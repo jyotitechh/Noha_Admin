@@ -14,7 +14,7 @@ import { REGISTRATIONS, PRAYER_INBOX } from './seed/registrations.js';
 import { normalise } from './validate.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const flutter = resolve(here, '../../../code/noah/lib/data');
+const flutter = resolve(here, 'data');
 
 /** Pull the declared instance fields out of a Dart class body. */
 function dartFields(src, className) {
