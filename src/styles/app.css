@@ -1,0 +1,98 @@
+/* Additions on top of prototype.css.
+
+   prototype.css is the design system copied from the HTML prototype and is
+   left unedited, so it can be refreshed from admin/_src/style.css if that
+   changes. Anything the React console needs beyond it goes here. */
+
+/* The prototype rendered the whole page in one go; React mounts screens, so
+   a screen arriving should not jump the layout. */
+.view > * { animation: viewin .16s ease-out }
+@keyframes viewin { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) {
+  .view > *, .drawer, .modal, .toast { animation: none !important }
+}
+
+/* Small buttons, used in table rows and bulk bars. */
+.btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; border-radius: 7px }
+.btn.sm svg { font-size: 14px }
+
+/* A row of actions that should not wrap mid-pair. */
+.acts-inline { display: inline-flex; gap: 6px; align-items: center }
+
+/* The review panel on a registration: the six steps, side by side with the
+   decision. */
+.reg-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); gap: 16px; align-items: start }
+@media (max-width: 1100px) { .reg-grid { grid-template-columns: minmax(0, 1fr) } }
+
+/* A step in the registration, numbered as the app numbers it. */
+.step { display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line) }
+.step:first-child { border-top: 0; padding-top: 0 }
+.step > .n {
+  width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand-ink); font-size: 11.5px; font-weight: 700;
+}
+.step > .body { min-width: 0; flex: 1 }
+.step h4 { margin: 0 0 7px; font-size: 13px; font-weight: 700 }
+
+/* Stand-ins for the uploads. There is no file storage in this build, so an
+   ID scan, a photograph and a KYC video are shown as labelled placeholders
+   rather than pretending to be the real thing. */
+.filebox {
+  border: 1px dashed var(--line-2); border-radius: 10px; background: var(--wash);
+  padding: 14px; display: flex; gap: 11px; align-items: center; color: var(--ink-3); font-size: 12.5px;
+}
+.filebox svg { font-size: 22px; color: var(--ink-4); flex: none }
+.filebox b { display: block; color: var(--ink-2); font-size: 13px }
+.filebox.photo { width: 104px; height: 104px; border-radius: 50%; flex-direction: column; gap: 4px; justify-content: center; text-align: center; padding: 8px }
+.filebox.video { min-height: 92px }
+
+/* The script the member read on camera, so the office can check it against
+   the recording. */
+.script {
+  background: var(--wash-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; font-size: 13px; line-height: 1.6; color: var(--ink-2); font-style: italic;
+}
+
+/* The office's checklist beside a registration. */
+.checks { list-style: none; margin: 0; padding: 0 }
+.checks li { display: flex; gap: 9px; align-items: flex-start; padding: 7px 0; font-size: 13px }
+.checks li svg { font-size: 16px; margin-top: 1px; flex: none }
+.checks li.ok svg { color: var(--ok) }
+.checks li.bad svg { color: var(--bad) }
+.checks li.unknown svg { color: var(--ink-4) }
+.checks li.unknown { color: var(--ink-3) }
+
+/* A compact two-column grid inside a drawer. */
+.dw-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px }
+@media (max-width: 680px) { .dw-cols { grid-template-columns: minmax(0, 1fr) } }
+
+/* Bars in the simple charts on the dashboard. */
+.vbars { display: flex; align-items: flex-end; gap: 10px; height: 132px; padding-top: 8px }
+.vbars > div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; min-width: 0 }
+.vbars .fill { background: linear-gradient(180deg, var(--brand), var(--brand-deep)); border-radius: 6px 6px 2px 2px; min-height: 3px }
+.vbars .lab { font-size: 11px; color: var(--ink-3); text-align: center }
+.vbars .val { font-size: 11px; font-weight: 700; text-align: center; color: var(--ink-2); font-variant-numeric: tabular-nums }
+
+/* The permission grid in Staff → Roles. */
+.permgrid { overflow: auto }
+.permgrid table { border-collapse: separate; border-spacing: 0; font-size: 13px; width: 100% }
+.permgrid th, .permgrid td { padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap }
+.permgrid thead th {
+  position: sticky; top: 0; background: #FBFAFD; z-index: 1; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--ink-3); text-align: center;
+}
+.permgrid tbody th { position: sticky; left: 0; background: #fff; text-align: left; font-weight: 600; white-space: normal; min-width: 260px }
+.permgrid td { text-align: center }
+.permgrid tr.grouphead th { background: var(--wash-2); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3) }
+
+/* Used where a screen wants to show the member-app view of something. */
+.applink {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+  color: var(--brand-ink); background: var(--brand-soft); border: 1px solid var(--brand-line);
+  border-radius: 999px; padding: 2px 9px;
+}
+.applink svg { font-size: 13px }
+
+/* prototype.css styles .note in info, warn, ok, brand and mute. A few places
+   need a plainly bad one — an unguarded endpoint, a failed payment mandate. */
+.note.bad { border-color: var(--bad-line); background: var(--bad-bg); color: #8E1F19 }

@@ -1,0 +1,306 @@
+/* Mock API for the Karuna Sadan admin console.
+
+   It serves the same sample data as the HTML prototype, plus the two queues
+   the prototype was missing: member registrations and prayer requests coming
+   from the Noah mobile app.
+
+   The member-facing routes under /api/app/* follow the contract in
+   code/noah/docs/BACKEND_HANDOFF.md, so the Flutter app can point at this
+   server and the admin's decisions will show up in it. See README.md.
+
+   Prototype, not production: data lives in memory and resets on restart,
+   there is no database, no file storage and no payment verification. */
+
+import express from 'express';
+import cors from 'cors';
+import { db, audit, can, roleById, page, matches, find } from './db.js';
+import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts } from './auth.js';
+import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
+import { check } from './catalyst.js';
+import { NOAH_TABLES } from './noah-schema.js';
+import { queuesFor } from './queues.js';
+import { now } from './seed/helpers.js';
+import mountApp from './routes/app.js';
+import mountAdmin from './routes/admin.js';
+
+const PORT = Number(process.env.PORT) || 4000;
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: '2mb' }));
+
+/* Small request log, so you can see the console talking to the API. */
+app.use((req, _res, next) => {
+  if (req.path !== '/api/health') console.log(`${req.method} ${req.originalUrl}`);
+  next();
+});
+
+/* ---------- health and metadata ---------- */
+
+app.get('/api/health', async (_req, res) => {
+  const base = { ok: true, at: now(), dataSource: source() };
+  if (!live()) {
+    return res.json({ ...base, seedPinnedTo: '2026-10-09T10:30 IST', note: 'In-memory sample data. Set CATALYST_* in .env.local to use Catalyst.' });
+  }
+  try {
+    /* Probe a table that exists in whichever schema is configured. */
+    const probe = await check(schema() === 'noah' ? NOAH_TABLES.Members : TABLES.Staff);
+    res.json({ ...base, catalyst: { projectId: probe.projectId, reachable: true } });
+  } catch (err) {
+    res.status(503).json({ ...base, ok: false, catalyst: { reachable: false, error: err.message } });
+  }
+});
+
+/* Every table in the connected project and how many rows it holds.
+
+   Useful when pointing at someone else's project: it answers "what is
+   actually in here" without opening the Catalyst console. Behind a session,
+   because it describes the whole database. */
+app.get('/api/survey', requireSession, async (_req, res) => {
+  if (!live()) return res.status(409).json({ error: 'Not connected to Catalyst.', dataSource: 'memory' });
+  try {
+    const tables = await surveyTables();
+    res.json({
+      schema: schema(),
+      total: tables.reduce((n, t) => n + (t.rows || 0), 0),
+      withData: tables.filter((t) => t.rows > 0).length,
+      tables: tables.map(({ table, rows, error, sample }) => ({
+        table, rows, error,
+        columns: sample ? Object.keys(sample).filter((k) => !['CREATORID', 'CREATEDTIME', 'MODIFIEDTIME'].includes(k)) : [],
+      })),
+    });
+  } catch (err) {
+    res.status(503).json({ error: err.message });
+  }
+});
+
+app.get('/api/meta', (_req, res) => {
+  res.json({
+    me: db.ME,
+    roles: db.ROLES.map((r) => ({ id: r.id, name: r.name, desc: r.desc, perms: r.perms })),
+    permGroups: db.PERM_GROUPS,
+    permLabels: db.PERM_LBL,
+    /* Named so the console can label things without hard-coding strings. */
+    locations: db.LOCS,
+    languages: db.LANGS,
+    pastors: db.PASTORS.map((p) => ({ id: p.id, name: p.name, loc: p.loc })),
+    towards: db.TOWARDS,
+    signOn: 'local-otp',
+    signOnNote: 'Zoho single sign-on is not wired up. Sign-in is a local email + one-time code.',
+  });
+});
+
+/* ---------- sign-in (no Zoho SSO) ---------- */
+
+app.post('/api/auth/request-code', async (req, res) => {
+  try {
+    const r = await requestCode(req.body?.email || '');
+    res.status(r.ok ? 200 : 400).json(r);
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/verify', async (req, res) => {
+  try {
+  const r = await verifyCode(req.body?.email || '', req.body?.code || '');
+  if (!r.ok) return res.status(400).json(r);
+  audit(r.user.name, roleById(r.user.role).name, 'Signed in', 'Access', 'Staff account', null, { method: 'Email one-time code' });
+  res.json(r);
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireSession, (req, res) => res.json({ user: req.user }));
+
+app.post('/api/auth/view-as', requireSession, (req, res) => {
+  const user = viewAs(req.session.token, req.body?.role);
+  if (!user) return res.status(400).json({ error: 'No such role.' });
+  res.json({ user });
+});
+
+app.post('/api/auth/sign-out', requireSession, (req, res) => {
+  signOut(req.session.token);
+  res.json({ ok: true });
+});
+
+/* Who you could sign in as. Prototype affordance: a real console would never
+   list its own staff accounts before sign-in. */
+app.get('/api/auth/accounts', async (_req, res) => {
+  try {
+    res.json(await listAccounts());
+  } catch (err) {
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* Everything past here needs a session. */
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth') || req.path === '/health' || req.path === '/meta' || req.path.startsWith('/app/')) return next();
+  return requireSession(req, res, next);
+});
+
+/* ---------- work queues ---------- */
+
+app.get('/api/queues', requireSession, async (req, res) => {
+  try {
+    res.json(await queuesFor(req.session.role, can));
+  } catch (err) {
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* ---------- generic read access to any collection ---------- */
+
+/* Which permission guards which collection. Anything not listed is refused,
+   so adding a collection to the seed does not silently expose it. */
+const READ_PERM = {
+  MEMBERS: 'members.view', FAMILIES: 'members.view', PASTORS: 'members.view', LEADERS: 'members.view',
+  CELLS: 'members.view', LOCATIONS: 'members.view', LOC_GROUPS: 'members.view', MINISTRIES: 'members.view',
+  TAGS: 'members.view', DUPES: 'members.edit', MAPREPORTS: 'pastoral.manage', LEADER_HISTORY: 'members.view',
+  VIDEOKYC: 'members.edit', REGISTRATIONS: 'members.edit',
+  RECEIPTS: 'giving.view', FAILED: 'giving.reconcile', SETTLEMENTS: 'giving.reconcile',
+  UNMATCHED: 'giving.reconcile', REFUNDS: 'giving.reconcile', GATEWAYS: 'giving.view',
+  PFORMS: 'giving.view', WEBHOOKS: 'giving.reconcile',
+  ACCOUNTS: 'finance.view', JOURNALS: 'finance.view', INCOME_VOUCHERS: 'finance.view',
+  NARRATIONS: 'finance.view', TDS: 'finance.view', VENDORS: 'finance.view', PROJECTS: 'finance.view',
+  EXPENSES: 'finance.view', BANKS: 'finance.view', BATCHES: 'finance.view', TXNS: 'finance.view',
+  DRAFTS: 'finance.post', BANK_IMPORTS: 'finance.view', IMPORT_REQS: 'finance.view', FIN_HEADS: 'finance.view',
+  TRANSLATORS: 'finance.view', REWARD_TX: 'rewards.approve', REWARD_RATES: 'rewards.approve',
+  EVENTS: 'events.view', HALLS: 'events.view', PASSES: 'events.view', SCANS: 'events.scan',
+  ABSENTEES: 'events.view', SERVICES: 'events.view', SERVICE_HISTORY: 'events.view',
+  CHECKLISTS: 'events.manage', EV_TASKS: 'events.manage', EV_EXPENSES: 'events.manage',
+  BUS_ROUTES: 'events.view', BUS_ATT: 'events.view',
+  MODQ: 'community.moderate', FLAGS: 'community.moderate', POLLS: 'community.moderate',
+  COMPETITIONS: 'community.moderate', PRAYERS: 'community.moderate', PRAYER_INBOX: 'community.moderate',
+  PRAISE: 'community.moderate', OBITS: 'community.moderate', FEEDBACK: 'community.moderate',
+  MANNA: 'content.edit', LIBRARY: 'content.edit', STUDIES: 'content.edit', COURSES: 'content.edit',
+  PLAYBACK: 'content.edit', VIDEOS: 'content.edit', LIVES: 'content.edit', PODCASTS: 'content.edit',
+  CHANNELS: 'content.edit', BANNERS: 'content.edit', ANNOUNCEMENTS: 'content.edit', CTYPES: 'content.edit',
+  BLISTS: 'comms.send', BROADCASTS: 'comms.send', PUSHES: 'comms.send', PTEMPLATES: 'comms.send',
+  EMAILS: 'comms.send', MLISTS: 'comms.send', CALLCAMPS: 'comms.calls', CALLLOGS: 'comms.calls',
+  THREADS: 'comms.inbox', SMSLOG: 'comms.send', SENDERS: 'comms.send', SMSTPL: 'comms.send',
+  DRIVE: 'ops.view', FILES: 'ops.view', PRODUCTS: 'ops.view', ORDERS: 'ops.view', TASKS: 'ops.view',
+  ASSETS: 'ops.view', INV: 'ops.view', MOVES: 'ops.view', WAREHOUSES: 'ops.view', INV_CATS: 'ops.view',
+  SETTINGS: 'ops.settings', DEVICES: 'ops.settings', JOBS: 'ops.settings', REMINDERS: 'ops.settings',
+  REFLISTS: 'ops.settings',
+  JPROFILES: ['jodie.verify', 'jodie.manage'], VERIF_DONE: 'jodie.verify', STAGES: 'jodie.verify',
+  QUESTIONS: 'jodie.manage', JBLOCKS: 'jodie.manage', JREPORTS: 'jodie.manage', JTHREADS: 'jodie.manage',
+  JCALLS: 'jodie.calls', JCALLLOG: 'jodie.calls', OUTBOUND: 'jodie.calls', STORIES: 'jodie.manage',
+  JCONTENT: 'jodie.manage', COLLEGES: 'jodie.manage',
+  PLANS: 'subs.view', ADDONS: 'subs.view', SUBS: 'subs.view', JINVOICES: 'subs.view',
+  JSETTLE: 'subs.manage', JUNMATCHED: 'subs.manage', CREDIT_NOTES: 'subs.manage',
+  STAFF: 'staff.manage', ROLES: 'staff.manage', ENDPOINTS: 'staff.manage',
+  AUD: 'audit.view', REPORTS: 'reports.view', SCHEDULES: 'reports.schedule', EXPORTS: 'reports.view',
+};
+
+/* Fields the free-text `q` searches, per collection. */
+const SEARCH_FIELDS = {
+  MEMBERS: ['name', 'id', 'mobile', 'email', 'loc', 'cell', 'status'],
+  REGISTRATIONS: ['fullName', 'id', 'mobile', 'email', 'city', 'region'],
+  RECEIPTS: ['id', 'name', 'ref', 'towards', 'mode', 'status'],
+  JPROFILES: ['name', 'id', 'loc', 'job', 'edu'],
+  EVENTS: ['name', 'id', 'place', 'status'],
+  PASSES: ['id', 'name', 'event'],
+  STAFF: ['name', 'email', 'title', 'id'],
+  AUD: ['actor', 'action', 'mod', 'rec', 'id'],
+  MANNA: ['id', 'title', 'verse', 'cat'],
+  PRAYER_INBOX: ['id', 'text', 'category', 'state'],
+};
+
+app.get('/api/data/:name', requireSession, async (req, res) => {
+  const name = req.params.name;
+  const perm = READ_PERM[name];
+  if (!perm) return res.status(404).json({ error: 'No such collection.' });
+  if (!can(req.session.role, perm)) {
+    return res.status(403).json({ error: 'You do not have access to this.', needs: [].concat(perm), youAre: roleById(req.session.role).name });
+  }
+
+  /* Collections that come from Catalyst when it is configured. Everything
+     else still reads the in-memory sample data, so the console keeps working
+     while the rest of the tables are built. */
+  const FROM_CATALYST = {
+    REGISTRATIONS: () => listRegistrations({ state: req.query.state, search: req.query.q }),
+    MEMBERS: () => listMembers({ search: req.query.q, loc: req.query.loc, status: req.query.status }),
+    AUD: () => listAudit(),
+  };
+  if (live() && FROM_CATALYST[name]) {
+    try {
+      return res.json(page(await FROM_CATALYST[name](), req.query));
+    } catch (err) {
+      return res.status(503).json({ error: err.message });
+    }
+  }
+
+  /* Connected to Catalyst, but this collection has no table there.
+
+     Returning the sample data would put invented receipts and events beside
+     real members, and nobody looking at the screen could tell which was
+     which. Better to show nothing and say why. */
+  if (live()) {
+    return res.json({
+      rows: [], total: 0, offset: 0, limit: 0,
+      notInProject: true,
+      message: `There is no ${name} table in the connected Catalyst project.`,
+    });
+  }
+
+  const raw = db[name];
+  if (!Array.isArray(raw)) return res.json({ rows: raw, total: 1, offset: 0, limit: 1 });
+
+  let rows = raw;
+  const { q, sort, dir, ...filters } = req.query;
+
+  if (q && SEARCH_FIELDS[name]) rows = rows.filter((r) => matches(r, q, SEARCH_FIELDS[name]));
+
+  /* Any other query parameter is an exact field match: ?state=pending */
+  for (const [k, v] of Object.entries(filters)) {
+    if (k === 'offset' || k === 'limit') continue;
+    const wanted = String(v).split(',');
+    rows = rows.filter((r) => wanted.includes(String(r[k])));
+  }
+
+  if (sort) {
+    const sign = dir === 'desc' ? -1 : 1;
+    rows = rows.slice().sort((a, b) => {
+      const x = a[sort], y = b[sort];
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * sign;
+    });
+  }
+
+  res.json(page(rows, req.query));
+});
+
+app.get('/api/data/:name/:id', requireSession, (req, res) => {
+  const perm = READ_PERM[req.params.name];
+  if (!perm) return res.status(404).json({ error: 'No such collection.' });
+  if (!can(req.session.role, perm)) return res.status(403).json({ error: 'You do not have access to this.' });
+  const row = find(req.params.name, req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found.' });
+  res.json(row);
+});
+
+/* ---------- module routes ---------- */
+mountAdmin(app, { requireSession, requirePerm });
+mountApp(app);
+
+/* ---------- errors ---------- */
+app.use('/api', (_req, res) => res.status(404).json({ error: 'No such endpoint.' }));
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Something went wrong on the server.' });
+});
+
+/* A Catalyst hiccup should surface as a 503, not kill the API. */
+process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.message || err));
+
+app.listen(PORT, () => {
+  console.log(`\n  Karuna Sadan admin — mock API on http://localhost:${PORT}`);
+  console.log(`  Sample data pinned to Friday 9 October 2026, 10:30 IST.`);
+  console.log(`  Sign in with any active staff email, for example ${db.STAFF[0].email}.`);
+  console.log(`  The one-time code is printed here and returned in the response.\n`);
+});
