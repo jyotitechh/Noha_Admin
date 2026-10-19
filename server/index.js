@@ -73,18 +73,49 @@ app.use((req, _res, next) => {
 
 /* ---------- health and metadata ---------- */
 
-app.get('/api/health', async (_req, res) => {
+/* Two different questions, deliberately not the same answer.
+
+   A host's health check asks "is this process alive?" and restarts or rolls
+   back the deploy when the answer is no. Catalyst being unreachable does not
+   mean this server is broken — it means Zoho is having a moment — and failing
+   the health check over it would take the console down in sympathy, during a
+   deploy, with nothing saying why.
+
+   So: always 200 while the process can answer. Catalyst's state is reported
+   in the body, where a person can read it, and the probe is cached so a host
+   pinging every few seconds does not make a round trip to Zoho each time. */
+let probeCache = null;
+let probeAt = 0;
+const PROBE_TTL_MS = 30_000;
+
+async function catalystState(force = false) {
+  if (!force && probeCache && Date.now() - probeAt < PROBE_TTL_MS) return probeCache;
+  try {
+    /* A table that exists in whichever schema is configured. */
+    const probe = await check(schema() === 'noah' ? NOAH_TABLES.Members : TABLES.Staff);
+    probeCache = { projectId: probe.projectId, reachable: true };
+  } catch (err) {
+    probeCache = { reachable: false, error: err.message };
+  }
+  probeAt = Date.now();
+  return probeCache;
+}
+
+app.get('/api/health', async (req, res) => {
   const base = { ok: true, at: now(), dataSource: source() };
   if (!live()) {
     return res.json({ ...base, seedPinnedTo: '2026-10-09T10:30 IST', note: 'In-memory sample data. Set CATALYST_* in .env.local to use Catalyst.' });
   }
-  try {
-    /* Probe a table that exists in whichever schema is configured. */
-    const probe = await check(schema() === 'noah' ? NOAH_TABLES.Members : TABLES.Staff);
-    res.json({ ...base, catalyst: { projectId: probe.projectId, reachable: true } });
-  } catch (err) {
-    res.status(503).json({ ...base, ok: false, catalyst: { reachable: false, error: err.message } });
-  }
+  /* ?fresh=1 skips the cache, for when you are actually debugging. */
+  const catalyst = await catalystState(req.query.fresh === '1');
+  res.json({ ...base, catalyst });
+});
+
+/* The strict version, for a human or a monitor that wants to be told off:
+   503 when Catalyst cannot be reached. Not what the host polls. */
+app.get('/api/health/catalyst', async (_req, res) => {
+  const catalyst = await catalystState(true);
+  res.status(catalyst.reachable ? 200 : 503).json({ ok: catalyst.reachable, at: now(), catalyst });
 });
 
 /* Every table in the connected project and how many rows it holds.
