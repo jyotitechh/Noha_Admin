@@ -35,16 +35,18 @@ await probe('list folders', `/baas/v1/project/${PROJECT}/folder`);
 await probe('this folder', `/baas/v1/project/${PROJECT}/folder/${FOLDER}`);
 await probe('files in it', `/baas/v1/project/${PROJECT}/folder/${FOLDER}/file`);
 
-/* A file id straight from the Files table, so the download is tried against
-   something that really exists. */
+/* A file id straight from the files table, so the download is tried against
+   something that really exists. `files.path` is the File Store id; the row's
+   own ROWID is what the Noah API's /admin/files/:id takes. */
 const { getRows } = await import('./catalyst.js');
 const { NOAH_TABLES } = await import('./noah-schema.js');
-const files = await getRows(NOAH_TABLES.Files).catch(() => []);
-const withId = files.filter((f) => f.catalystFileId);
-console.log(`  Files table: ${files.length} rows, ${withId.length} with a catalystFileId`);
+const files = await getRows(NOAH_TABLES.files).catch(() => []);
+const withId = files.filter((f) => f.path);
+console.log(`  files table: ${files.length} rows, ${withId.length} with a path (the File Store id)`);
 if (withId.length) {
-  const sample = withId.find((f) => /video/i.test(f.kind || f.fileType || '')) || withId[0];
-  console.log(`  trying ${JSON.stringify(sample).slice(0, 200)}\n`);
-  await probe('download it', `/baas/v1/project/${PROJECT}/folder/${FOLDER}/file/${sample.catalystFileId}/download`);
+  const sample = withId.find((f) => String(f.fileType) === '3') || withId[0];
+  console.log(`  trying files row ${sample.ROWID}: fileType ${sample.fileType}, ${sample.extension}, ${sample.size} bytes
+`);
+  await probe('download it', `/baas/v1/project/${PROJECT}/folder/${FOLDER}/file/${sample.path}/download`);
 }
 console.log();

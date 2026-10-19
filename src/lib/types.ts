@@ -8,7 +8,7 @@ export interface Registration {
   id: string;
   salutation: string;
   firstName: string; middleName: string; lastName: string; fullName: string;
-  mobile: string; email: string; gender: string; dob: Date;
+  mobile: string; email: string; gender: string; dob: Date | null;
   marital: string; reference: string;
   /* `region` is the state or province. `state` below is the workflow state. */
   line1: string; line2: string; city: string; region: string; country: string; pin: string;
@@ -17,7 +17,7 @@ export interface Registration {
   agreed: boolean;
   declarationVersion: string; declarationLang: string; signature: string; signedOn: Date;
   videoSecs: number; videoFile: string; videoAttempt: number; script: string;
-  state: 'pending' | 'approved' | 'videoReturned';
+  state: 'draft' | 'pending' | 'approved' | 'videoReturned' | 'rejected';
   at: Date; decidedAt: Date | null; decidedBy: string; remark: string; memberId: string | null;
   checks: {
     idReadable: boolean | null; photoMatchesId: boolean | null; videoAudible: boolean | null;

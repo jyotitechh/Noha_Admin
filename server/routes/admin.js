@@ -6,7 +6,7 @@
 
 import { db, audit, roleById as staffRole, find } from '../db.js';
 import { now, ri, sum, pct } from '../seed/helpers.js';
-import { live, registrationById, createMember, patchRegistration, writeAudit, listRegistrations, listMembers, approveRegistration, returnVideo } from '../store.js';
+import { live, registrationById, createMember, patchRegistration, writeAudit, listRegistrations, listMembers, approveRegistration, returnVideo, rejectRegistration } from '../store.js';
 import { downloadFile, fileScopeMissing } from '../catalyst.js';
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
@@ -20,6 +20,14 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const log = (req, ...rest) => audit(req.user.name, staffRole(req.session.role).name, ...rest);
 
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
+
+/** Why a registration cannot be decided right now, in the office's words. */
+const notPendingMessage = (state) => ({
+  draft: 'That person has not finished registering yet, so there is nothing to decide.',
+  approved: 'That registration is already approved.',
+  rejected: 'That registration was already rejected.',
+  videoReturned: 'That registration is waiting for the member to record the video again.',
+}[state] || 'That registration is not waiting for a decision.');
 
 export default function mountAdmin(app, { requireSession, requirePerm }) {
   const guard = (perm) => [requireSession, requirePerm(perm)];
@@ -65,7 +73,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         membersByLocation: Object.entries(
           members.reduce((acc, m) => { const k = m.loc || 'Not given'; acc[k] = (acc[k] || 0) + 1; return acc; }, {}),
         ).map(([loc, n]) => ({ loc, n })).sort((a, b) => b.n - a.n),
-        registrationMix: ['pending', 'approved', 'draft'].map((s) => ({
+        registrationMix: ['pending', 'approved', 'videoReturned', 'rejected'].map((s) => ({
           state: s, n: regs.filter((r) => r.state === s).length,
         })),
         recentAudit: [],
@@ -143,6 +151,13 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     if (!r) return notFound(res);
     if (r.state === 'approved') return res.status(409).json({ error: 'That registration is already approved.' });
 
+    /* Only a registration waiting for a decision can be decided. The Noah API
+       enforces this itself (409 not_pending); without its key the table writes
+       would not, so the console does, and says which case it is. */
+    if (live() && r.state !== 'pending') {
+      return res.status(409).json({ error: notPendingMessage(r.state) });
+    }
+
     const { loc, pastor, cell } = req.body || {};
 
     if (live()) {
@@ -169,9 +184,20 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
            it only if they cannot. A repair, not part of the normal path. */
         clearCache();
         const fresh = await registrationById(r.id);
-        const rowId = r.memberId ?? fresh?.memberId;
+        const rowId = r.memberRowId ?? fresh?.memberRowId;
         const them = (await listMembers({})).find((m) => String(m.rowId) === String(rowId));
+
+        /* The app lets them in when the registration reads 'approved'. If the
+           API said yes but the table disagrees, say so: reporting a clean
+           approval that did not land is the worst answer. */
         if (!canEnterApp(them, fresh)) {
+          return res.status(502).json({
+            error: 'The Noah API accepted the approval, but the registration does not read approved yet. Refresh in a moment; if it still says pending, tell the Catalyst developer.',
+          });
+        }
+        /* The API also clears `isUnVerified` so the office's own tools see the
+           member as verified. Mend it only if that did not land. */
+        if (them && !them.officeVerified) {
           await activateMemberOnly(rowId);
           repaired = true;
         }
@@ -247,6 +273,13 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     const remark = String(req.body?.remark || '').trim();
     if (!remark) return res.status(400).json({ error: 'Say why the video is being returned. The member sees this.' });
 
+    /* Only a registration waiting for a decision can be decided. The Noah API
+       enforces this itself (409 not_pending); without its key the table writes
+       would not, so the console does, and says which case it is. */
+    if (live() && r.state !== 'pending') {
+      return res.status(409).json({ error: notPendingMessage(r.state) });
+    }
+
     const before = { state: r.state };
 
     if (live()) {
@@ -298,6 +331,64 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     res.json({ ok: true, registration: r });
   });
 
+  /* Reject. The member sees the reason, in the email and in the app, so it is
+     required — the same rule as returning a video. Only the new schema has a
+     rejected status, and only the Noah API tells the member. */
+  app.post('/api/registrations/:id/reject', ...guard('members.edit'), async (req, res) => {
+    const r = live() ? await registrationById(req.params.id) : find('REGISTRATIONS', req.params.id);
+    if (!r) return notFound(res);
+    const remark = String(req.body?.remark || '').trim();
+    if (!remark) return res.status(400).json({ error: 'Say why it is being rejected. The member sees this.' });
+    if (r.state === 'approved') return res.status(409).json({ error: 'That registration is already approved.' });
+
+    /* Only a registration waiting for a decision can be decided. The Noah API
+       enforces this itself (409 not_pending); without its key the table writes
+       would not, so the console does, and says which case it is. */
+    if (live() && r.state !== 'pending') {
+      return res.status(409).json({ error: notPendingMessage(r.state) });
+    }
+
+    const before = { state: r.state };
+
+    if (live()) {
+      let silent = false;
+      if (noahConfigured()) {
+        try {
+          await noah.reject(r.id, { actor: req.user.name, note: remark });
+        } catch (err) {
+          return res.status(err.status === 409 ? 409 : 502).json({ error: err.message, code: err.code });
+        }
+        clearCache();
+      } else {
+        try {
+          await rejectRegistration({ registration: r, remark });
+        } catch (err) {
+          return res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
+        }
+        silent = true;
+      }
+      await writeAudit({
+        actor: req.user.name, role: staffRole(req.session.role).name,
+        action: 'Rejected registration', module: 'Membership', record: r.id,
+        before, after: { state: 'rejected', via: silent ? 'tables' : 'noah-api' }, remark, ip: '10.20.4.17',
+      });
+      return res.json({
+        ok: true,
+        registration: { ...r, state: 'rejected', remark },
+        warning: silent
+          ? 'Marked as rejected, but the member was NOT told why: NOAH_ADMIN_API_KEY is not set.'
+          : undefined,
+      });
+    }
+
+    r.state = 'rejected';
+    r.decidedAt = now();
+    r.decidedBy = req.user.name;
+    r.remark = remark;
+    log(req, 'Rejected registration', 'Membership', r.id, before, { state: 'rejected' }, remark);
+    res.json({ ok: true, registration: r });
+  });
+
   /* A short-lived URL for one of the three uploads, so the office can read
      the ID document, look at the photograph and watch the KYC video.
 
@@ -337,7 +428,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       return res.send(buffer);
     };
 
-    const tableFileId = r.fileIds?.[{ id: 'idProof', photo: 'photo', video: 'video' }[kind]];
+    const slot = { id: 'idProof', photo: 'photo', video: 'video' }[kind];
+    /* `files` ROWID: what GET /admin/files/:id takes. */
+    const filesRowId = r.fileIds?.[slot];
+    /* `files.path`: the File Store id, for a direct download. */
+    const tableFileId = r.storeIds?.[slot];
     let viaNoah = null;
 
     /* The Noah API first. Its admin key reaches File Store; the OAuth token at
@@ -347,8 +442,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
        table when the detail does not name one. */
     if (noahConfigured()) {
       try {
-        const detail = await noah.getRegistration(r.id);
-        const fileId = findFileId(detail, kind) ?? tableFileId;
+        /* The id comes from our own join, which knows it exactly. Only when
+           that has nothing is the API's own detail asked, which names files by
+           whatever it calls them. */
+        let fileId = filesRowId;
+        if (!fileId) fileId = findFileId(await noah.getRegistration(r.id), kind);
         if (!fileId) {
           return res.status(404).json({ error: `No ${kind} was uploaded for this registration.` });
         }
@@ -362,9 +460,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     }
 
     if (!tableFileId) {
-      return res.status(404).json({
-        error: `No ${kind} was uploaded for this registration.`,
-        viaNoah: viaNoah || undefined,
+      return res.status(viaNoah ? 502 : 404).json({
+        error: viaNoah
+          ? `The Noah API could not serve this file: ${viaNoah}`
+          : `No ${kind} was uploaded for this registration.`,
       });
     }
 
@@ -399,7 +498,8 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         .filter((m) => m.rowId)
         .map((m) => {
           const row = roleRows.get(String(m.rowId)) ?? null;
-          const approved = String(m.rawStatus ?? '').toLowerCase() === 'active';
+          /* The registration decides, not members.status (true for all). */
+          const approved = !!m.approved;
           return {
             memberRowId: m.rowId,
             name: m.name,

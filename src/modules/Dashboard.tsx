@@ -110,15 +110,15 @@ export default function Dashboard() {
                 {d.registrationMix.map((r, i) => (
                   <i key={r.state} style={{
                     width: pct(r.n, d.registrationMix.reduce((n, x) => n + x.n, 0)) + '%',
-                    background: ['#D98A00', '#1E9E86', '#BE2F27'][i],
+                    background: ['#D98A00', '#1E9E86', '#BE2F27', '#8A8F98'][i],
                   }} />
                 ))}
               </div>
               <div className="legend mt8">
                 {d.registrationMix.map((r, i) => (
                   <span key={r.state}>
-                    <i style={{ background: ['#D98A00', '#1E9E86', '#BE2F27'][i] }} />
-                    {{ pending: 'Waiting', approved: 'Approved', videoReturned: 'Video returned' }[r.state]} <b>{r.n}</b>
+                    <i style={{ background: ['#D98A00', '#1E9E86', '#BE2F27', '#8A8F98'][i] }} />
+                    {({ pending: 'Waiting', approved: 'Approved', videoReturned: 'Video returned', rejected: 'Rejected', draft: 'Not submitted' } as Record<string, string>)[r.state] ?? r.state} <b>{r.n}</b>
                   </span>
                 ))}
               </div>

@@ -151,4 +151,6 @@ export const REG_STATE: Record<string, string> = {
   pending: 'Waiting',
   approved: 'Approved',
   videoReturned: 'Video returned',
+  rejected: 'Rejected',
+  draft: 'Not submitted',
 };

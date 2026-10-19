@@ -35,7 +35,11 @@ function Steps({ r }: { r: Registration }) {
             ['Mobile', <span key="m" className="mono">{r.mobile}</span>],
             ['Email', r.email],
             ['Gender', r.gender],
-            ['Date of birth', <>{fd(r.dob)} <span className="muted">· {Math.floor((Date.now() - +r.dob) / 31557600000)} years</span></>],
+            /* A member the office added may have no date of birth. +null is 0,
+               which would read as a 56-year-old. */
+            ['Date of birth', r.dob
+              ? <>{fd(r.dob)} <span className="muted">· {Math.floor((Date.now() - +r.dob) / 31557600000)} years</span></>
+              : <span className="muted">Not given</span>],
             ['Marital status', r.marital],
             ['How they heard', r.reference || <span className="muted">Not given (optional)</span>],
           ]} />
@@ -168,10 +172,11 @@ function Checks({ r, onToggle }: { r: Registration; onToggle: (k: string, v: boo
 }
 
 export default function Registrations() {
-  const [state, setState] = useState<'pending' | 'approved' | 'videoReturned' | ''>('pending');
+  const [state, setState] = useState<'pending' | 'approved' | 'videoReturned' | 'rejected' | ''>('pending');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<Registration | null>(null);
   const [returning, setReturning] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [approving, setApproving] = useState(false);
   const [remark, setRemark] = useState('');
   const [loc, setLoc] = useState('');
@@ -186,11 +191,18 @@ export default function Registrations() {
   );
   const counts = useQuery(() => collection<Registration>('REGISTRATIONS', { limit: 500 }), []);
 
+  /* Whether this is the real Catalyst data or the sample set. On Catalyst the
+     office does not choose a congregation here — the Noah API approves, and it
+     has nowhere to put one — so the picker would promise something false. */
+  const meta = useQuery(() => api.get<{ dataSource?: string }>('/meta'), []);
+  const onCatalyst = meta.data?.dataSource === 'catalyst';
+
   const tally = useMemo(() => {
     const rows = counts.data?.rows ?? [];
     return {
       pending: rows.filter((r) => r.state === 'pending').length,
       returned: rows.filter((r) => r.state === 'videoReturned').length,
+      rejected: rows.filter((r) => r.state === 'rejected').length,
       approved: rows.filter((r) => r.state === 'approved').length,
       oldest: rows.filter((r) => r.state === 'pending').map((r) => r.at).sort((a, b) => +a - +b)[0] ?? null,
     };
@@ -210,8 +222,16 @@ export default function Registrations() {
   async function approve(r: Registration) {
     setBusy(true);
     try {
-      const res = await api.post<{ member: { id: string; name: string } }>(`/registrations/${r.id}/approve`, { loc: loc || undefined });
-      await afterDecision(`${res.member.name} is now a member (${res.member.id}). The app opens for them.`);
+      const res = await api.post<{ member: { id: string; name?: string }; warning?: string }>(
+        `/registrations/${r.id}/approve`,
+        { loc: onCatalyst ? undefined : loc || undefined },
+      );
+      /* The reply names the member only in the sample data; on Catalyst it
+         carries their id. The name is the one already on screen. */
+      await afterDecision(`${r.fullName} is now a member (${res.member.id}). The app opens for them.`);
+      /* Approved, but the member was not told: say so, rather than leaving the
+         office to assume an email went out. */
+      if (res.warning) toast(res.warning, 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -224,13 +244,29 @@ export default function Registrations() {
     if (!remark.trim()) return;
     setBusy(true);
     try {
-      await api.post(`/registrations/${r.id}/return-video`, { remark: remark.trim() });
+      const res = await api.post<{ warning?: string }>(`/registrations/${r.id}/return-video`, { remark: remark.trim() });
       await afterDecision(`The video went back to ${r.fullName}. They can re-record it in the app.`);
+      if (res.warning) toast(res.warning, 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
       setBusy(false);
       setReturning(false);
+    }
+  }
+
+  async function reject(r: Registration) {
+    if (!remark.trim()) return;
+    setBusy(true);
+    try {
+      const res = await api.post<{ warning?: string }>(`/registrations/${r.id}/reject`, { remark: remark.trim() });
+      await afterDecision(`${r.fullName}'s registration was rejected.`);
+      if (res.warning) toast(res.warning, 'warn');
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setBusy(false);
+      setRejecting(false);
     }
   }
 
@@ -267,7 +303,7 @@ export default function Registrations() {
     {
       key: 'state', label: 'Status',
       cell: (r) => (
-        <Chip tone={r.state === 'approved' ? 'ok' : r.state === 'videoReturned' ? 'bad' : 'warn'}>
+        <Chip tone={r.state === 'approved' ? 'ok' : r.state === 'videoReturned' || r.state === 'rejected' ? 'bad' : r.state === 'draft' ? 'mute' : 'warn'}>
           {REG_STATE[r.state]}
         </Chip>
       ),
@@ -313,6 +349,7 @@ export default function Registrations() {
               <select className="sel" value={state} onChange={(e) => setState(e.target.value as typeof state)} aria-label="Filter by status">
                 <option value="pending">Waiting ({tally.pending})</option>
                 <option value="videoReturned">Video returned ({tally.returned})</option>
+                <option value="rejected">Rejected ({tally.rejected})</option>
                 <option value="approved">Approved ({tally.approved})</option>
                 <option value="">Everything</option>
               </select>
@@ -341,37 +378,64 @@ export default function Registrations() {
               <span className="mono">{open.id}</span> · submitted {fdt(open.at)} ·{' '}
               {open.state === 'pending'
                 ? <>waiting <Age at={open.at} warn={24} bad={48} /></>
-                : <>{REG_STATE[open.state]} by {open.decidedBy}</>}
+                : open.decidedBy
+                  ? <>{REG_STATE[open.state]} by {open.decidedBy}</>
+                  : <>{REG_STATE[open.state]}</>}
             </>
           )
         }
         footer={
-          open && open.state !== 'approved' ? (
+          /* Only a registration waiting for a decision can be decided. The
+             server refuses anything else, so offering the buttons would only
+             lead to an error. */
+          open && open.state === 'pending' ? (
             <>
               <span className="muted small">
-                Approving creates the member record. The app opens for them straight away.
+                {onCatalyst
+                  ? 'Approving opens the app for them, and the Noah API emails them.'
+                  : 'Approving creates the member record. The app opens for them straight away.'}
               </span>
               <span className="sp" style={{ flex: 1 }} />
               <Btn variant="danger" icon="video" onClick={() => setReturning(true)} disabled={busy}>
                 Return the video
               </Btn>
+              <Btn variant="danger" icon="x" onClick={() => setRejecting(true)} disabled={busy}>
+                Reject
+              </Btn>
               <Btn variant="ok" icon="user-check" onClick={() => setApproving(true)} disabled={busy}>
-                Approve and create the member
+                {onCatalyst ? 'Approve' : 'Approve and create the member'}
               </Btn>
             </>
-          ) : open ? (
+          ) : open?.state === 'approved' ? (
             <>
               <Icon name="check" />
               <span className="muted small">
-                Approved {open.decidedAt ? fdt(open.decidedAt) : ''} by {open.decidedBy}.
+                Approved {open.decidedAt ? fdt(open.decidedAt) : ''}{open.decidedBy ? ` by ${open.decidedBy}` : ''}.
                 {open.memberId && <> Member <b className="mono">{open.memberId}</b>.</>}
               </span>
             </>
+          ) : open ? (
+            <span className="muted small">
+              {open.state === 'draft' && 'They have not submitted yet, so there is nothing to decide.'}
+              {open.state === 'rejected' && `Rejected ${open.decidedAt ? fdt(open.decidedAt) : ''}. A decision can only be made once.`}
+              {open.state === 'videoReturned' && 'Waiting for them to record the video again. It comes back here when they do.'}
+            </span>
           ) : null
         }
       >
         {open && (
           <>
+            {open.state === 'rejected' && (
+              <div className="mb12">
+                <Note tone="bad" icon="x">
+                  <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}.</b>
+                  <br />“{open.remark}”
+                  <br />
+                  <span className="small">The member was shown this reason.</span>
+                </Note>
+              </div>
+            )}
+
             {open.state === 'videoReturned' && (
               <div className="mb12">
                 <Note tone="warn" icon="video">
@@ -391,7 +455,7 @@ export default function Registrations() {
               <div className="card pad">
                 <Checks r={open} onToggle={(k, v) => toggleCheck(open, k, v)} />
 
-                {open.state === 'pending' && (
+                {open.state === 'pending' && !onCatalyst && (
                   <>
                     <hr className="div" />
                     <Field
@@ -418,13 +482,22 @@ export default function Registrations() {
         onClose={() => setApproving(false)}
         onConfirm={() => open && approve(open)}
         title="Approve this registration?"
-        confirmLabel="Approve and create the member"
+        confirmLabel={onCatalyst ? 'Approve' : 'Approve and create the member'}
       >
         {open && (
           <>
             <p className="mt0">
-              <b>{open.fullName}</b> becomes a member of the <b>{loc}</b> congregation.
-              The Noah app opens for them immediately.
+              {onCatalyst ? (
+                <>
+                  <b>{open.fullName}</b> is approved and the Noah app opens for them
+                  immediately. The Noah API emails them to say so.
+                </>
+              ) : (
+                <>
+                  <b>{open.fullName}</b> becomes a member of the <b>{loc}</b> congregation.
+                  The Noah app opens for them immediately.
+                </>
+              )}
             </p>
             <Note tone="mute" icon="info">
               Their ID, photograph, signed declaration and KYC video stay on the
@@ -434,6 +507,41 @@ export default function Registrations() {
           </>
         )}
       </Confirm>
+
+      {/* ---------- reject ---------- */}
+      <Drawer
+        open={rejecting}
+        onClose={() => { setRejecting(false); setRemark(''); }}
+        title="Reject this registration"
+        sub={open ? `${open.fullName} will be told why` : ''}
+        footer={
+          <>
+            <span className="sp" style={{ flex: 1 }} />
+            <Btn onClick={() => { setRejecting(false); setRemark(''); }}>Cancel</Btn>
+            <Btn variant="danger" disabled={!remark.trim() || busy} onClick={() => open && reject(open)}>
+              {busy ? 'Sending…' : 'Reject'}
+            </Btn>
+          </>
+        }
+      >
+        <Note tone="warn" icon="alert">
+          A registration can be decided once. After this the member cannot be
+          approved from here, so if the problem is only the video, return the
+          video instead.
+        </Note>
+        <div className="mt16">
+          <Field label="Why is it being rejected?" hint="Required. The member sees these words, in the email and in the app.">
+            <textarea
+              className="ta"
+              rows={4}
+              value={remark}
+              autoFocus
+              placeholder="The ID you gave does not match the name on your registration."
+              onChange={(e) => setRemark(e.target.value)}
+            />
+          </Field>
+        </div>
+      </Drawer>
 
       {/* ---------- return the video ---------- */}
       <Drawer

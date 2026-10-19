@@ -86,13 +86,16 @@ app.use((req, _res, next) => {
    pinging every few seconds does not make a round trip to Zoho each time. */
 let probeCache = null;
 let probeAt = 0;
-const PROBE_TTL_MS = 30_000;
+const PROBE_TTL_MS = 5 * 60_000;
 
+/* Asks Catalyst, and counts against its quota. Catalyst's Data Store free tier
+   is finite — the allowance ran out once already — so this is only ever called
+   when a person asks for it, never on a timer. */
 async function catalystState(force = false) {
   if (!force && probeCache && Date.now() - probeAt < PROBE_TTL_MS) return probeCache;
   try {
     /* A table that exists in whichever schema is configured. */
-    const probe = await check(schema() === 'noah' ? NOAH_TABLES.Members : TABLES.Staff);
+    const probe = await check(schema() === 'noah' ? NOAH_TABLES.members : TABLES.Staff);
     probeCache = { projectId: probe.projectId, reachable: true };
   } catch (err) {
     probeCache = { reachable: false, error: err.message };
@@ -101,14 +104,24 @@ async function catalystState(force = false) {
   return probeCache;
 }
 
+/* What a host's health check polls, every few seconds, for as long as the
+   service exists. It must cost nothing, so it never touches Catalyst: it
+   answers "is this process alive", and reports what was last learned about
+   Catalyst from real traffic or from /api/health/catalyst.
+
+   It used to make a Data Store fetch every thirty seconds, around the clock.
+   That is roughly three thousand fetches a day spent to learn nothing. */
 app.get('/api/health', async (req, res) => {
   const base = { ok: true, at: now(), dataSource: source() };
   if (!live()) {
     return res.json({ ...base, seedPinnedTo: '2026-10-09T10:30 IST', note: 'In-memory sample data. Set CATALYST_* in .env.local to use Catalyst.' });
   }
-  /* ?fresh=1 skips the cache, for when you are actually debugging. */
-  const catalyst = await catalystState(req.query.fresh === '1');
-  res.json({ ...base, catalyst });
+  /* ?fresh=1 is a person debugging, and is allowed to spend a fetch. */
+  if (req.query.fresh === '1') return res.json({ ...base, catalyst: await catalystState(true) });
+  res.json({
+    ...base,
+    catalyst: probeCache || { reachable: null, note: 'Not checked yet. Use /api/health?fresh=1 or /api/health/catalyst.' },
+  });
 });
 
 /* The strict version, for a human or a monitor that wants to be told off:
@@ -152,6 +165,9 @@ app.get('/api/meta', (_req, res) => {
     languages: db.LANGS,
     pastors: db.PASTORS.map((p) => ({ id: p.id, name: p.name, loc: p.loc })),
     towards: db.TOWARDS,
+    /* 'catalyst' or 'memory', so a screen can tell real data from the sample
+       set and not promise things the real one cannot do. */
+    dataSource: source(),
     signOn: 'local-otp',
     signOnNote: 'Zoho single sign-on is not wired up. Sign-in is a local email + one-time code.',
     /* So the sign-in screen knows to ask for the passphrase and to stop

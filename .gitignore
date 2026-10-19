@@ -12,3 +12,7 @@ dist
 # Hand-made upload bundles. Build artefacts, and they go stale.
 server.zip
 *.zip
+
+# Real member data pulled from Catalyst: names, phone numbers, ID numbers,
+# addresses, and the old sign-in rows. NEVER commit this.
+export/

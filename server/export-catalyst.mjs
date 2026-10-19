@@ -61,7 +61,17 @@ writeFileSync(resolve(out, 'registrations.json'), JSON.stringify({ registrations
 
 /* ---------- the uploads ---------- */
 
-const files = Array.isArray(dump.Files) ? dump.Files : [];
+const files = (Array.isArray(dump.files) ? dump.files : []).map((f) => {
+  /* remoteSource is JSON: { name, mimeType, purpose }. */
+  let meta = {};
+  try { meta = typeof f.remoteSource === 'string' ? JSON.parse(f.remoteSource) : (f.remoteSource || {}); } catch { /* not JSON */ }
+  return {
+    ...f,
+    name: meta.name || '',
+    mimeType: meta.mimeType || '',
+    purpose: meta.purpose || ({ 1: 'photo', 2: 'idProof', 3: 'video' }[f.fileType] || ''),
+  };
+});
 let downloaded = 0;
 let downloadError = '';
 let folders = [];
@@ -85,10 +95,11 @@ try {
   log(`\n  File Store folders: ${folders.length ? folders.map((f) => `${f.id} ${f.folder_name ?? ''}`).join(', ') : 'none'}`);
 
   for (const f of files) {
-    if (!f.catalystFileId) continue;
+    /* `path` is the File Store id; the row's own ROWID is something else. */
+    if (!f.path) continue;
     let got = false;
     for (const folder of folders) {
-      const url = `https://api.catalyst.zoho.in/baas/v1/project/${PROJECT_ID}/folder/${folder.id}/file/${f.catalystFileId}/download`;
+      const url = `https://api.catalyst.zoho.in/baas/v1/project/${PROJECT_ID}/folder/${folder.id}/file/${f.path}/download`;
       const r = await fetch(url, { headers: H });
       if (!r.ok) continue;
       writeFileSync(resolve(out, 'files', `${f.purpose}-${f.ROWID}-${f.name}`), Buffer.from(await r.arrayBuffer()));
@@ -96,7 +107,7 @@ try {
       got = true;
       break;
     }
-    if (!got) log(`    could not fetch ${f.name} (file ${f.catalystFileId})`);
+    if (!got) log(`    could not fetch ${f.name} (file ${f.path})`);
   }
 } catch (err) {
   downloadError = err.message;
@@ -142,8 +153,8 @@ ${withData.map((c) => row([c.name, c.rows])).join('\n')}
 ${empty.length ? `## Empty\n\n${empty.map((c) => c.name).join(' · ')}\n` : ''}
 ## Registrations
 
-${registrations.length} registration records, joined across \`Registrations\`,
-\`Members\`, \`MemberAddresses\`, \`MemberIdentity\` and \`Files\`.
+${registrations.length} registration records, joined across \`appRegistrations\`,
+\`members\`, \`membersExtra\` and \`files\`.
 
 | Status | Name | Mobile | City | ID | Video | Declaration |
 |---|---|---|---|---|---|---|
@@ -173,10 +184,10 @@ ${members
 
 ${files.length} file records.
 
-| Purpose | Name | Type | Size | Catalyst file id | Owner |
+| Purpose | Name | Type | Size | File Store id | Owner (members.ROWID) |
 |---|---|---|---|---|---|
 ${files
-  .map((f) => row([f.purpose, f.name, f.mimeType, `${f.size} bytes`, f.catalystFileId, f.ownerMemberRowId]))
+  .map((f) => row([f.purpose, f.name, f.mimeType, `${f.size} bytes`, f.path, f.uid]))
   .join('\n')}
 
 ${
@@ -191,15 +202,10 @@ added to the existing list, then run this again.
 }
 ## Sign-in activity
 
-${Array.isArray(dump.OtpRequests) ? dump.OtpRequests.length : 0} one-time codes, ${Array.isArray(dump.Sessions) ? dump.Sessions.length : 0} sessions.
+${Array.isArray(dump.users) ? dump.users.length : 0} login rows (\`users\`), ${Array.isArray(dump.userTokens) ? dump.userTokens.length : 0} sign-in tokens (\`userTokens\`).
 
-| Phone | Sent | Expires | Used | Sends | Attempts | From |
-|---|---|---|---|---|---|---|
-${(Array.isArray(dump.OtpRequests) ? dump.OtpRequests : [])
-  .map((o) => row([o.phoneKey, o.sentAt, o.expiresAt, o.usedAt, o.sendCount, o.attempts, o.ip]))
-  .join('\n')}
-
-Codes are stored as SHA-256 hashes, not in the clear.
+One-time codes live on \`users\` (\`otp\`, \`otpTime\`, \`otpAttempts\`). They are in
+\`catalyst-export.json\` and deliberately not repeated here.
 
 ---
 

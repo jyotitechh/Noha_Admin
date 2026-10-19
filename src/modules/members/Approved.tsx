@@ -18,7 +18,7 @@ import { fd, fdt, since } from '@/lib/format';
 import type { Registration } from '@/lib/types';
 
 type Row = Registration & { rawStatus?: string; memberRowId?: string };
-type Show = 'approved' | 'returned' | 'all';
+type Show = 'approved' | 'returned' | 'rejected' | 'all';
 
 export default function Approved() {
   const [show, setShow] = useState<Show>('approved');
@@ -30,7 +30,7 @@ export default function Approved() {
 
   /* Decided means the office has acted on it, either way. */
   const decided = useMemo(
-    () => all.filter((r) => r.state === 'approved' || r.state === 'videoReturned'),
+    () => all.filter((r) => r.state === 'approved' || r.state === 'videoReturned' || r.state === 'rejected'),
     [all],
   );
 
@@ -38,6 +38,7 @@ export default function Approved() {
     let r = decided;
     if (show === 'approved') r = r.filter((x) => x.state === 'approved');
     if (show === 'returned') r = r.filter((x) => x.state === 'videoReturned');
+    if (show === 'rejected') r = r.filter((x) => x.state === 'rejected');
     if (search.trim()) {
       const s = search.toLowerCase();
       r = r.filter((x) =>
@@ -55,6 +56,7 @@ export default function Approved() {
     return {
       approved: approved.length,
       returned: decided.filter((r) => r.state === 'videoReturned').length,
+      rejected: decided.filter((r) => r.state === 'rejected').length,
       thisWeek: approved.filter((r) => r.decidedAt && +r.decidedAt > week).length,
       deciders: deciders.size,
       latest: approved[0]?.decidedAt ?? null,
@@ -71,7 +73,9 @@ export default function Approved() {
       key: 'state', label: 'Decision',
       cell: (r) => (r.state === 'approved'
         ? <Chip tone="ok" icon="user-check">Approved</Chip>
-        : <Chip tone="bad" icon="video">Video returned</Chip>),
+        : r.state === 'rejected'
+          ? <Chip tone="bad" icon="x">Rejected</Chip>
+          : <Chip tone="bad" icon="video">Video returned</Chip>),
     },
     {
       key: 'decidedBy', label: 'By',
@@ -100,7 +104,8 @@ export default function Approved() {
       <Note tone="ok" icon="user-check">
         Everyone here has been decided. <b>Approved</b> means the Noah app
         opens for them; <b>video returned</b> means they were asked to record
-        step six again and the app stays shut until they do.
+        step six again and the app stays shut until they do; <b>rejected</b> is
+        final, and the member was told why.
       </Note>
 
       <Kpis>
@@ -132,6 +137,7 @@ export default function Approved() {
               options={[
                 { id: 'approved', label: 'Approved', count: stats.approved },
                 { id: 'returned', label: 'Video returned', count: stats.returned },
+                { id: 'rejected', label: 'Rejected', count: stats.rejected },
                 { id: 'all', label: 'Everything decided', count: decided.length },
               ]}
             />
@@ -157,7 +163,9 @@ export default function Approved() {
             <div className="row wrap gap6 mb12">
               {open.state === 'approved'
                 ? <Chip tone="ok" icon="user-check">Approved — the app is open to them</Chip>
-                : <Chip tone="bad" icon="video">Video returned — the app stays shut</Chip>}
+                : open.state === 'rejected'
+                  ? <Chip tone="bad" icon="x">Rejected — the app stays shut</Chip>
+                  : <Chip tone="bad" icon="video">Video returned — the app stays shut</Chip>}
               {open.rawStatus && <Chip tone="plain">Catalyst status: {open.rawStatus}</Chip>}
             </div>
 
@@ -171,7 +179,7 @@ export default function Approved() {
               {open.decidedAt && (
                 <li>
                   <i />
-                  <b>{open.state === 'approved' ? 'Approved' : 'Video returned'}</b>
+                  <b>{open.state === 'approved' ? 'Approved' : open.state === 'rejected' ? 'Rejected' : 'Video returned'}</b>
                   <span className="muted">
                     {' '}· {fdt(open.decidedAt)}
                     {open.decidedBy ? ` by ${open.decidedBy}` : ''}

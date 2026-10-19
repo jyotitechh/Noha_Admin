@@ -188,6 +188,25 @@ export async function getRows(tableId, { max = 2000 } = {}) {
 export const getRow = (tableId, rowId) =>
   call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row/${rowId}`);
 
+/** Every table in the project as `{ name, id }`, ids as strings.
+
+    The table list sends `table_id` as a bare number, and a Catalyst id is past
+    Number.MAX_SAFE_INTEGER, so JSON.parse would round it — the same trap as an
+    unquoted ROWID on insert. The ids are quoted in the raw text first. Used to
+    check that the ids in noah-schema.js still point at the tables they name:
+    the schema has already been rebuilt once, and a dead id fails with an error
+    that does not say so. */
+export async function listTables() {
+  const at = await accessToken();
+  const res = await fetch(`${API}/baas/v1/project/${PROJECT_ID}/table`, {
+    headers: { authorization: 'Zoho-oauthtoken ' + at, 'CATALYST-ORG': ORG_ID },
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Catalyst: could not list tables (HTTP ${res.status}).`);
+  const body = JSON.parse(text.replace(/("table_id"\s*:\s*)(\d{15,})/g, '$1"$2"'));
+  return (body.data || []).map((t) => ({ name: t.table_name, id: String(t.table_id) }));
+}
+
 /* ---------- File Store ----------
 
    The Files table records a `catalystFileId` but not which folder holds it,

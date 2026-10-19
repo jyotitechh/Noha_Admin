@@ -15,7 +15,7 @@
    keep their signatures. */
 
 import { getRows, insert, update, configured } from './catalyst.js';
-import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, canEnterApp, registrationCore, createRegistrationInNoah, patchRegistrationInNoah } from './noah-schema.js';
+import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, rejectInNoah, canEnterApp, createRegistrationInNoah, patchRegistrationInNoah } from './noah-schema.js';
 import { db, audit as memAudit } from './db.js';
 
 /* Table ids. Empty by default — set CATALYST_TABLE_* in .env.local for the
@@ -172,14 +172,9 @@ export async function listRegistrations({ state, search } = {}) {
 export async function registrationById(regId) {
   if (!live()) return db.REGISTRATIONS.find((r) => r.id === regId) || null;
   if (isNoah()) {
-    /* Try the single-row fetch first; it is one request instead of five
-       whole tables, which matters when the office is waiting on a click. */
-    const core = await registrationCore(regId).catch(() => null);
-    if (core) {
-      const full = (await loadRegistrations()).find((r) => r.id === regId);
-      return full ?? core;
-    }
-    return (await loadRegistrations()).find((r) => r.id === regId) || null;
+    /* Ids are strings and compared as strings: a Catalyst ROWID does not
+       survive being a Number. */
+    return (await loadRegistrations()).find((r) => String(r.id) === String(regId)) || null;
   }
   const rows = await getRows(TABLES.Registrations);
   const hit = rows.find((r) => r.regId === regId);
@@ -254,9 +249,16 @@ export async function approveRegistration({ registration, staffName, loc, remark
   return member;
 }
 
+/** Reject, in whichever schema is connected. Only the new schema has it. */
+export async function rejectRegistration({ registration, remark }) {
+  if (isNoah()) return rejectInNoah({ registration, remark });
+  await patchRegistration(registration, { state: 'rejected', remark });
+  return { state: 'rejected' };
+}
+
 /** Send the video back, in whichever schema is connected. */
 export async function returnVideo({ registration, staffName, remark }) {
-  if (isNoah()) return returnVideoInNoah({ registration, staffName, remark });
+  if (isNoah()) return returnVideoInNoah({ registration, remark });
   await patchRegistration(registration, {
     state: 'videoReturned',
     decidedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),

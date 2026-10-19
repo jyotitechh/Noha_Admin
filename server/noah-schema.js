@@ -1,63 +1,102 @@
-/* Reading the `noah-backend` Catalyst project.
+/* Reading and writing the `noah-backend` Catalyst project.
 
-   That project is the Catalyst developer's, and its schema is normalised:
-   a registration is spread across five tables, joined on `memberRowId`.
+   The office's own schema (nodi_schema.sql) replaced the first one. What the
+   console needs from it:
 
-     Members          who they are: phoneKey, names, email, gender, dob
-     MemberAddresses  one row per address, type 'residence'
-     MemberIdentity   one COLUMN per ID type: aadhaar, pan, passport, …
-     Registrations    the review record: status, declaration, video, files
-     Files            the uploads: purpose idProof | photo | video
+     users             the login: number, countryCode, is_admin, otp…
+     members           who they are — names, email, address, ID numbers,
+                       photo, memberType, isUnVerified. 104 columns is
+                       Catalyst's limit, so the rest are in…
+     membersExtra      one row per member, membersExtra.id = members.ROWID:
+                       the role flags, connectedPastor / connectedLeader
+     appRegistrations  the review record: status, declaration, video, files
+     files             one row per upload: uid, path, fileType, remoteSource
 
-   The console wants one flat registration, so this module does the joining.
-   There is no ZCQL (see catalyst.js), so the tables are fetched whole and
-   joined in Node. Fine at this size; it belongs in a Catalyst function with
+   A registration is therefore appRegistrations + members + membersExtra +
+   files, joined in Node. There is no ZCQL (see catalyst.js), so the tables
+   are fetched whole. Fine at this size; it belongs in a Catalyst function with
    real queries before this carries thousands of members.
 
-   Nothing here writes. Approving a member in this project means updating
-   their tables, and the status vocabulary is not agreed yet — see
-   docs/SCHEMA-RECONCILIATION.md. Read-only until that conversation happens. */
+   ── The rules that matter ────────────────────────────────────────────────
 
-import { getRows, update, insert } from './catalyst.js';
+   ACCESS. The app lets someone in when `appRegistrations.status = 'approved'`.
+   A member the office verified in its own system (`isUnVerified = false`) who
+   has no registration row also counts. NEVER `members.status`: it is a
+   boolean now, true for everyone, and says nothing about approval.
 
-/* Table ids in noah-backend (27145000000040056). */
+   A phone number that has only asked for an OTP already has a `users` row, a
+   `members` row and a `draft` registration. A row existing is not approval.
+
+   DECISIONS go through the Noah API (noah-api.js), which also notifies the
+   member. The functions here that write a decision are the fallback for when
+   the API key is not set, and they are loud about it.
+
+   IDS. A ROWID is past Number.MAX_SAFE_INTEGER: keep it a string, and never
+   take it from an insert response (Catalyst sends it unquoted there). */
+
+import { getRows, getRow, update, insert, listTables } from './catalyst.js';
+
+/* Every Catalyst call goes through this object, not straight to the imports.
+   The schema logic — joins, the access gate, roles, the shape of a decision —
+   is where the mistakes are, and testing it should not need the network or
+   spend Catalyst's Data Store allowance. A test swaps these for an in-memory
+   copy of the tables (see test-schema-offline.mjs). */
+export const io = { getRows, getRow, update, insert, listTables };
+
+/* Table ids in noah-backend (27145000000040056), Development.
+   `npm run check:schema` confirms each still points at the table it names. */
 export const NOAH_TABLES = {
-  Members: '27145000000050162',
-  MemberAddresses: '27145000000056361',
-  MemberIdentity: '27145000000050521',
-  MemberProfile: '27145000000053003',
-  Registrations: '27145000000058361',
-  Files: '27145000000043026',
-  OtpRequests: '27145000000058002',
-  Sessions: '27145000000056002',
-  Locations: '27145000000059004',
-  DailyManna: '27145000000057362',
-  DailyPrayers: '27145000000052010',
-  DailyConfessions: '27145000000054018',
-  BibleCommentary: '27145000000059363',
-  Books: '27145000000059722',
-  BookCategories: '27145000000045311',
-  BookChapters: '27145000000055376',
-  Videos: '27145000000046367',
-  VideoCategories: '27145000000041042',
-  LiveVideos: '27145000000040840',
-  Praises: '27145000000064079',
-  PraiseReports: '27145000000055017',
-  DashboardBanners: '27145000000052369',
-  Groups: '27145000000053362',
-  GroupMembers: '27145000000050880',
-  Kids: '27145000000040122',
-  KidLinks: '27145000000061002',
-  MemberRelations: '27145000000046008',
-  MemberRoles: '27145000000056720',
-  MemberPreferences: '27145000000057003',
-  Favorites: '27145000000040481',
-  Attachments: '27145000000047045',
-  DailyMannaCategories: '27145000000058720',
+  users: '27145000000126568',
+  members: '27145000000074174',
+  membersExtra: '27145000000070252',
+  userTokens: '27145000000129857',
+  files: '27145000000081969',
+  deviceTokens: '27145000000081251',
+  notifications: '27145000000113764',
+  threads: '27145000000127841',
+  threadUserConnect: '27145000000133628',
+  threadMessages: '27145000000135980',
+  appRegistrations: '27145000000134560',
+  appChangeRequests: '27145000000128317',
+};
+const T = NOAH_TABLES;
+
+/* ---------- small readers ---------- */
+
+const digits = (s) => String(s ?? '').replace(/\D/g, '');
+const same = (a, b) => a != null && b != null && String(a) === String(b);
+
+/* Booleans come back as true/false, or "true"/"false" from an insert. */
+const asBool = (v) => v === true || v === 'true' || v === 1 || v === '1';
+const isFalse = (v) => v === false || v === 'false' || v === 0 || v === '0';
+
+/* Two clocks. Columns the app writes are UTC; Catalyst's own CREATEDTIME and
+   MODIFIEDTIME are IST. Reading one as the other is 5½ hours wrong, which is
+   enough to put "waiting 5 hours" on someone who has just registered. */
+function parseWhen(v, zone) {
+  if (!v) return null;
+  const s = String(v).trim().replace(' ', 'T').slice(0, 19);
+  const d = new Date((s.length === 10 ? s + 'T00:00:00' : s) + zone);
+  return Number.isNaN(+d) ? null : d;
+}
+const utc = (v) => parseWhen(v, 'Z');
+const ist = (v) => parseWhen(v, '+05:30');
+
+/* Catalyst date columns want YYYY-MM-DD. The validator hands back a Date, and
+   String(date).slice(0, 10) quietly gives "Sun Jun 2", which Catalyst rejects
+   with "date value expected". */
+const asDay = (v) => {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10);
 };
 
-const asDate = (v) => (v ? new Date(String(v).replace(' ', 'T')) : null);
-const asBool = (v) => v === true || v === 'true' || v === 1 || v === '1';
+/** Catalyst wants 'YYYY-MM-DD HH:mm:ss', and the app writes UTC. */
+const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+const GENDER = { 1: 'male', 2: 'female', 3: 'other' };
+const genderOf = (g) => GENDER[Number(g)] || '';
+const genderCode = (g) => ({ male: 1, m: 1, female: 2, f: 2, other: 3 }[String(g || '').toLowerCase()] ?? null);
 
 /** Pull the staff name back out of a note like "Approved by Anitha Varghese". */
 const decidedByFrom = (note) => {
@@ -65,493 +104,663 @@ const decidedByFrom = (note) => {
   return m ? m[1].trim() : '';
 };
 
-/* Their ID table has a column per type. Turn that back into a type and a
-   number, which is how the app sends it and how the console shows it. */
-const ID_COLUMNS = [
-  ['aadhaar', 'Aadhaar'],
-  ['pan', 'PAN'],
-  ['passport', 'Passport'],
-  ['drivingLicence', 'Driving licence'],
-  ['voterId', 'Voter ID'],
-  ['emiratesId', 'Emirates ID'],
-];
+/* ---------- phone numbers ----------
 
-const idFrom = (identity, declaredType) => {
-  if (!identity) return { idType: declaredType || '', idNumber: '' };
-  /* Prefer the type the registration says was used. */
-  const byDeclared = ID_COLUMNS.find(([col]) => col.toLowerCase() === String(declaredType || '').toLowerCase());
-  if (byDeclared && identity[byDeclared[0]]) {
-    return { idType: byDeclared[1], idNumber: identity[byDeclared[0]] };
-  }
-  const filled = ID_COLUMNS.find(([col]) => identity[col]);
-  return filled ? { idType: filled[1], idNumber: identity[filled[0]] } : { idType: declaredType || '', idNumber: '' };
-};
+   There is no `phoneKey` any more: a number is `countryCode` + `mobileNumber1`
+   on members, `countryCode` + `number` on users. */
 
-/* Their statuses, as observed: `draft` until submitted, then `approved`.
-   The console speaks pending / approved / videoReturned, so translate — and
-   keep the original so nothing is hidden behind the translation. */
-function consoleState(reg) {
-  const raw = String(reg.status || '').toLowerCase();
-  if (raw === 'approved') return 'approved';
-  if (raw === 'returned' || raw === 'videoreturned' || (reg.reviewNote && raw !== 'approved' && reg.reviewedAt)) {
-    return 'videoReturned';
+const COUNTRY_CODES = new Set([
+  '1', '7', '20', '27', '30', '31', '32', '33', '34', '39', '40', '41', '43', '44', '45', '46',
+  '47', '48', '49', '52', '54', '55', '60', '61', '62', '63', '64', '65', '66', '81', '82', '84',
+  '86', '90', '91', '92', '93', '94', '95', '98', '212', '234', '254', '880', '960', '961', '962',
+  '963', '964', '965', '966', '968', '971', '972', '973', '974', '975', '977',
+]);
+
+/** '+91 95631 16482' → { cc: '91', number: '9563116482' }. */
+export function splitPhone(mobile) {
+  const d = digits(mobile);
+  for (const n of [3, 2, 1]) {
+    const cc = d.slice(0, n);
+    if (COUNTRY_CODES.has(cc) && d.length - n >= 6) return { cc, number: d.slice(n) };
   }
-  /* A draft that has been submitted is what the office has to look at. */
-  if (reg.submittedAt) return 'pending';
-  return 'draft';
+  return { cc: d.slice(0, 2), number: d.slice(2) };
 }
 
-/* The join pulls five whole tables, which is slow enough to matter once a
-   screen asks for it twice in a row. A short cache makes a page load one
-   fetch instead of three; anything that writes clears it. */
-let cache = null;
-let cacheAt = 0;
-const CACHE_MS = 4000;
+const phoneOf = (m, user) => {
+  const number = digits(m?.mobileNumber1) || digits(user?.number);
+  const cc = digits(m?.countryCode) || digits(user?.countryCode);
+  return number ? '+' + cc + number : '';
+};
 
-export const clearCache = () => { cache = null; };
+/* ---------- ID numbers ----------
 
-/** One registration row by its ROWID, without joining anything.
+   The member row has a column per ID type. The type the member used is
+   `appRegistrations.idProofType`. */
 
-    Approving needs only the row id and the member it points at, so fetching
-    one row beats rebuilding the whole join — which was slow enough to time
-    the request out. */
+const ID_TYPES = [
+  { column: 'aadharNo', label: 'Aadhaar', keys: ['aadhaar', 'aadhar'] },
+  { column: 'panNo', label: 'PAN', keys: ['pan'] },
+  { column: 'passportNumber', label: 'Passport', keys: ['passport'] },
+  { column: 'voterId', label: 'Voter ID', keys: ['voterid', 'voter'] },
+  { column: 'drivingLicense', label: 'Driving licence', keys: ['drivinglicence', 'drivinglicense', 'dl'] },
+  { column: 'emiratesID', label: 'Emirates ID', keys: ['emiratesid', 'emirates'] },
+];
+const flat = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+const idTypeFor = (declared) => ID_TYPES.find((t) => t.keys.includes(flat(declared)));
+
+function idFrom(member, declaredType) {
+  const byDeclared = idTypeFor(declaredType);
+  if (byDeclared && member[byDeclared.column]) {
+    return { idType: byDeclared.label, idNumber: member[byDeclared.column] };
+  }
+  const filled = ID_TYPES.find((t) => member[t.column]);
+  return filled
+    ? { idType: filled.label, idNumber: member[filled.column] }
+    : { idType: byDeclared?.label || declaredType || '', idNumber: '' };
+}
+
+/* ---------- registration status ---------- */
+
+const STATES = {
+  draft: 'draft', pending: 'pending', approved: 'approved',
+  rejected: 'rejected', videoreturned: 'videoReturned',
+};
+/** Their five statuses, as the console spells them. Anything else is a draft. */
+const stateOf = (s) => STATES[String(s || '').toLowerCase()] || 'draft';
+
+/* ---------- one read, shared ----------
+
+   A registration needs five tables and the member register needs most of the
+   same ones, so they are fetched together and cached for a few seconds: a
+   page load is one round of fetches, not one per screen. Anything that
+   writes clears it. The generation counter stops a fetch that was already in
+   flight when a write happened from being cached as if it were fresh. */
+
+let snap = null;
+let snapAt = 0;
+let inflight = null;
+let generation = 0;
+const CACHE_MS = 15_000;
+
+export const clearCache = () => { snap = null; generation += 1; };
+
+async function snapshot() {
+  if (snap && Date.now() - snapAt < CACHE_MS) return snap;
+  if (inflight) return inflight;
+
+  const started = generation;
+  inflight = (async () => {
+    const [regs, members, extras, files, users] = await Promise.all([
+      io.getRows(T.appRegistrations), io.getRows(T.members), io.getRows(T.membersExtra),
+      io.getRows(T.files), io.getRows(T.users),
+    ]);
+    const value = { regs, members, extras, files, users };
+    if (generation === started) { snap = value; snapAt = Date.now(); }
+    return value;
+  })().finally(() => { inflight = null; });
+
+  return inflight;
+}
+
+/* The newest registration per member. A member can have more than one (a
+   draft, then a resubmission), and the newest is the one that counts. */
+const when = (r) => +(utc(r.submittedAt) || ist(r.CREATEDTIME) || 0);
+function latestRegByMember(regs) {
+  const out = new Map();
+  for (const r of regs) {
+    const k = String(r.memberRowId);
+    if (!out.has(k) || when(r) > when(out.get(k))) out.set(k, r);
+  }
+  return out;
+}
+
+const fileMeta = (f) => {
+  if (!f) return null;
+  let meta = {};
+  try { meta = typeof f.remoteSource === 'string' ? JSON.parse(f.remoteSource) : (f.remoteSource || {}); } catch { /* not JSON */ }
+  return {
+    rowId: String(f.ROWID),
+    storeId: f.path ? String(f.path) : null,
+    name: meta.name || '',
+    mimeType: meta.mimeType || '',
+    bytes: Number(f.size || 0),
+  };
+};
+
+/** One registration row by its ROWID, without joining anything. */
 export async function registrationCore(rowId) {
-  const row = await getRow(NOAH_TABLES.Registrations, rowId);
+  const row = await io.getRow(T.appRegistrations, rowId);
   if (!row) return null;
   return {
-    rowId: row.ROWID,
-    memberRowId: row.memberRowId,
+    rowId: String(row.ROWID),
+    memberRowId: String(row.memberRowId),
     rawStatus: row.status,
-    state: consoleState(row),
-    id: row.ROWID,
+    state: stateOf(row.status),
+    id: String(row.ROWID),
   };
 }
 
 /** Everything the console needs for the registration queue, joined up. */
 export async function loadRegistrations() {
-  if (cache && Date.now() - cacheAt < CACHE_MS) return cache;
-  const [regs, members, addresses, identities, files] = await Promise.all([
-    getRows(NOAH_TABLES.Registrations),
-    getRows(NOAH_TABLES.Members),
-    getRows(NOAH_TABLES.MemberAddresses),
-    getRows(NOAH_TABLES.MemberIdentity),
-    getRows(NOAH_TABLES.Files),
-  ]);
+  const { regs, members, files, users } = await snapshot();
 
-  const byMember = (rows) => {
-    const m = new Map();
-    for (const r of rows) if (!m.has(r.memberRowId)) m.set(r.memberRowId, r);
-    return m;
-  };
-  const memberById = new Map(members.map((m) => [m.ROWID, m]));
-  const addressOf = byMember(addresses);
-  const identityOf = byMember(identities);
+  const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
+  const userById = new Map(users.map((u) => [String(u.ROWID), u]));
+  const fileById = new Map(files.map((f) => [String(f.ROWID), f]));
 
-  const filesOf = new Map();
+  /* A member's uploads by kind, newest first: fileType 1 photo, 2 ID, 3 video. */
+  const uploads = new Map();
   for (const f of files) {
-    if (!filesOf.has(f.ownerMemberRowId)) filesOf.set(f.ownerMemberRowId, {});
-    filesOf.get(f.ownerMemberRowId)[f.purpose] = f;
+    if (asBool(f.archived)) continue;
+    const key = `${f.uid}:${f.fileType}`;
+    if (!uploads.has(key)) uploads.set(key, []);
+    uploads.get(key).push(f);
   }
+  for (const list of uploads.values()) list.sort((a, b) => +ist(b.CREATEDTIME) - +ist(a.CREATEDTIME));
 
-  const built = regs.map((r) => {
-    const m = memberById.get(r.memberRowId) || {};
-    const a = addressOf.get(r.memberRowId) || {};
-    const mine = filesOf.get(r.memberRowId) || {};
-    const { idType, idNumber } = idFrom(identityOf.get(r.memberRowId), r.idProofType);
+  const pick = (explicitId, uid, type) =>
+    fileById.get(String(explicitId)) || uploads.get(`${uid}:${type}`)?.[0] || null;
 
+  return regs.map((r) => {
+    const m = memberById.get(String(r.memberRowId)) || {};
+    const uid = String(r.memberRowId);
+
+    const idFile = fileMeta(pick(r.idProofFileId, uid, 2));
+    const photo = fileMeta(pick(m.photo, uid, 1));
+    const video = fileMeta(pick(r.videoFileId, uid, 3));
+
+    const { idType, idNumber } = idFrom(m, r.idProofType);
     const fullName = [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' ');
+    const [refName = '', , refPhone = ''] = String(m.referBy || '').split('|');
+    const dob = utc(m.dateOfBirth);
 
     return {
-      rowId: r.ROWID,
-      memberRowId: r.memberRowId,
-      id: r.ROWID,
+      rowId: String(r.ROWID),
+      memberRowId: uid,
+      id: String(r.ROWID),
       /* Their raw status, kept visible rather than translated away. */
       rawStatus: r.status,
-      state: consoleState(r),
+      state: stateOf(r.status),
 
-      mobile: m.phoneKey || [m.countryCode, m.mobileNumber].filter(Boolean).join(' '),
+      mobile: phoneOf(m, userById.get(String(m.userId))),
       salutation: m.salutation || '',
       firstName: m.firstName || '', middleName: m.middleName || '', lastName: m.lastName || '',
       fullName: fullName || '(name not given yet)',
-      email: m.email || '',
-      gender: m.gender || '',
-      dob: asDate(m.dob),
+      email: m.emailId1 || '',
+      gender: genderOf(m.gender),
+      dob,
       marital: m.maritalStatus || '',
-      reference: m.referenceName || '',
+      reference: refName,
+      referencePhone: refPhone,
 
-      line1: a.addressLine || '', line2: a.area || '',
-      city: a.city || '', region: a.state || '',
-      country: a.country || '', pin: a.pincode || '',
+      line1: m.address || '', line2: m.area || '',
+      city: m.city || '', region: m.state || '',
+      country: m.country || '', pin: m.pincode || '',
+      nationality: r.nationality || '',
 
       idType, idNumber,
-      idFile: mine.idProof?.name || '',
-      idSizeKb: Math.round(Number(mine.idProof?.size || 0) / 1024),
-      photoFile: mine.photo?.name || '',
-      photoSizeKb: Math.round(Number(mine.photo?.size || 0) / 1024),
+      idFile: idFile?.name || '',
+      idSizeKb: Math.round((idFile?.bytes || 0) / 1024),
+      photoFile: photo?.name || '',
+      photoSizeKb: Math.round((photo?.bytes || 0) / 1024),
 
       agreed: asBool(r.declarationAccepted),
       declarationLang: r.declarationLanguage || '',
       declarationVersion: '',
       signature: r.signatureText || '',
-      signedOn: asDate(r.declarationAcceptedAt),
+      signedOn: utc(r.declarationAcceptedAt),
 
-      videoFile: mine.video?.name || '',
+      videoFile: video?.name || '',
       videoSecs: Number(r.videoSeconds || 0),
-      videoAttempt: 1,
+      /* One video file per recording, so the count is the attempt number. */
+      videoAttempt: Math.max(1, uploads.get(`${uid}:3`)?.length || 0),
 
-      at: asDate(r.submittedAt) || asDate(r.CREATEDTIME),
-      decidedAt: asDate(r.reviewedAt),
-      /* Their schema records the decider as `reviewedByLegacyId`, a numeric
-         id into a staff table that does not exist in this project. So the
-         name is written into `reviewNote` on approval and read back out
-         here. Not elegant, but it is the only place the name survives. */
-      decidedBy: r.reviewedByLegacyId || decidedByFrom(r.reviewNote),
+      at: utc(r.submittedAt) || ist(r.CREATEDTIME),
+      decidedAt: utc(r.reviewedAt),
+      /* appRegistrations records no reviewer, so the name is written into
+         `reviewNote` on approval and read back out here. */
+      decidedBy: decidedByFrom(r.reviewNote),
       remark: r.reviewNote || '',
-      memberId: r.memberRowId,
+      memberId: uid,
+      /* The number the office's own system knows them by. */
+      officeMemberId: m.memberId || '',
 
       checks: {
         idReadable: null, photoMatchesId: null, videoAudible: null,
         nameMatchesSignature:
           !!r.signatureText && r.signatureText.trim().toLowerCase() === fullName.trim().toLowerCase(),
-        ageOver18: m.dob ? (Date.now() - +asDate(m.dob)) / 31557600000 >= 18 : true,
+        ageOver18: dob ? (Date.now() - +dob) / 31557600000 >= 18 : true,
         duplicateMobile: false,
       },
       script: '',
-      /* Catalyst File Store ids, for when signed view URLs are wired. */
+
+      /* `files` ROWIDs: what GET /admin/files/:id on the Noah API takes. */
       fileIds: {
-        idProof: mine.idProof?.catalystFileId || null,
-        photo: mine.photo?.catalystFileId || null,
-        video: mine.video?.catalystFileId || null,
+        idProof: idFile?.rowId || null,
+        photo: photo?.rowId || null,
+        video: video?.rowId || null,
+      },
+      /* The Catalyst File Store ids (`files.path`), for a direct download when
+         the Noah API key is not set. */
+      storeIds: {
+        idProof: idFile?.storeId || null,
+        photo: photo?.storeId || null,
+        video: video?.storeId || null,
       },
     };
   });
-
-  cache = built;
-  cacheAt = Date.now();
-  return built;
 }
 
 /** The member register, for the Membership screen. */
 export async function loadMembers() {
-  const [members, addresses] = await Promise.all([
-    getRows(NOAH_TABLES.Members),
-    getRows(NOAH_TABLES.MemberAddresses),
-  ]);
-  const addressOf = new Map();
-  for (const a of addresses) if (!addressOf.has(a.memberRowId)) addressOf.set(a.memberRowId, a);
+  const { regs, members, extras, users } = await snapshot();
+
+  const latest = latestRegByMember(regs);
+  const userById = new Map(users.map((u) => [String(u.ROWID), u]));
+  const extraOf = new Map(extras.map((x) => [String(x.id), x]));
+  const nameOf = new Map(members.map((m) => [
+    String(m.ROWID), [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' '),
+  ]));
 
   return members.map((m) => {
-    const a = addressOf.get(m.ROWID) || {};
-    const name = [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' ');
+    const reg = latest.get(String(m.ROWID));
+    const x = extraOf.get(String(m.ROWID)) || {};
+    const user = userById.get(String(m.userId)) || {};
+    const name = nameOf.get(String(m.ROWID));
+
+    const officeVerified = isFalse(m.isUnVerified);
+    /* The registration decides. With none, the office's own verification does. */
+    const approval = reg ? stateOf(reg.status) : (officeVerified ? 'approved' : 'none');
+    const archived = asBool(m.archived);
+    const blocked = archived || asBool(user.archived);
+
+    /* Never default to Active: 'Active' here means the office approved them. */
+    const status = archived ? 'Archived' : ({
+      approved: 'Active', pending: 'Pending', videoReturned: 'Video returned',
+      rejected: 'Rejected', draft: 'Not approved', none: 'Not approved',
+    }[approval]);
+
+    const dob = utc(m.dateOfBirth);
     return {
-      id: m.memberNumber || m.ROWID,
-      rowId: m.ROWID,
+      id: m.memberId || String(m.ROWID),
+      rowId: String(m.ROWID),
+      userRowId: m.userId ? String(m.userId) : null,
       name: name || '(not registered yet)',
       first: m.firstName || '', last: m.lastName || '',
-      mobile: m.phoneKey || '',
-      email: m.email || '',
-      g: m.gender === 'female' ? 'F' : 'M',
-      age: m.dob ? Math.floor((Date.now() - +asDate(m.dob)) / 31557600000) : 0,
-      loc: a.city || '', cell: null, pastor: null,
-      /* Do NOT invent a status. A null `status` means nobody has approved
-         this person, and defaulting it to Active would hand the app to
-         everyone who ever asked for an OTP. */
-      status: asBool(m.isArchived) ? 'Archived' : (m.status || 'Not approved'),
-      rawStatus: m.status ?? null,
-      partner: false, kid: asBool(m.isKid),
-      joined: asDate(m.joinedOn) || asDate(m.CREATEDTIME),
-      lang: m.appLanguage || 'en',
-      address: [a.addressLine, a.city, a.pincode].filter(Boolean).join(', '),
-      photo: m.photoFileId ? 'Approved' : 'None',
+      mobile: phoneOf(m, user),
+      email: m.emailId1 || '',
+      g: Number(m.gender) === 2 ? 'F' : 'M',
+      age: dob ? Math.floor((Date.now() - +dob) / 31557600000) : 0,
+      loc: m.city || '',
+      cell: x.connectedLeader ? nameOf.get(String(x.connectedLeader)) || null : null,
+      pastor: x.connectedPastor ? nameOf.get(String(x.connectedPastor)) || null : null,
+      status,
+      /* The approval state, not `members.status`. Kept under the old name so
+         screens that show Catalyst's own word still have one. */
+      rawStatus: approval,
+      approval,
+      approved: approval === 'approved',
+      officeVerified,
+      archived,
+      blocked,
+      isAdmin: asBool(user.is_admin) || asBool(user.is_super_admin),
+      memberType: m.memberType || null,
+      partner: asBool(x.isPartner), kid: asBool(m.isKid),
+      joined: utc(m.dateOfJoining) || ist(m.CREATEDTIME),
+      lang: m.language || 'en',
+      address: [m.address, m.city, m.pincode].filter(Boolean).join(', '),
+      photo: m.photo ? 'Approved' : 'None',
       crm: 'Pending', lastActive: null,
     };
   });
 }
 
-/* ---------- writes ----------
+/** May the app open for this person?
 
-   Approving has to do two things, because access is gated on the member, not
-   on the registration:
+    Deliberately strict: it needs positive evidence of approval. The cost of
+    guessing wrong is letting a stranger into the congregation's app.
 
-     Registrations.status -> 'approved'   the office's decision
-     Members.status       -> 'active'     what actually opens the app
+      - archived, or a blocked login       → never
+      - a registration exists              → only if it says 'approved'
+      - none, but the office verified them → yes (`isUnVerified = false`)
+      - anything else                      → no
 
-   THE TRAP: in this schema every phone number that asks for an OTP already
-   has a Members row. So "a member row exists" must NOT mean "let them in" —
-   that would admit everyone who ever typed their number. `canEnterApp` below
-   is the real gate, and it checks the registration. */
-
-export const MEMBER_ACTIVE = 'active';
+    `members.status` is not consulted. It is true for everybody. */
+export function canEnterApp(member, registration) {
+  if (member?.blocked) return false;
+  if (registration) return stateOf(registration.rawStatus ?? registration.status) === 'approved';
+  return !!member && member.officeVerified === true;
+}
 
 /* ---------- the app writing in ----------
 
-   A registration submitted from the Noah app has to be spread back across
-   the same five tables the read joins together. One row per table, keyed on
-   the member, which is found or created from the phone number.
+   A registration submitted from the console's mock of the app has to land in
+   the same tables the real app's registration does:
 
-   `phoneKey` is unique on Members, so a number that has already asked for an
-   OTP reuses its row rather than colliding. */
+     users → members → membersExtra → (fields on members) → appRegistrations
 
-const phoneKeyOf = (mobile) => {
-  const s = String(mobile || '').trim();
-  return s.startsWith('+') ? s.replace(/\s+/g, '') : '+' + s.replace(/\D/g, '');
-};
+   The real Flutter app talks to the Noah API, not to this. This stays so the
+   registration journey can be tested end to end without it. */
 
-/* Catalyst date columns want YYYY-MM-DD. The validator hands back a Date
-   object, and String(date).slice(0, 10) quietly gives "Sun Jun 2", which
-   Catalyst rejects with "date value expected". */
-const asDay = (v) => {
-  if (!v) return null;
-  const d = v instanceof Date ? v : new Date(v);
-  return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10);
-};
+/** The `users` row for a number, or a new one. Looks first: nothing here
+    enforces one row per number any more. */
+async function findOrCreateUser(cc, number) {
+  const find = async () => (await io.getRows(T.users))
+    .find((u) => digits(u.countryCode) === cc && digits(u.number) === number);
 
-/** Find the Members row for a number, or create one. */
+  const existing = await find();
+  if (existing) return existing;
+
+  await io.insert(T.users, { number, countryCode: '+' + cc, is_member: true });
+  const fresh = await find();
+  if (!fresh) throw new Error('The login row was created but could not be read back.');
+  return fresh;
+}
+
+/** `membersExtra` for a member, created when missing. `id` is the member's
+    ROWID — that is how the two are joined. */
+async function ensureExtra(memberRowId) {
+  const find = async () => (await io.getRows(T.membersExtra)).find((x) => same(x.id, memberRowId));
+  const existing = await find();
+  if (existing) return existing;
+
+  await io.insert(T.membersExtra, { id: String(memberRowId), form_submit: false, video_consent_submit: 0 });
+  clearCache();
+  const fresh = await find();
+  if (!fresh) throw new Error('The extra row was created but could not be read back.');
+  return fresh;
+}
+
+/** The members row for a number, or create the user, member and extra rows. */
 export async function findOrCreateMember(mobile, details = {}) {
-  const key = phoneKeyOf(mobile);
-  const existing = (await getRows(NOAH_TABLES.Members)).find((m) => m.phoneKey === key);
+  const { cc, number } = splitPhone(mobile);
+  if (!number) throw new Error('That is not a mobile number.');
+
+  const user = await findOrCreateUser(cc, number);
+
+  const findMember = async () => {
+    const all = await io.getRows(T.members);
+    return all.find((m) => same(m.userId, user.ROWID))
+      || all.find((m) => digits(m.countryCode) === cc && digits(m.mobileNumber1) === number);
+  };
+
+  let member = await findMember();
+  if (!member) {
+    await io.insert(T.members, {
+      userId: String(user.ROWID),
+      countryCode: '+' + cc,
+      mobileNumber1: number,
+      /* Not verified until the office says so. */
+      isUnVerified: true,
+      isKid: false,
+      archived: false,
+    });
+    /* DO NOT use the ROWID from the insert response. Catalyst returns it
+       unquoted there, so JSON.parse makes it a Number, and a Catalyst ROWID is
+       past Number.MAX_SAFE_INTEGER — the last digits come back wrong, and as a
+       foreign key it fails with an error that never mentions rounding. Reading
+       the row back gives the id as a quoted string, intact. */
+    member = await findMember();
+    if (!member) throw new Error('The member row was created but could not be read back.');
+    /* Rows the app creates carry id = ROWID. */
+    await io.update(T.members, { ROWID: String(member.ROWID), id: String(member.ROWID) });
+  }
+
+  await ensureExtra(member.ROWID);
 
   const fields = {
-    countryCode: key.slice(0, 3),
-    mobileNumber: key.slice(3),
     ...(details.firstName !== undefined ? { firstName: details.firstName } : {}),
     ...(details.middleName !== undefined ? { middleName: details.middleName } : {}),
     ...(details.lastName !== undefined ? { lastName: details.lastName } : {}),
-    ...(details.email ? { email: details.email } : {}),
-    ...(details.gender ? { gender: details.gender } : {}),
-    ...(asDay(details.dob) ? { dob: asDay(details.dob) } : {}),
+    ...(details.email ? { emailId1: details.email } : {}),
+    ...(genderCode(details.gender) ? { gender: genderCode(details.gender) } : {}),
+    ...(asDay(details.dob) ? { dateOfBirth: asDay(details.dob) } : {}),
     ...(details.marital ? { maritalStatus: details.marital } : {}),
     ...(details.salutation ? { salutation: details.salutation } : {}),
-    ...(details.reference ? { referenceName: details.reference } : {}),
-    ...(details.country ? { nationality: details.country } : {}),
+    ...(details.reference ? { referBy: details.reference } : {}),
   };
-
-  if (existing) {
-    await update(NOAH_TABLES.Members, { ROWID: existing.ROWID, ...fields });
-    clearCache();
-    return String(existing.ROWID);
+  if (Object.keys(fields).length) {
+    await io.update(T.members, { ROWID: String(member.ROWID), ...fields });
   }
 
-  await insert(NOAH_TABLES.Members, {
-    phoneKey: key,
-    isKid: false,
-    isArchived: false,
-    /* No status until the office approves. A status here would open the app. */
-    ...fields,
-  });
   clearCache();
-
-  /* DO NOT use the ROWID from the insert response.
-
-     Catalyst returns it unquoted there, so JSON.parse makes it a Number —
-     and a Catalyst ROWID (27145000000069452) is past Number.MAX_SAFE_INTEGER,
-     so the last digits are silently wrong. Using it as a foreign key fails
-     with "Invalid Foreign key value for column memberRowId", which does not
-     obviously point at a rounding problem.
-
-     Reading the row back gives the id as a quoted string, intact. */
-  const fresh = (await getRows(NOAH_TABLES.Members)).find((m) => m.phoneKey === key);
-  if (!fresh) throw new Error('The member row was created but could not be read back.');
-  return String(fresh.ROWID);
+  return String(member.ROWID);
 }
-
-/** Their ID table has a column per type; put the number in the right one. */
-const ID_COLUMN_FOR = {
-  aadhaar: 'aadhaar', pan: 'pan', passport: 'passport',
-  'driving licence': 'drivingLicence', dl: 'drivingLicence',
-  'voter id': 'voterId', voter: 'voterId',
-  'emirates id': 'emiratesId',
-};
 
 /**
  * Store a registration submitted from the app.
- * Returns the new Registrations ROWID, which is the id the console shows.
+ * Returns the new appRegistrations ROWID, which is the id the console shows.
  */
 export async function createRegistrationInNoah(v) {
   const memberRowId = await findOrCreateMember(v.mobile, v);
   if (!memberRowId) throw new Error('Could not create the member row for this number.');
 
-  const when = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  /* Both lookups at once; each is a full table scan and there is no reason
-     to wait for one before starting the other. */
-  const [addresses, identities] = await Promise.all([
-    getRows(NOAH_TABLES.MemberAddresses),
-    getRows(NOAH_TABLES.MemberIdentity),
-  ]);
-  const existingAddress = addresses.find((a) => a.memberRowId === memberRowId);
-  const existingIdentity = identities.find((i) => i.memberRowId === memberRowId);
-
-  /* step 2, address */
-  const address = {
-    memberRowId,
-    type: 'residence',
-    addressLine: v.line1 || '',
+  /* step 2 (address) and step 3 (the ID number) are columns of the member */
+  const idColumn = idTypeFor(v.idType)?.column;
+  await io.update(T.members, {
+    ROWID: memberRowId,
+    address: v.line1 || '',
     area: v.line2 || '',
     city: v.city || '',
     state: v.region || '',
     country: v.country || '',
     pincode: v.pin || '',
-  };
-  if (existingAddress) await update(NOAH_TABLES.MemberAddresses, { ROWID: existingAddress.ROWID, ...address });
-  else await insert(NOAH_TABLES.MemberAddresses, address);
+    ...(idColumn && v.idNumber ? { [idColumn]: v.idNumber } : {}),
+  });
 
-  /* step 3, the ID number, into its own column */
-  const column = ID_COLUMN_FOR[String(v.idType || '').toLowerCase()];
-  if (column && v.idNumber) {
-    const identity = { memberRowId, [column]: v.idNumber };
-    if (existingIdentity) await update(NOAH_TABLES.MemberIdentity, { ROWID: existingIdentity.ROWID, ...identity });
-    else await insert(NOAH_TABLES.MemberIdentity, identity);
-  }
-
-  /* the review record itself. `submittedAt` is what puts it in the office's
-     queue — a draft without it is someone still filling the form in. */
-  const created = await insert(NOAH_TABLES.Registrations, {
+  const now = stamp();
+  const row = {
     memberRowId,
-    status: 'draft',
-    submittedAt: when,
-    declarationAccepted: !!v.agreed,
-    declarationLanguage: v.declarationLang || 'en',
-    declarationAcceptedAt: when,
-    signatureText: v.signature || '',
+    /* `pending` is the queue the office works from. */
+    status: 'pending',
+    submittedAt: now,
+    nationality: v.country || '',
     idProofType: String(v.idType || '').toLowerCase(),
+    signatureText: v.signature || '',
+    declarationAccepted: !!v.agreed,
+    declarationAcceptedAt: now,
+    declarationLanguage: v.declarationLang || 'en',
     videoSeconds: Number(v.videoSecs || 0) || null,
     videoLanguage: v.declarationLang || 'en',
     profileVerified: false,
-  });
+  };
 
+  /* A number that has asked for an OTP already has a `draft` registration.
+     Fill that in rather than leaving an empty draft beside a second row. */
+  const mine = (await io.getRows(T.appRegistrations))
+    .filter((r) => same(r.memberRowId, memberRowId))
+    .sort((a, b) => when(b) - when(a));
+  const draft = mine.find((r) => stateOf(r.status) === 'draft');
+
+  if (draft) {
+    await io.update(T.appRegistrations, { ROWID: String(draft.ROWID), ...row });
+    clearCache();
+    return String(draft.ROWID);
+  }
+
+  await io.insert(T.appRegistrations, row);
   clearCache();
 
-  /* Same precision trap as above: read the row back rather than trusting the
-     unquoted ROWID in the insert response. */
-  const fresh = (await getRows(NOAH_TABLES.Registrations))
-    .filter((r) => r.memberRowId === memberRowId)
-    .sort((a, b) => String(b.CREATEDTIME).localeCompare(String(a.CREATEDTIME)))[0];
-  return fresh ? String(fresh.ROWID) : (Array.isArray(created) ? String(created[0]?.ROWID) : String(created?.ROWID));
+  /* Same precision trap as above: read the row back. */
+  const fresh = (await io.getRows(T.appRegistrations))
+    .filter((r) => same(r.memberRowId, memberRowId))
+    .sort((a, b) => when(b) - when(a))[0];
+  if (!fresh) throw new Error('The registration was created but could not be read back.');
+  return String(fresh.ROWID);
 }
 
-/** Has this person been approved, and may the app open for them?
+/* ---------- member roles ----------
 
-    Deliberately strict: it must find positive evidence of approval. A missing
-    or unrecognised status is treated as "not approved", because the cost of
-    guessing wrong is letting a stranger into the congregation's app. */
-export function canEnterApp(member, registration) {
-  if (!member) return false;
-  if (String(member.rawStatus ?? '').toLowerCase() === MEMBER_ACTIVE) return true;
-  /* For members approved before the status column was being written. */
-  return String(registration?.rawStatus ?? '').toLowerCase() === 'approved';
-}
+   A member's roles are spread over two tables: `memberType` on members, and
+   the flags on membersExtra. The rest of the console sees one merged row. */
 
-/* ---------- member roles ---------- */
-
-/** The MemberRoles row for a member, creating it if there is not one. */
+/** The member's roles as one row, or null when there is no such member. */
 export async function memberRolesRow(memberRowId, { create = false } = {}) {
-  const rows = await getRows(NOAH_TABLES.MemberRoles);
-  const existing = rows.find((r) => String(r.memberRowId) === String(memberRowId));
-  if (existing || !create) return existing ?? null;
-
-  await insert(NOAH_TABLES.MemberRoles, {
-    memberRowId,
-    /* Everyone approved is a church member. Nothing else is assumed. */
-    isChurchMember: true,
-    memberType: 'member',
-  });
-  clearCache();
-  const fresh = (await getRows(NOAH_TABLES.MemberRoles))
-    .find((r) => String(r.memberRowId) === String(memberRowId));
-  return fresh ?? null;
+  if (create) await ensureExtra(memberRowId);
+  const { members, extras } = await snapshot();
+  const m = members.find((x) => same(x.ROWID, memberRowId));
+  if (!m) return null;
+  const x = extras.find((e) => same(e.id, memberRowId));
+  return { ...(x || {}), memberType: m.memberType ?? null, memberRowId: String(m.ROWID) };
 }
 
-/** Apply a set of column changes to a member's roles. */
+/** Apply a set of role changes. `memberType` belongs to members; everything
+    else is a flag on membersExtra. */
 export async function patchMemberRoles(memberRowId, patch) {
-  const row = await memberRolesRow(memberRowId, { create: true });
-  if (!row) throw new Error('Could not find or create the roles row for this member.');
-  await update(NOAH_TABLES.MemberRoles, { ROWID: row.ROWID, ...patch });
+  const { memberType, ...flags } = patch;
+
+  if ('memberType' in patch) {
+    await io.update(T.members, { ROWID: String(memberRowId), memberType });
+  }
+  if (Object.keys(flags).length) {
+    const extra = await ensureExtra(memberRowId);
+    await io.update(T.membersExtra, { ROWID: String(extra.ROWID), ...flags });
+  }
   clearCache();
-  return (await getRows(NOAH_TABLES.MemberRoles))
-    .find((r) => String(r.ROWID) === String(row.ROWID)) ?? null;
+  return memberRolesRow(memberRowId);
 }
 
 /** Everyone's roles, keyed by member row id, for the list screens. */
 export async function allMemberRoles() {
-  const rows = await getRows(NOAH_TABLES.MemberRoles);
-  const byMember = new Map();
-  for (const r of rows) byMember.set(String(r.memberRowId), r);
-  return byMember;
+  const { members, extras } = await snapshot();
+  const extraOf = new Map(extras.map((x) => [String(x.id), x]));
+  const out = new Map();
+  for (const m of members) {
+    out.set(String(m.ROWID), {
+      ...(extraOf.get(String(m.ROWID)) || {}),
+      memberType: m.memberType ?? null,
+      memberRowId: String(m.ROWID),
+    });
+  }
+  return out;
 }
 
+/* ---------- decisions, written straight to the tables ----------
+
+   THESE ARE THE FALLBACK. Decisions belong to the Noah API, which also sends
+   the email and the push; editing the tables does neither, and the member is
+   left on the waiting screen with no idea. The routes call these only when
+   NOAH_ADMIN_API_KEY is not set, and say so in the reply.
+
+   What the API itself does, per ADMIN.md §4, is the shape of each. */
+
+/** Approve: the registration, and the member as the office's tools see them. */
 export async function approveInNoah({ registration, staffName, remark }) {
-  const when = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const at = stamp();
 
-  /* The member first. A member marked active whose registration still says
-     pending is recoverable; a registration marked approved pointing at a
-     member who cannot sign in is a person locked out with no trace. */
-  await update(NOAH_TABLES.Members, {
-    ROWID: registration.memberRowId,
-    status: MEMBER_ACTIVE,
-    joinedOn: when.slice(0, 10), /* already YYYY-MM-DD */
+  /* The member first. Access follows the registration, so a member marked
+     verified whose registration still says pending is simply not let in yet —
+     recoverable. The reverse is not: approved, but the office's own tools
+     still show them unverified. */
+  await io.update(T.members, {
+    ROWID: String(registration.memberRowId),
+    isUnVerified: false,
+    verifiedOn: at,
   });
-
-  await update(NOAH_TABLES.Registrations, {
-    ROWID: registration.rowId,
+  await io.update(T.appRegistrations, {
+    ROWID: String(registration.rowId),
     status: 'approved',
-    reviewedAt: when,
+    reviewedAt: at,
     reviewNote: remark || `Approved by ${staffName}`,
     profileVerified: true,
-    profileVerifiedAt: when,
+    profileVerifiedAt: at,
   });
-
-  /* Everyone approved becomes an ordinary church member. Anything beyond
-     that — pastor, cell leader, prayer warrior — is given deliberately
-     afterwards, never as a side effect of being let in. */
-  await memberRolesRow(registration.memberRowId, { create: true });
 
   clearCache();
   /* `id` as well as `memberRowId`: the same value here, but the contract and
      the app both ask for `id`. */
   return {
-    id: registration.memberRowId,
-    memberRowId: registration.memberRowId,
-    status: MEMBER_ACTIVE,
+    id: String(registration.memberRowId),
+    memberRowId: String(registration.memberRowId),
+    status: 'approved',
     roles: ['member'],
   };
 }
 
-export async function returnVideoInNoah({ registration, staffName, remark }) {
-  const when = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-  /* Their schema has no `videoReturned` status — the agreed vocabulary is
-     `draft` then `approved` (see docs/SCHEMA-RECONCILIATION.md). Until that
-     conversation happens, returning sends it back to `draft` with the reason
-     in reviewNote, and clears the video so the app asks for it again. That is
-     reversible and loses nothing; inventing a status word they do not read
-     would quietly break their app. */
-  await update(NOAH_TABLES.Registrations, {
-    ROWID: registration.rowId,
-    status: 'draft',
-    reviewedAt: when,
+/** Send the video back. Only the registration changes. */
+export async function returnVideoInNoah({ registration, remark }) {
+  await io.update(T.appRegistrations, {
+    ROWID: String(registration.rowId),
+    status: 'videoReturned',
+    reviewedAt: stamp(),
     reviewNote: remark,
-    submittedAt: null,
-    videoFileId: null,
-    videoSeconds: null,
   });
-
-  /* Make sure they cannot get in while the video is outstanding. */
-  await update(NOAH_TABLES.Members, {
-    ROWID: registration.memberRowId,
-    status: 'pending',
-  });
-
   clearCache();
-  return { status: 'draft', remark };
+  return { status: 'videoReturned', remark };
 }
 
-/** Row counts for every table, for the survey screen. */
+/** Reject. Only the registration changes. */
+export async function rejectInNoah({ registration, remark }) {
+  await io.update(T.appRegistrations, {
+    ROWID: String(registration.rowId),
+    status: 'rejected',
+    reviewedAt: stamp(),
+    reviewNote: remark,
+  });
+  clearCache();
+  return { status: 'rejected', remark };
+}
+
+/** The member side of an approval, when the API has already decided.
+
+    The API sets `isUnVerified = false` and `verifiedOn` itself. This only
+    mends it if that did not land, so the office's own tools do not show an
+    approved member as unverified. A repair, never the normal path. */
+export async function activateMemberOnly(memberRowId) {
+  await io.update(T.members, {
+    ROWID: String(memberRowId),
+    isUnVerified: false,
+    verifiedOn: stamp(),
+  });
+  clearCache();
+  return { memberRowId: String(memberRowId), status: 'approved' };
+}
+
+/* Translate a console-shaped patch into appRegistrations' columns.
+
+   The console speaks `state`, `videoSecs`, `remark`; the table has `status`,
+   `videoSeconds`, `reviewNote`. Passing the console's names straight through
+   made Catalyst reject the whole request — which is how a re-recorded video
+   came to hang instead of saving. Unrecognised fields are dropped, because one
+   unknown column fails the entire write and takes the good fields with it. */
+export async function patchRegistrationInNoah(registration, patch) {
+  const out = { ROWID: String(registration.rowId) };
+
+  for (const [k, v] of Object.entries(patch)) {
+    switch (k) {
+      case 'state':
+        out.status = v;
+        if (v === 'pending') {
+          out.submittedAt = patch.submittedAt || stamp();
+          /* The reason it came back is spent once they act on it. */
+          out.reviewNote = '';
+        }
+        break;
+      case 'videoSecs': out.videoSeconds = Number(v) || null; break;
+      case 'remark': out.reviewNote = v; break;
+      case 'submittedAt': out.submittedAt = v; break;
+      case 'decidedAt': out.reviewedAt = v; break;
+      case 'profileVerified': out.profileVerified = v; break;
+      /* `videoFile` is a filename from the app. The file itself is a `files`
+         row, and writing a name into videoFileId would put a name where an id
+         belongs. */
+      default: break;
+    }
+  }
+
+  await io.update(T.appRegistrations, out);
+  clearCache();
+  return out;
+}
+
+/* ---------- housekeeping ---------- */
+
+/** Row counts for the tables the console uses, for the survey screen. */
 export async function surveyTables() {
-  const names = Object.keys(NOAH_TABLES);
   const out = [];
-  for (const name of names) {
+  for (const name of Object.keys(NOAH_TABLES)) {
     try {
-      const rows = await getRows(NOAH_TABLES[name], { max: 1000 });
+      const rows = await io.getRows(NOAH_TABLES[name], { max: 1000 });
       out.push({ table: name, rows: rows.length, sample: rows[0] ?? null });
     } catch (err) {
       out.push({ table: name, rows: null, error: err.message });
@@ -560,77 +769,56 @@ export async function surveyTables() {
   return out.sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
 }
 
-/* The member half of an approval, without touching Registrations.
+/* Columns this code reads or writes, per table. `check:schema` looks for each
+   in a real row. If the Catalyst developer renames one, this says which. */
+export const EXPECTED_COLUMNS = {
+  users: ['number', 'countryCode', 'is_member', 'is_admin', 'is_super_admin', 'archived'],
+  members: [
+    'id', 'userId', 'countryCode', 'mobileNumber1', 'isUnVerified', 'verifiedOn', 'memberId',
+    'salutation', 'firstName', 'middleName', 'lastName', 'emailId1', 'gender', 'dateOfBirth',
+    'maritalStatus', 'referBy', 'address', 'area', 'city', 'state', 'country', 'pincode',
+    'aadharNo', 'panNo', 'passportNumber', 'voterId', 'drivingLicense', 'emiratesID',
+    'photo', 'archived', 'isKid', 'memberType', 'dateOfJoining', 'language',
+  ],
+  membersExtra: [
+    'id', 'isChurchMember', 'isLeader', 'isPrayerWarrior', 'isPartner', 'isPassScan',
+    'isBusCoordinator', 'isTranslator', 'isAvailableForMatrimony', 'isVIPMember', 'isBaptised',
+    'allowRewards', 'isBlockedFromComment', 'isAlertList', 'alertListComment',
+    'connectedPastor', 'connectedLeader', 'form_submit', 'video_consent_submit',
+  ],
+  files: ['uid', 'path', 'extension', 'size', 'fileType', 'remoteSource', 'archived', 'uploadedAt', 'isPublic'],
+  appRegistrations: [
+    'memberRowId', 'status', 'reviewNote', 'reviewedAt', 'submittedAt', 'nationality',
+    'idProofType', 'idProofFileId', 'signatureText', 'declarationAccepted',
+    'declarationAcceptedAt', 'declarationLanguage', 'videoFileId', 'videoSeconds',
+    'videoBytes', 'videoLanguage', 'videoConsentState', 'profileVerified', 'profileVerifiedAt',
+  ],
+};
 
-   When the Noah API makes the decision it also writes the registration and
-   emails the member, so this end must not write `Registrations.status` —
-   doing that again would be the silent approval the API exists to prevent.
+/** Do the ids still point at the tables they name, and do the columns exist? */
+export async function verifySchema() {
+  const live = await io.listTables();
+  const byName = new Map(live.map((t) => [t.name, t.id]));
+  const report = [];
 
-   What the API does to the *member* row is its business and may change, so
-   rather than assume, the approve route checks afterwards whether the member
-   can actually get in and calls this only if they cannot. It is a repair, not
-   part of the normal path. */
-export async function activateMemberOnly(memberRowId) {
-  const when = new Date().toISOString().slice(0, 10);
-  await update(NOAH_TABLES.Members, {
-    ROWID: memberRowId,
-    status: MEMBER_ACTIVE,
-    joinedOn: when,
-  });
-  await memberRolesRow(memberRowId, { create: true });
-  clearCache();
-  return { memberRowId, status: MEMBER_ACTIVE };
-}
-
-/* Translate a console-shaped patch into this schema's columns.
-
-   The console speaks `state`, `videoSecs`, `remark`; this project's table has
-   `status`, `videoSeconds`, `reviewNote`. Passing the console's names straight
-   through made Catalyst reject the whole request — which is how a re-recorded
-   video came to hang instead of saving.
-
-   Only the fields that are actually sent are translated. Anything unrecognised
-   is dropped rather than passed along, because one unknown column fails the
-   entire write and takes the known-good fields down with it. */
-export async function patchRegistrationInNoah(registration, patch) {
-  const when = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  const out = { ROWID: registration.rowId };
-
-  for (const [k, v] of Object.entries(patch)) {
-    switch (k) {
-      case 'state':
-        /* 'pending' is not a status in this schema: it is a draft that has
-           been submitted. See consoleState. */
-        if (v === 'pending') {
-          out.status = 'draft';
-          out.submittedAt = patch.submittedAt || when;
-          /* The reason it came back is spent once they act on it; leaving it
-             would keep the registration reading as returned for ever. */
-          out.reviewNote = '';
-          out.reviewedAt = null;
-        } else if (v === 'approved') {
-          out.status = 'approved';
-        } else if (v === 'videoReturned') {
-          out.status = 'draft';
-          out.reviewedAt = when;
-        } else {
-          out.status = v;
+  for (const [name, id] of Object.entries(NOAH_TABLES)) {
+    const liveId = byName.get(name);
+    const entry = { table: name, id, liveId: liveId || null, idOk: liveId === id, rows: null, missing: [], checked: false };
+    if (entry.idOk) {
+      try {
+        const rows = await io.getRows(id, { max: 5 });
+        entry.rows = rows.length;
+        const want = EXPECTED_COLUMNS[name];
+        /* Column names are only visible on a row, so an empty table cannot be
+           checked — say so rather than passing it. */
+        if (want && rows.length) {
+          entry.checked = true;
+          const have = new Set(rows.flatMap((r) => Object.keys(r)));
+          entry.missing = want.filter((c) => !have.has(c));
         }
-        break;
-      case 'videoSecs': out.videoSeconds = Number(v) || null; break;
-      case 'remark': out.reviewNote = v; break;
-      case 'submittedAt': out.submittedAt = v; break;
-      case 'decidedAt': out.reviewedAt = v; break;
-      case 'profileVerified': out.profileVerified = v; break;
-      /* `videoFile` is a filename from the app. There is no column for one
-         here — the file itself lives in the Files table — and writing it into
-         videoFileId would put a name where an id belongs. */
-      case 'videoFile': case 'memberId': case 'decidedBy': break;
-      default: break;
+      } catch (err) { entry.error = err.message; }
     }
+    report.push(entry);
   }
-
-  await update(NOAH_TABLES.Registrations, out);
-  clearCache();
-  return out;
+  return report;
 }
