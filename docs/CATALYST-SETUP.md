@@ -194,3 +194,79 @@ code, and they work. They are simply dormant until `.env.local` exists.
 
 > That client secret passed through a chat message. **Regenerate it** in the
 > API console rather than reusing it on the new project.
+
+---
+
+# Reading the uploads: the File Store scope
+
+## The symptom
+
+Opening a photograph, ID proof or KYC video in a registration returns **403**,
+and the console says the token has no File Store scope.
+
+## What is actually wrong
+
+Nothing is missing in Catalyst. The files are there — 33 of them, 11 photos,
+11 ID proofs, 11 videos, every one with a `catalystFileId` in the `Files`
+table. The console knows which file belongs to which registration.
+
+The refresh token simply cannot read them. It was issued with five scopes:
+
+```
+ZohoCatalyst.tables.READ
+ZohoCatalyst.tables.rows.CREATE
+ZohoCatalyst.tables.rows.READ
+ZohoCatalyst.tables.rows.UPDATE
+ZohoCatalyst.tables.rows.DELETE
+```
+
+Tables only. Every File Store route answers the same way:
+
+```
+401 {"error_code":"OAUTH_SCOPE_MISMATCH","message":"invalid oauth scope to access this URL"}
+```
+
+That is true of listing folders, reading one folder, listing its files, and
+downloading a file by id — checked individually with
+`npm run probe:filestore`. Knowing the folder id does not help: the refusal is
+about the token, not about finding the folder.
+
+## The fix
+
+Add two scopes and exchange a new code. Five minutes, in your own API console.
+
+1. `npm run catalyst:scopes` — prints the full list to paste.
+2. Go to <https://api-console.zoho.in/>, open the Self Client, **Generate
+   Code** with that scope string. Pick a long duration.
+3. `node server/catalyst.js --exchange <code>`
+4. Restart the API server.
+
+Then `npm run probe:filestore` should download rather than refuse, and the
+video opens in the registration drawer.
+
+### Two things that have caught us before
+
+**The code is single use and expires in minutes.** `--exchange` writes the
+refresh token straight into `.env.local` rather than printing it for someone
+to copy, because a mistyped paste means starting over with a fresh code.
+
+**The API console accepts a scope it does not recognise and then silently
+drops it.** That is how the ZCQL scope was lost — it looked granted and was
+not. So `--exchange` now reads back what was actually granted and fails loudly
+if anything asked for is missing. If `ZohoCatalyst.files.READ` comes back in
+that "NOT granted" list, tick it by hand in the console's own scope tree
+instead of pasting it.
+
+## Why there are two folder paths
+
+Listing folders needs `folders.READ`; going straight to a known folder needs
+only `files.READ`. `CATALYST_FILE_FOLDER_ID` in `.env.local` holds the folder
+the uploads live in, so `downloadFile` tries it directly first and only falls
+back to listing. One missing scope then need not stop the other working.
+
+## The other way round
+
+If the Catalyst developer sends `ADMIN_API_KEY.txt`, none of this is needed:
+`GET /admin/files/:id` on the Noah API reads the same files with the admin key
+and no Catalyst scope at all. See [NOAH-API.md](NOAH-API.md). Either route
+fixes it; the scope is the one you can do without waiting for anyone.

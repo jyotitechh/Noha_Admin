@@ -18,6 +18,7 @@ import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Field, Icon, Kpi, Kpis, Note, Who, Age, Failed, Loading, Empty, Kv } from '@/components/ui';
 import { fd, fdt, REG_STATE, since } from '@/lib/format';
 import type { Registration } from '@/lib/types';
+import { Upload } from '@/components/Upload';
 
 const LANG = { en: 'English', hi: 'हिन्दी Hindi', mr: 'मराठी Marathi' } as const;
 
@@ -63,13 +64,8 @@ function Steps({ r }: { r: Registration }) {
             ['Type', r.idType],
             ['Number', <span key="num" className="mono">{r.idNumber}</span>],
           ]} />
-          <div className="filebox mt12">
-            <Icon name="file-text" />
-            <div className="grow">
-              <b>{r.idFile}</b>
-              {Math.round(r.idSizeKb)} KB · uploaded from the app
-            </div>
-            <span className="chip plain">No file storage in this build</span>
+          <div className="mt12">
+            <Upload registrationId={r.id} kind="id" filename={r.idFile} sizeKb={Math.round(r.idSizeKb)} />
           </div>
         </div>
       </div>
@@ -78,17 +74,8 @@ function Steps({ r }: { r: Registration }) {
         <span className="n">4</span>
         <div className="body">
           <h4>Photograph</h4>
-          <div className="row">
-            <div className="filebox photo">
-              <Icon name="sil" />
-              <span className="xs">Photo</span>
-            </div>
-            <div className="grow small muted">
-              <b className="ink2" style={{ display: 'block' }}>{r.photoFile}</b>
-              {Math.round(r.photoSizeKb)} KB
-              <div className="mt8">Check it against the face on the ID document.</div>
-            </div>
-          </div>
+          <Upload registrationId={r.id} kind="photo" filename={r.photoFile} sizeKb={Math.round(r.photoSizeKb)} />
+          <p className="small muted mt8 mb0">Check it against the face on the ID document.</p>
         </div>
       </div>
 
@@ -120,14 +107,7 @@ function Steps({ r }: { r: Registration }) {
             Video KYC
             {r.videoAttempt > 1 && <Chip tone="warn">Attempt {r.videoAttempt}</Chip>}
           </h4>
-          <div className="filebox video">
-            <Icon name="video" />
-            <div className="grow">
-              <b>{r.videoFile}</b>
-              {r.videoSecs} seconds · recorded on the front camera
-            </div>
-            <span className="chip plain">No file storage in this build</span>
-          </div>
+          <Upload registrationId={r.id} kind="video" filename={r.videoFile} seconds={r.videoSecs} />
           <p className="small muted mt12 mb0">What the member was asked to read:</p>
           <div className="script mt8">“{r.script}”</div>
         </div>

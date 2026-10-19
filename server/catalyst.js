@@ -15,16 +15,13 @@
    To get the last three:
 
      1. Go to https://api-console.zoho.in/ and create a **Self Client**.
-     2. Generate a code with these scopes, comma separated:
-          ZohoCatalyst.tables.READ,
-          ZohoCatalyst.tables.rows.CREATE,
-          ZohoCatalyst.tables.rows.READ,
-          ZohoCatalyst.tables.rows.UPDATE,
-          ZohoCatalyst.tables.rows.DELETE,
-        Pick a long duration; you exchange it once.
+     2. Generate a code with the scopes `node server/catalyst.js --scopes`
+        prints. Pick a long duration; you exchange it once.
      3. Exchange the code for a refresh token:
           node server/catalyst.js --exchange <code>
-        and put the refresh_token it prints into .env.local.
+        It writes straight into .env.local and then reads back which scopes
+        were actually granted — the console accepts an unrecognised scope and
+        silently drops it, so asking is not the same as having.
 
    The data centre is India (.in). For another DC change ACCOUNTS and API.
    ────────────────────────────────────────────────────────────────────────── */
@@ -54,6 +51,30 @@ const API = process.env.CATALYST_API_HOST || 'https://api.catalyst.zoho.in';
 export const PROJECT_ID = process.env.CATALYST_PROJECT_ID || '';
 export const ORG_ID = process.env.CATALYST_ORG_ID || '';
 
+/* What the console needs from Catalyst.
+
+   The two File Store scopes are what make the members' photographs, ID proofs
+   and KYC videos readable. Without them every File Store route answers
+   OAUTH_SCOPE_MISMATCH — the folder id does not help, because the refusal is
+   about the token, not about finding the folder.
+
+   Read-only on files and folders: the console shows uploads, it never writes
+   or deletes them. */
+export const SCOPES = [
+  'ZohoCatalyst.tables.READ',
+  'ZohoCatalyst.tables.rows.CREATE',
+  'ZohoCatalyst.tables.rows.READ',
+  'ZohoCatalyst.tables.rows.UPDATE',
+  'ZohoCatalyst.tables.rows.DELETE',
+  'ZohoCatalyst.folders.READ',
+  'ZohoCatalyst.files.READ',
+];
+
+/* The File Store folder the uploads live in. Listing folders needs
+   `folders.READ`; going straight to a known folder needs only `files.READ`.
+   Knowing the id means one missing scope need not stop the other working. */
+export const FILE_FOLDER_ID = process.env.CATALYST_FILE_FOLDER_ID || '';
+
 /** True when there is enough configuration to try. */
 export const configured = () =>
   !!(PROJECT_ID && ORG_ID && process.env.CATALYST_REFRESH_TOKEN &&
@@ -66,7 +87,7 @@ export const configured = () =>
 let token = null;
 let tokenExpires = 0;
 
-async function accessToken() {
+export async function accessToken() {
   if (token && Date.now() < tokenExpires - 60_000) return token;
 
   const url = new URL(ACCOUNTS + '/oauth/v2/token');
@@ -167,6 +188,84 @@ export async function getRows(tableId, { max = 2000 } = {}) {
 export const getRow = (tableId, rowId) =>
   call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row/${rowId}`);
 
+/* ---------- File Store ----------
+
+   The Files table records a `catalystFileId` but not which folder holds it,
+   and the download URL needs both. So the folders are listed once and cached,
+   and a file is looked for across them.
+
+   This needs a File Store scope. A self client granted only the table scopes
+   gets OAUTH_SCOPE_MISMATCH here, which `fileScopeMissing` reports so the
+   console can say so rather than showing a broken player. */
+
+let folderCache = null;
+let folderError = '';
+
+export const fileScopeMissing = () => folderError;
+
+export async function listFolders() {
+  if (folderCache) return folderCache;
+  try {
+    const data = await call(`/baas/v1/project/${PROJECT_ID}/folder`);
+    folderCache = Array.isArray(data) ? data : [];
+    folderError = '';
+    return folderCache;
+  } catch (err) {
+    folderError = /scope/i.test(err.message)
+      ? 'The Catalyst token has no File Store scope, so uploads cannot be read.'
+      : err.message;
+    throw new Error(folderError);
+  }
+}
+
+/**
+ * Fetch one file's bytes.
+ * Returns { buffer, contentType } or throws with a readable reason.
+ */
+export async function downloadFile(fileId) {
+  const at = await accessToken();
+
+  const tryFolder = async (folderId) => {
+    const res = await fetch(
+      `${API}/baas/v1/project/${PROJECT_ID}/folder/${folderId}/file/${fileId}/download`,
+      { headers: { authorization: 'Zoho-oauthtoken ' + at, 'CATALYST-ORG': ORG_ID } },
+    );
+    if (res.ok) {
+      return {
+        buffer: Buffer.from(await res.arrayBuffer()),
+        contentType: res.headers.get('content-type') || 'application/octet-stream',
+      };
+    }
+    /* A scope refusal is about the token, so trying more folders is pointless
+       and would just repeat the same 401 once per folder. */
+    if (res.status === 401) {
+      const body = await res.text();
+      if (/OAUTH_SCOPE_MISMATCH/i.test(body)) {
+        folderError = 'The Catalyst token has no File Store scope, so uploads cannot be read.';
+        throw new Error(folderError);
+      }
+    }
+    return null;
+  };
+
+  /* Straight to the known folder first: that needs `files.READ` alone, where
+     listing folders also needs `folders.READ`. */
+  if (FILE_FOLDER_ID) {
+    const hit = await tryFolder(FILE_FOLDER_ID);
+    if (hit) return hit;
+  }
+
+  const folders = await listFolders();
+  if (!folders.length) throw new Error('There are no File Store folders in this project.');
+
+  for (const folder of folders) {
+    if (String(folder.id) === String(FILE_FOLDER_ID)) continue; /* already tried */
+    const hit = await tryFolder(folder.id);
+    if (hit) return hit;
+  }
+  throw new Error(`File ${fileId} was not found in any folder.`);
+}
+
 /** Insert rows into a table. */
 export const insert = (tableId, rows) =>
   call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row`, {
@@ -174,10 +273,12 @@ export const insert = (tableId, rows) =>
     body: JSON.stringify([].concat(rows)),
   });
 
-/** Update rows. Each must carry its ROWID. */
+/** Update rows. Each must carry its ROWID.
+    Catalyst uses PUT here; PATCH is refused with
+    "The http request method type is not a valid one". */
 export const update = (tableId, rows) =>
   call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row`, {
-    method: 'PATCH',
+    method: 'PUT',
     body: JSON.stringify([].concat(rows)),
   });
 
@@ -233,4 +334,29 @@ if (process.argv[2] === '--exchange') {
 
   console.log(`\n  Saved to .env.local (${body.refresh_token.slice(0, 12)}…).`);
   console.log('  Refresh tokens do not expire — this is done once.\n');
+
+  /* The API console accepts a scope it does not recognise and then quietly
+     leaves it out, so the only way to know what was really granted is to read
+     it back. This is how the ZCQL scope was lost without anyone noticing. */
+  const granted = String(body.scope || '').split(/[ ,]+/).filter(Boolean);
+  const missing = SCOPES.filter((s) => !granted.includes(s));
+
+  console.log('  Granted:');
+  for (const s of granted) console.log('    ' + s);
+
+  if (missing.length) {
+    console.log('\n  NOT granted — the console dropped these:');
+    for (const s of missing) console.log('    ' + s);
+    console.log('\n  Generate the code again and tick these by hand in the');
+    console.log('  self client\'s scope list rather than pasting them.\n');
+    process.exit(1);
+  }
+  console.log('\n  Everything asked for was granted.\n');
+}
+
+/* ---------- print the scope string to paste into the console ---------- */
+
+if (process.argv[2] === '--scopes') {
+  console.log('\n  Paste this into the self client, as one comma-separated line:\n');
+  console.log('  ' + SCOPES.join(',') + '\n');
 }

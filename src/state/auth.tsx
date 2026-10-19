@@ -16,7 +16,7 @@ interface AuthValue {
   loading: boolean;
   /** True when the signed-in role holds any one of `perm`. */
   can: (perm?: string | string[]) => boolean;
-  requestCode: (email: string) => Promise<{ name: string; devCode: string }>;
+  requestCode: (email: string, passphrase?: string) => Promise<{ name: string; devCode: string }>;
   verify: (email: string, code: string) => Promise<void>;
   viewAs: (role: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -37,8 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const requestCode = useCallback(async (email: string) => {
-    const r = await api.post<{ name: string; devCode: string }>('/auth/request-code', { email });
+  const requestCode = useCallback(async (email: string, passphrase?: string) => {
+    const r = await api.post<{ name: string; devCode: string }>('/auth/request-code', { email, passphrase });
     return r;
   }, []);
 

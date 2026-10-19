@@ -72,6 +72,8 @@ export const MODULES: ModuleDef[] = [
     tabs: [
       { id: 'registrations', label: 'App registrations', perm: 'members.edit', status: 'built',
         desc: 'New members who finished the six-step registration in the Noah app. Nothing opens for them until you approve it here.' },
+      { id: 'approved', label: 'Approved and history', perm: 'members.edit', status: 'built',
+        desc: 'Everyone the office has decided on: who was approved, who was asked to record their video again, by whom and when.' },
       { id: 'register', label: 'Member register', status: 'built',
         desc: 'Everyone on the roll, with their congregation, cell and pastor.' },
       { id: 'videocheck', label: 'Video checks', perm: 'members.edit', status: 'built',
@@ -96,7 +98,8 @@ export const MODULES: ModuleDef[] = [
       { id: 'roles', label: 'Roles', status: 'planned', from: 'App roles → Roles', desc: 'Member-side roles such as prayer warrior, cell leader and usher.' },
       { id: 'access', label: 'Feature access', status: 'planned', from: 'App roles → Feature access', desc: 'Which of the app’s 35 features each role reaches.' },
       { id: 'chat', label: 'Chat rules', status: 'planned', from: 'App roles → Chat rules', desc: 'Who may message whom, and what is kept.' },
-      { id: 'people', label: 'People and roles', status: 'planned', from: 'App roles → People and roles', desc: 'Which members hold which app role.' },
+      { id: 'people', label: 'People and roles', status: 'built',
+        desc: 'Who holds which role in the Noah app. Everyone approved starts as an ordinary member; pastor, cell leader and the rest are given here.' },
     ],
   },
   {

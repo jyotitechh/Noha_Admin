@@ -1,0 +1,53 @@
+# The Node API, for Render. The React console stays on Vercel.
+#
+# Render reads this when you create a Blueprint from the repository. Every
+# value below is safe to commit; every secret is marked `sync: false`, which
+# means Render asks you for it and stores it itself. None of them belong in
+# git — see docs/DEPLOY.md for what each one is.
+
+services:
+  - type: web
+    name: ksm-admin-api
+    runtime: node
+    plan: free
+    # The repo root is the admin console; the API is server/index.js in it.
+    buildCommand: npm install
+    startCommand: npm start
+    # Render restarts the service if this stops answering.
+    healthCheckPath: /api/health
+    envVars:
+      # --- which Catalyst project, and how to read it -------------------
+      - key: CATALYST_PROJECT_ID
+        value: "27145000000040056"
+      - key: CATALYST_ORG_ID
+        value: "60063007256"
+      - key: CATALYST_SCHEMA
+        value: noah
+      - key: CATALYST_FILE_FOLDER_ID
+        value: "27145000000071527"
+
+      # --- secrets: Render prompts for these, they are never in git -----
+      - key: CATALYST_CLIENT_ID
+        sync: false
+      - key: CATALYST_CLIENT_SECRET
+        sync: false
+      - key: CATALYST_REFRESH_TOKEN
+        sync: false
+
+      # --- the Catalyst developer's API --------------------------------
+      - key: NOAH_API_BASE
+        value: https://noah-backend-60063007256.development.catalystserverless.in/server/noah_api
+      - key: NOAH_ADMIN_API_KEY
+        sync: false
+
+      # --- who may call this API, and who may sign in -------------------
+      # Comma separated. Your Vercel domain, plus any custom domain later.
+      - key: ALLOWED_ORIGINS
+        value: https://noha-admin.vercel.app
+      # Without this, anyone who finds the URL can request a sign-in code and
+      # be handed it. Choose a long phrase; share it with the office only.
+      - key: ADMIN_PASSPHRASE
+        sync: false
+
+      - key: NODE_ENV
+        value: production

@@ -3,7 +3,16 @@
    Every screen goes through here, so swapping the mock API for a real backend
    is a change to BASE and to the sign-in calls, not to the screens. */
 
-const BASE = '/api';
+/* Where the API lives.
+
+   Empty in development: Vite proxies /api to localhost:4000, so same-origin.
+   In a deployment where the server is NOT on the same host — the console on
+   Vercel, the API elsewhere — set VITE_API_BASE at build time to that
+   server's origin, for example https://ksm-api.onrender.com
+
+   It is baked into the bundle at build time, so it must be a URL and never a
+   secret. Anything the browser holds, anyone can read. */
+const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '') + '/api';
 const TOKEN_KEY = 'ksm-admin-token';
 
 export const getToken = () => {
@@ -44,7 +53,28 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   const text = await res.text();
-  const body = text ? JSON.parse(text, revive) : null;
+
+  /* The API always answers JSON. Anything else means the request never
+     reached it — a host's own 404 page, a proxy error, a sign-in redirect.
+     Parsing that raw gives "Unexpected token 'T'", which sends you looking
+     for an expired token instead of a missing server. */
+  let body: ReturnType<typeof JSON.parse> = null;
+  if (text) {
+    try {
+      body = JSON.parse(text, revive);
+    } catch {
+      throw new ApiError(
+        res.status,
+        res.status === 404
+          ? `No API is running at ${BASE}${path}. The page is deployed but its server is not: ${
+            text.trim().slice(0, 80)
+          }`
+          : `The server replied with ${res.status} and something that is not JSON: ${
+            text.trim().slice(0, 80)
+          }`,
+      );
+    }
+  }
 
   if (!res.ok) {
     throw new ApiError(res.status, body?.error || `Request failed (${res.status}).`, {
@@ -75,6 +105,8 @@ export interface Page<T> {
      filter returned nothing. */
   notInProject?: boolean;
   message?: string;
+  /* Where to look instead, when there is somewhere. */
+  instead?: string | null;
 }
 
 export interface Queue {

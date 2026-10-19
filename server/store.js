@@ -15,7 +15,7 @@
    keep their signatures. */
 
 import { getRows, insert, update, configured } from './catalyst.js';
-import { loadRegistrations, loadMembers, surveyTables } from './noah-schema.js';
+import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, canEnterApp, registrationCore, createRegistrationInNoah, patchRegistrationInNoah } from './noah-schema.js';
 import { db, audit as memAudit } from './db.js';
 
 /* Table ids. Empty by default — set CATALYST_TABLE_* in .env.local for the
@@ -36,7 +36,7 @@ export const live = () => configured();
    Set CATALYST_SCHEMA=noah in .env.local for noah-backend. */
 export const schema = () => (process.env.CATALYST_SCHEMA || 'flat').toLowerCase();
 export const isNoah = () => live() && schema() === 'noah';
-export { surveyTables };
+export { surveyTables, canEnterApp };
 export const source = () => (live() ? 'catalyst' : 'memory');
 
 /* ---------- shaping ----------
@@ -171,7 +171,16 @@ export async function listRegistrations({ state, search } = {}) {
 
 export async function registrationById(regId) {
   if (!live()) return db.REGISTRATIONS.find((r) => r.id === regId) || null;
-  if (isNoah()) return (await loadRegistrations()).find((r) => r.id === regId) || null;
+  if (isNoah()) {
+    /* Try the single-row fetch first; it is one request instead of five
+       whole tables, which matters when the office is waiting on a click. */
+    const core = await registrationCore(regId).catch(() => null);
+    if (core) {
+      const full = (await loadRegistrations()).find((r) => r.id === regId);
+      return full ?? core;
+    }
+    return (await loadRegistrations()).find((r) => r.id === regId) || null;
+  }
   const rows = await getRows(TABLES.Registrations);
   const hit = rows.find((r) => r.regId === regId);
   return hit ? toRegistration(hit) : null;
@@ -193,6 +202,9 @@ const nextRegId = () => 'REG-' + Date.now().toString(36).toUpperCase() + (++seq)
 
 export async function createRegistration(value) {
   if (!live()) return null;
+  /* noah-backend spreads a registration across five tables. */
+  if (isNoah()) return createRegistrationInNoah(value);
+
   const regId = nextRegId();
   await insert(TABLES.Registrations, {
     regId,
@@ -222,7 +234,37 @@ export async function createRegistration(value) {
 /** Patch a registration. `reg` must carry the rowId from a read. */
 export async function patchRegistration(reg, patch) {
   if (!live()) return;
+  /* The two schemas name these columns differently, and in noah-backend
+     TABLES.Registrations is empty anyway — the ids live in NOAH_TABLES. */
+  if (isNoah()) return patchRegistrationInNoah(reg, patch);
   await update(TABLES.Registrations, { ROWID: reg.rowId, ...patch });
+}
+
+/** Approve, in whichever schema is connected. */
+export async function approveRegistration({ registration, staffName, loc, remark }) {
+  if (isNoah()) return approveInNoah({ registration, staffName, remark });
+  const member = await createMember({ reg: registration, loc });
+  await patchRegistration(registration, {
+    state: 'approved',
+    decidedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    decidedBy: staffName,
+    memberId: member.id,
+    remark: remark || '',
+  });
+  return member;
+}
+
+/** Send the video back, in whichever schema is connected. */
+export async function returnVideo({ registration, staffName, remark }) {
+  if (isNoah()) return returnVideoInNoah({ registration, staffName, remark });
+  await patchRegistration(registration, {
+    state: 'videoReturned',
+    decidedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    decidedBy: staffName,
+    remark,
+    videoAttempt: (registration.videoAttempt || 1) + 1,
+  });
+  return { state: 'videoReturned' };
 }
 
 /* ---------- members ---------- */
@@ -270,7 +312,16 @@ export async function createMember({ reg, loc }) {
 /* ---------- audit ---------- */
 
 export async function writeAudit({ actor, role, action, module, record, before, after, remark, ip }) {
-  if (!live()) return memAudit(actor, role, action, module, record, before, after, remark);
+  /* noah-backend has no AuditLog table. Keep the entry in memory rather than
+     failing the decision over it — losing the approval because the log could
+     not be written would be the wrong trade. The console shows the in-memory
+     log and says where it is kept.
+
+     Writing it was also throwing outside the caller's try/catch, which left
+     approvals hanging with no reply. */
+  if (!live() || !TABLES.AuditLog) {
+    return memAudit(actor, role, action, module, record, before, after, remark);
+  }
   await insert(TABLES.AuditLog, {
     actor, role: role || '', action, module: module || '', record: String(record || ''),
     beforeJson: before ? JSON.stringify(before).slice(0, 9000) : null,
@@ -280,7 +331,7 @@ export async function writeAudit({ actor, role, action, module, record, before, 
 }
 
 export async function listAudit() {
-  if (!live()) return db.AUD;
+  if (!live() || !TABLES.AuditLog) return db.AUD;
   const rows = await getRows(TABLES.AuditLog);
   return rows.map(toAudit).sort((a, b) => +b.at - +a.at).slice(0, 200);
 }

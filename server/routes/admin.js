@@ -4,15 +4,20 @@
    entry, so the audit log is a true record of what was done in the console.
    Decisions here are what the mobile app sees through /api/app/*. */
 
-import { db, audit, roleById, find } from '../db.js';
+import { db, audit, roleById as staffRole, find } from '../db.js';
 import { now, ri, sum, pct } from '../seed/helpers.js';
-import { live, registrationById, createMember, patchRegistration, writeAudit, listRegistrations, listMembers } from '../store.js';
+import { live, registrationById, createMember, patchRegistration, writeAudit, listRegistrations, listMembers, approveRegistration, returnVideo } from '../store.js';
+import { downloadFile, fileScopeMissing } from '../catalyst.js';
+import * as noah from '../noah-api.js';
+import { noahConfigured, findFileId } from '../noah-api.js';
+import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
+import { patchMemberRoles, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 /** Audit with the signed-in staff member as the actor. */
-const log = (req, ...rest) => audit(req.user.name, roleById(req.session.role).name, ...rest);
+const log = (req, ...rest) => audit(req.user.name, staffRole(req.session.role).name, ...rest);
 
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
 
@@ -23,7 +28,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
   app.get('/api/dashboard', requireSession, async (req, res) => {
     const role = req.session.role;
-    const held = (p) => roleById(role).perms.includes(p);
+    /* staffRole is the console-role lookup. `memberRole` in this file is the
+       app-role lookup from roles.js, which knows nothing about 'super'
+       and returns undefined — reading .perms off it crashed the dashboard. */
+    const held = (p) => staffRole(role).perms.includes(p);
 
     /* Connected to Catalyst: count the real tables only. Giving, events and
        moderation have no tables in that project, so their cards come out
@@ -138,21 +146,70 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     const { loc, pastor, cell } = req.body || {};
 
     if (live()) {
-      const member = await createMember({ reg: r, loc });
-      await patchRegistration(r, {
-        state: 'approved',
-        decidedAt: stamp(),
-        decidedBy: req.user.name,
-        memberId: member.id,
-        remark: req.body?.remark || '',
-      });
+      const note = req.body?.remark || `Approved by ${req.user.name}`;
+      let member = null, notified = null, repaired = false, silent = false;
+
+      if (noahConfigured()) {
+        /* The Noah API owns the decision. It writes the registration AND tells
+           the member. Setting Registrations.status from here instead would
+           approve someone in silence — they would never find out. */
+        let result;
+        try {
+          result = await noah.approve(r.id, { actor: req.user.name, note });
+        } catch (err) {
+          /* 409 means it was already decided. That is an answer about the
+             registration, not a fault here, so it keeps its own status. */
+          return res.status(err.status === 409 ? 409 : 502)
+            .json({ error: err.message, code: err.code });
+        }
+        notified = result?.notified ?? null;
+
+        /* What the API does to the *member* row is its business and may change.
+           Rather than assume, check whether they can actually get in, and mend
+           it only if they cannot. A repair, not part of the normal path. */
+        clearCache();
+        const fresh = await registrationById(r.id);
+        const rowId = r.memberId ?? fresh?.memberId;
+        const them = (await listMembers({})).find((m) => String(m.rowId) === String(rowId));
+        if (!canEnterApp(them, fresh)) {
+          await activateMemberOnly(rowId);
+          repaired = true;
+        }
+        /* `id` as well as `memberRowId`: in this schema they are the same
+           value, and the contract — and the app — ask for `id`. */
+        member = { id: rowId, memberRowId: rowId, status: 'active', roles: ['member'] };
+      } else {
+        /* No admin key yet. The console still works, but nothing reaches the
+           member — so say that, rather than reporting a clean approval. */
+        try {
+          member = await approveRegistration({
+            registration: r, staffName: req.user.name, loc, remark: req.body?.remark,
+          });
+        } catch (err) {
+          return res.status(502).json({ error: `Catalyst refused the approval: ${err.message}` });
+        }
+        silent = true;
+      }
+
+      const memberId = member.id || member.memberRowId;
       await writeAudit({
-        actor: req.user.name, role: roleById(req.session.role).name,
+        actor: req.user.name, role: staffRole(req.session.role).name,
         action: 'Approved registration', module: 'Membership', record: r.id,
-        before: { state: r.state }, after: { state: 'approved', member: member.id },
+        before: { state: r.state },
+        after: { state: 'approved', member: memberId, via: silent ? 'tables' : 'noah-api' },
         remark: req.body?.remark || '', ip: '10.20.4.17',
       });
-      return res.json({ ok: true, registration: { ...r, state: 'approved', memberId: member.id }, member });
+      return res.json({
+        ok: true,
+        registration: { ...r, state: 'approved', memberId },
+        member,
+        notified,
+        appAccess: 'The member can now sign in to the Noah app.',
+        warning: silent
+          ? 'Approved in the tables, but the member was NOT told: NOAH_ADMIN_API_KEY is not set, so no email went out.'
+          : undefined,
+        repaired: repaired || undefined,
+      });
     }
 
     const id = 'NH-' + (104210 + db.MEMBERS.length + 1);
@@ -193,19 +250,42 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     const before = { state: r.state };
 
     if (live()) {
-      await patchRegistration(r, {
-        state: 'videoReturned',
-        decidedAt: stamp(),
-        decidedBy: req.user.name,
-        remark,
-        videoAttempt: (r.videoAttempt || 1) + 1,
-      });
+      let silent = false;
+
+      /* The remark is the whole point of this route: the member is being asked
+         to record it again and needs to know what was wrong. Only the API
+         delivers that, so a table write would return the video and tell them
+         nothing. */
+      if (noahConfigured()) {
+        try {
+          await noah.returnVideo(r.id, { actor: req.user.name, note: remark });
+        } catch (err) {
+          return res.status(err.status === 409 ? 409 : 502)
+            .json({ error: err.message, code: err.code });
+        }
+        clearCache();
+      } else {
+        try {
+          await returnVideo({ registration: r, staffName: req.user.name, remark });
+        } catch (err) {
+          return res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
+        }
+        silent = true;
+      }
+
       await writeAudit({
-        actor: req.user.name, role: roleById(req.session.role).name,
+        actor: req.user.name, role: staffRole(req.session.role).name,
         action: 'Returned registration video', module: 'Membership', record: r.id,
-        before, after: { state: 'videoReturned' }, remark, ip: '10.20.4.17',
+        before, after: { state: 'videoReturned', via: silent ? 'tables' : 'noah-api' },
+        remark, ip: '10.20.4.17',
       });
-      return res.json({ ok: true, registration: { ...r, state: 'videoReturned', remark } });
+      return res.json({
+        ok: true,
+        registration: { ...r, state: 'videoReturned', remark },
+        warning: silent
+          ? 'Marked as returned, but the member was NOT told what to fix: NOAH_ADMIN_API_KEY is not set.'
+          : undefined,
+      });
     }
 
     r.state = 'videoReturned';
@@ -227,26 +307,150 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
      In the mock the URL goes nowhere — there is no storage. The shape is what
      Catalyst must return. */
-  app.get('/api/registrations/:id/file/:kind', ...guard('members.edit'), (req, res) => {
-    const r = find('REGISTRATIONS', req.params.id);
+  app.get('/api/registrations/:id/file/:kind', ...guard('members.edit'), async (req, res) => {
+    const kind = req.params.kind;
+    if (!['id', 'photo', 'video'].includes(kind)) {
+      return res.status(400).json({ error: 'kind must be id, photo or video.' });
+    }
+
+    const r = live() ? await registrationById(req.params.id) : find('REGISTRATIONS', req.params.id);
     if (!r) return notFound(res);
 
-    const kind = req.params.kind;
-    const field = { id: 'idFile', photo: 'photoFile', video: 'videoFile' }[kind];
-    if (!field) return res.status(400).json({ error: 'kind must be id, photo or video.' });
-    if (!r[field]) return res.status(404).json({ error: `No ${kind} was uploaded.` });
-
+    /* Looking at someone's identity document is an action, not a page view. */
     log(req, 'Viewed a registration document', 'Membership', r.id, null, { document: kind });
 
-    res.json({
-      kind,
-      filename: r[field],
-      /* Catalyst returns a signed GET URL from File Store or Stratus. */
-      url: null,
-      expiresInSeconds: 300,
-      mock: true,
-      note: 'There is no file storage in this build. Catalyst returns a signed URL here.',
-    });
+    if (!live()) {
+      const field = { id: 'idFile', photo: 'photoFile', video: 'videoFile' }[kind];
+      if (!r[field]) return res.status(404).json({ error: `No ${kind} was uploaded.` });
+      return res.status(503).json({
+        error: 'There is no file storage in the sample data. Connect Catalyst to read real uploads.',
+        filename: r[field],
+      });
+    }
+
+    /* Streamed through this server rather than handed out as a public URL, so
+       the permission check and the audit entry cannot be bypassed. */
+    const stream = (buffer, contentType) => {
+      res.setHeader('content-type', contentType);
+      res.setHeader('cache-control', 'private, max-age=300');
+      res.setHeader('content-disposition', `inline; filename="${kind}-${r.id}"`);
+      return res.send(buffer);
+    };
+
+    const tableFileId = r.fileIds?.[{ id: 'idProof', photo: 'photo', video: 'video' }[kind]];
+    let viaNoah = null;
+
+    /* The Noah API first. Its admin key reaches File Store; the OAuth token at
+       this end is tables-only, which is why the video could not be fetched
+       before. The file ids come from the API's own registration detail, since
+       only it knows what its ids mean — falling back to the id in the Files
+       table when the detail does not name one. */
+    if (noahConfigured()) {
+      try {
+        const detail = await noah.getRegistration(r.id);
+        const fileId = findFileId(detail, kind) ?? tableFileId;
+        if (!fileId) {
+          return res.status(404).json({ error: `No ${kind} was uploaded for this registration.` });
+        }
+        const { buffer, contentType } = await noah.getFile(fileId, { actor: req.user.name });
+        return stream(buffer, contentType);
+      } catch (err) {
+        /* Fall through to the direct attempt below: one working path is enough,
+           and if neither works both reasons are reported together. */
+        viaNoah = err.message;
+      }
+    }
+
+    if (!tableFileId) {
+      return res.status(404).json({
+        error: `No ${kind} was uploaded for this registration.`,
+        viaNoah: viaNoah || undefined,
+      });
+    }
+
+    try {
+      const { buffer, contentType } = await downloadFile(tableFileId);
+      return stream(buffer, contentType);
+    } catch (err) {
+      return res.status(fileScopeMissing() ? 403 : 502).json({
+        error: noahConfigured()
+          ? `The Noah API could not serve this file (${viaNoah}), and reading Catalyst File Store directly failed too: ${err.message}`
+          : err.message,
+        scopeMissing: !!fileScopeMissing(),
+        needsAdminKey: !noahConfigured(),
+        fileId: tableFileId,
+      });
+    }
+  });
+
+  /* ================= member roles in the app ================= */
+
+  /* The catalogue: what roles exist, what each one opens. */
+  app.get('/api/app-roles/catalogue', requireSession, (_req, res) => {
+    res.json({ roles: MEMBER_ROLES, restrictions: MEMBER_RESTRICTIONS });
+  });
+
+  /* Everyone, with the roles they hold. */
+  app.get('/api/app-roles/people', ...guard(['approles.manage', 'members.view']), async (req, res) => {
+    if (!live()) return res.json({ rows: [], total: 0, notInProject: true, message: 'Member roles need the Catalyst connection.' });
+    try {
+      const [members, roleRows] = await Promise.all([listMembers({}), allMemberRoles()]);
+      const rows = members
+        .filter((m) => m.rowId)
+        .map((m) => {
+          const row = roleRows.get(String(m.rowId)) ?? null;
+          const approved = String(m.rawStatus ?? '').toLowerCase() === 'active';
+          return {
+            memberRowId: m.rowId,
+            name: m.name,
+            mobile: m.mobile,
+            loc: m.loc,
+            status: m.status,
+            approved,
+            /* Approved members with no roles row yet still count as church
+               members — the row is written the first time anything changes. */
+            ...appRoleSummary(row, { approved }),
+            hasRolesRow: !!row,
+          };
+        });
+      res.json({ rows, total: rows.length, offset: 0, limit: rows.length });
+    } catch (err) {
+      res.status(503).json({ error: err.message });
+    }
+  });
+
+  /* Give or take away one role. */
+  app.post('/api/app-roles/:memberRowId/:roleId', ...guard(['approles.manage', 'members.edit']), async (req, res) => {
+    if (!live()) return res.status(409).json({ error: 'Member roles need the Catalyst connection.' });
+
+    const { memberRowId, roleId } = req.params;
+    const on = req.body?.on !== false;
+
+    const patch = patchForRole(roleId, on) ?? patchForRestriction(roleId, on, req.body?.comment);
+    if (!patch) {
+      return res.status(400).json({
+        error: memberRole(roleId)?.always
+          ? 'Church member cannot be taken away. Archive the member instead.'
+          : 'No such role.',
+      });
+    }
+
+    try {
+      const row = await patchMemberRoles(memberRowId, patch);
+      const summary = appRoleSummary(row);
+      const label = memberRole(roleId)?.label ?? restrictionById(roleId)?.label ?? roleId;
+
+      await writeAudit({
+        actor: req.user.name, role: staffRole(req.session.role).name,
+        action: on ? `Gave the role: ${label}` : `Removed the role: ${label}`,
+        module: 'App roles', record: memberRowId,
+        before: null, after: { roles: summary.roles }, ip: '10.20.4.17',
+      });
+
+      res.json({ ok: true, ...summary, changed: label, on });
+    } catch (err) {
+      res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
+    }
   });
 
   /* Tick or untick one of the office's checks while reviewing. */
@@ -304,7 +508,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
   app.post('/api/decide/:coll/:id', requireSession, (req, res) => {
     const spec = DECIDE[req.params.coll];
     if (!spec) return res.status(404).json({ error: 'That queue cannot be decided here.' });
-    if (!roleById(req.session.role).perms.includes(spec.perm)) {
+    if (!staffRole(req.session.role).perms.includes(spec.perm)) {
       return res.status(403).json({ error: 'You do not have access to this.', needs: [spec.perm] });
     }
     const row = find(req.params.coll, req.params.id);
@@ -326,7 +530,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
   app.post('/api/decide/:coll', requireSession, (req, res) => {
     const spec = DECIDE[req.params.coll];
     if (!spec) return res.status(404).json({ error: 'That queue cannot be decided here.' });
-    if (!roleById(req.session.role).perms.includes(spec.perm)) {
+    if (!staffRole(req.session.role).perms.includes(spec.perm)) {
       return res.status(403).json({ error: 'You do not have access to this.', needs: [spec.perm] });
     }
     const ids = [].concat(req.body?.ids || []);

@@ -19,7 +19,9 @@ import { db } from '../db.js';
 import { now, ri } from '../seed/helpers.js';
 import { videoScript } from '../seed/registrations.js';
 import { normalise, validateRegistration, MIN_VIDEO_SECONDS, MAX_VIDEO_SECONDS } from '../validate.js';
-import { live, registrationByMobile, memberByMobile, createRegistration, registrationById, patchRegistration } from '../store.js';
+import { live, registrationByMobile, memberByMobile, createRegistration, registrationById, patchRegistration, canEnterApp } from '../store.js';
+import { appRoleSummary } from '../roles.js';
+import { memberRolesRow } from '../noah-schema.js';
 
 const clean = (s) => String(s || '').replace(/\s+/g, '');
 
@@ -84,14 +86,42 @@ export default function mountApp(app) {
     if (code !== '4821') return res.status(400).json({ error: 'That code is not right.' });
 
     const member = await memberFor(mobile);
-    if (member) {
+    const reg = await regFor(mobile);
+
+    /* THE GATE.
+
+       In the noah-backend schema a Members row is created the moment someone
+       asks for an OTP, so the row existing proves nothing. Access depends on
+       the office having approved them — `canEnterApp` checks the member's
+       status and falls back to the registration.
+
+       Get this wrong and every person who ever typed their number walks
+       straight into the app. */
+    if (member && canEnterApp(member, reg)) {
+      /* The roles decide which features the app opens. A plain member gets
+         the ordinary app; a pastor also gets their congregation; a prayer
+         warrior also sees the private prayer wall.
+
+         The app uses these to decide what to show. The server still checks
+         them on every endpoint that matters — a role in this response is
+         not a key, it is a hint about what to draw. */
+      /* They are past the gate, so they are approved by definition. */
+      const roles = live() && member.rowId
+        ? appRoleSummary(await memberRolesRow(member.rowId), { approved: true })
+        : { roles: ['member'], restrictions: [], isPastor: false, isLeader: false, isPrayerWarrior: false, canScanPasses: false, features: [] };
+
       return res.json({
         status: 'member',
-        token: 'demo-' + member.id,
+        token: 'demo-' + (member.id || member.rowId),
         member: { id: member.id, name: member.name, loc: member.loc, lang: member.lang },
+        ...roles,
       });
     }
-    const reg = await regFor(mobile);
+
+    /* A member row with no approval is someone part-way through. */
+    if (member && reg) {
+      return res.json({ status: 'pending', registrationId: reg.id, state: reg.state });
+    }
     if (!reg) return res.json({ status: 'new' });
     if (reg.state === 'approved') {
       const created = live() ? await memberByMobile(mobile) : db.MEMBERS.find((m) => m.id === reg.memberId);
@@ -196,8 +226,16 @@ export default function mountApp(app) {
     reg.script = videoScript(reg);
 
     if (live()) {
-      const regId = await createRegistration(value);
-      return res.status(201).json({ ok: true, registrationId: regId, state: 'pending' });
+      /* Must answer, even when Catalyst refuses. A registration that hangs
+         leaves the member staring at a spinner having typed everything
+         twice, and leaves no trace of why. */
+      try {
+        const regId = await createRegistration(value);
+        return res.status(201).json({ ok: true, registrationId: regId, state: 'pending' });
+      } catch (err) {
+        console.error('[registration]', err);
+        return res.status(502).json({ error: `Catalyst refused the registration: ${err.message}` });
+      }
     }
     db.REGISTRATIONS.unshift(reg);
     res.status(201).json({ ok: true, registrationId: reg.id, state: reg.state });
@@ -214,7 +252,12 @@ export default function mountApp(app) {
       state: reg.state,
       remark: reg.remark,
       decidedAt: reg.decidedAt,
-      memberId: reg.memberId,
+      /* Only once approved. In noah-backend a Members row is created as soon
+         as the number is verified, so the id exists long before anyone has
+         decided anything — handing it over here would invite the app to read
+         "I have a member id" as "I am in". Approval is `state`, and nothing
+         else. */
+      memberId: reg.state === 'approved' ? reg.memberId : null,
       /* Shown on the waiting page. Still a placeholder: see README. */
       office: { name: 'Anitha Varghese', phone: '+91 98200 00000', hours: 'Monday to Saturday, 9 am to 6 pm' },
     });
@@ -232,13 +275,20 @@ export default function mountApp(app) {
       return res.status(400).json({ error: `The video must be between ${MIN_VIDEO_SECONDS} and ${MAX_VIDEO_SECONDS} seconds.` });
     }
     if (live()) {
-      await patchRegistration(reg, {
-        videoSecs: secs,
-        videoFile: b.videoFile || reg.videoFile,
-        state: 'pending',
-        submittedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        remark: '',
-      });
+      /* Wrapped because this runs on a member's phone. A throw here would end
+         the request with no reply at all, and the app would sit on a spinner
+         until it timed out rather than saying anything. */
+      try {
+        await patchRegistration(reg, {
+          videoSecs: secs,
+          videoFile: b.videoFile || reg.videoFile,
+          state: 'pending',
+          submittedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          remark: '',
+        });
+      } catch (err) {
+        return res.status(502).json({ error: `The video could not be saved: ${err.message}` });
+      }
       return res.json({ ok: true, state: 'pending' });
     }
     reg.videoSecs = secs;

@@ -5,3 +5,10 @@ dist
 .DS_Store
 .env.local
 .env
+
+# Sign-in tokens for the local dev server. Never commit these.
+.sessions.json
+
+# Hand-made upload bundles. Build artefacts, and they go stale.
+server.zip
+*.zip

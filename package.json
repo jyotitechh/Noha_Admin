@@ -12,9 +12,18 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "audit:fields": "node server/field-audit.mjs",
-    "test:contract": "node server/contract-test.mjs"
+    "test:contract": "node server/contract-test.mjs",
+    "test:journey": "node server/test-full-journey.mjs",
+    "test:roles": "node server/test-roles.mjs",
+    "export:catalyst": "node server/export-catalyst.mjs",
+    "test:noah": "node server/test-noah-api.mjs",
+    "probe:filestore": "node server/probe-filestore.mjs",
+    "catalyst:scopes": "node server/catalyst.js --scopes",
+    "start": "node server/index.js"
   },
   "dependencies": {
+    "cors": "2.8.5",
+    "express": "4.21.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.26.2"
@@ -24,9 +33,10 @@
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.3",
     "concurrently": "9.0.1",
-    "cors": "2.8.5",
-    "express": "4.21.1",
     "typescript": "5.6.3",
     "vite": "5.4.10"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

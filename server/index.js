@@ -14,7 +14,7 @@
 import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
-import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts } from './auth.js';
+import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
 import { check } from './catalyst.js';
 import { NOAH_TABLES } from './noah-schema.js';
@@ -26,7 +26,43 @@ import mountAdmin from './routes/admin.js';
 const PORT = Number(process.env.PORT) || 4000;
 const app = express();
 
-app.use(cors());
+/* Who may call this API from a browser.
+
+   In development the console is same-origin (Vite proxies /api), so this does
+   not come up. Once the API is on its own host it does: the console is on
+   another origin, and without this the browser blocks every call.
+
+   `cors()` with no argument answers "yes" to every origin on the internet. The
+   Authorization header means a stranger's page still cannot use your session,
+   but there is no reason to let any site talk to this API, so it is a list.
+
+   ALLOWED_ORIGINS is comma separated, e.g.
+     https://noha-admin.vercel.app,https://ksm-admin.karunasadan.org
+   Vercel preview deployments get their own URL per commit, so *.vercel.app
+   previews are allowed too — convenient, and they are your own builds. */
+const ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+
+const LOCAL = /^http:\/\/localhost:\d+$/;
+const VERCEL_PREVIEW = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
+
+app.use(cors({
+  origin(origin, cb) {
+    /* No Origin header: curl, a health check, the tests. Not a browser, so
+       there is no cross-origin question to answer. */
+    if (!origin) return cb(null, true);
+    const clean = origin.replace(/\/+$/, '');
+    if (ORIGINS.includes(clean) || LOCAL.test(clean) || VERCEL_PREVIEW.test(clean)) {
+      return cb(null, true);
+    }
+    /* Refuse by not allowing, rather than by throwing: an error here becomes
+       a 500 and hides what actually happened. */
+    return cb(null, false);
+  },
+  /* The console sends the session as a Bearer header, not a cookie. */
+  allowedHeaders: ['content-type', 'authorization'],
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+}));
 app.use(express.json({ limit: '2mb' }));
 
 /* Small request log, so you can see the console talking to the API. */
@@ -87,6 +123,10 @@ app.get('/api/meta', (_req, res) => {
     towards: db.TOWARDS,
     signOn: 'local-otp',
     signOnNote: 'Zoho single sign-on is not wired up. Sign-in is a local email + one-time code.',
+    /* So the sign-in screen knows to ask for the passphrase and to stop
+       offering the staff account menu. Saying it is required gives nothing
+       away; the passphrase itself never leaves the server. */
+    passphraseRequired: passphraseRequired(),
   });
 });
 
@@ -94,6 +134,12 @@ app.get('/api/meta', (_req, res) => {
 
 app.post('/api/auth/request-code', async (req, res) => {
   try {
+    /* On a deployed API the one-time code comes back in this response, so
+       this passphrase is the only thing between the internet and a signed-in
+       super administrator. Locally it is not set and this is a no-op. */
+    const gate = checkPassphrase(req.body?.passphrase, req.ip);
+    if (!gate.ok) return res.status(401).json({ ok: false, error: gate.error, needsPassphrase: true });
+
     const r = await requestCode(req.body?.email || '');
     res.status(r.ok ? 200 : 400).json(r);
   } catch (err) {
@@ -127,7 +173,16 @@ app.post('/api/auth/sign-out', requireSession, (req, res) => {
 
 /* Who you could sign in as. Prototype affordance: a real console would never
    list its own staff accounts before sign-in. */
+/* The prototype's "pick an account to try a role" list.
+
+   It names every member of staff and their email. That is a convenience while
+   building and a gift to anyone probing a public URL, so once a passphrase is
+   set the list is not published. The sign-in form then asks for an address
+   instead of offering a menu. */
 app.get('/api/auth/accounts', async (_req, res) => {
+  if (passphraseRequired()) {
+    return res.status(403).json({ error: 'Not available on this deployment. Type the staff address instead.' });
+  }
   try {
     res.json(await listAccounts());
   } catch (err) {
@@ -239,10 +294,22 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
      real members, and nobody looking at the screen could tell which was
      which. Better to show nothing and say why. */
   if (live()) {
+    /* Where the thing they were probably looking for actually lives. An
+       empty screen that does not say "but try over there" sends people
+       hunting, or makes them think the data is missing. */
+    const INSTEAD = {
+      VIDEOKYC: 'The KYC videos members record when they register are under App registrations — open a registration and look at step 6.',
+      PRAYERS: 'Prayer requests from the app are under Community → App prayer requests.',
+      MODQ: 'Noahgram moderation has no table in this project yet.',
+      RECEIPTS: 'Giving has no tables in this project yet.',
+      EVENTS: 'Events have no tables in this project yet.',
+      MANNA: 'Daily Manna has a table in this project, but it is empty.',
+    };
     return res.json({
       rows: [], total: 0, offset: 0, limit: 0,
       notInProject: true,
       message: `There is no ${name} table in the connected Catalyst project.`,
+      instead: INSTEAD[name] ?? null,
     });
   }
 
@@ -284,6 +351,24 @@ app.get('/api/data/:name/:id', requireSession, (req, res) => {
 });
 
 /* ---------- module routes ---------- */
+
+/* Express 4 does not catch a rejected promise from an async handler: the
+   request simply never gets a reply, and the caller sits there until it times
+   out. A phone showing a spinner for five minutes is a worse failure than an
+   error message, so every async handler registered from here on hands its
+   rejection to the error middleware below.
+
+   Each route still catches what it expects — this is the floor, not the plan. */
+for (const method of ['get', 'post', 'patch', 'put', 'delete']) {
+  const original = app[method].bind(app);
+  app[method] = (path, ...handlers) =>
+    original(path, ...handlers.map((h) => (
+      typeof h === 'function' && h.length < 4
+        ? (req, res, next) => { try { Promise.resolve(h(req, res, next)).catch(next); } catch (e) { next(e); } }
+        : h
+    )));
+}
+
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
@@ -292,7 +377,27 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'No such endpoint.'
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: 'Something went wrong on the server.' });
+  if (res.headersSent) return;
+
+  /* Body-parser and friends set a status on what they throw. Malformed JSON
+     is the caller's mistake, so it should say 400, not report the server as
+     broken. */
+  if (err?.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({
+      error: err.type === 'entity.parse.failed'
+        ? 'The request body is not valid JSON.'
+        : err.message || 'That request could not be handled.',
+    });
+  }
+
+  /* A Catalyst refusal is not this server falling over, and saying so helps
+     whoever is looking at it work out which end to fix. */
+  const fromCatalyst = /catalyst/i.test(err?.message || '');
+  res.status(fromCatalyst ? 502 : 500).json({
+    error: fromCatalyst
+      ? `Catalyst refused the request: ${err.message}`
+      : 'Something went wrong on the server.',
+  });
 });
 
 /* A Catalyst hiccup should surface as a 503, not kill the API. */

@@ -180,14 +180,30 @@ export function Field({ label, hint, error, children }: { label: ReactNode; hint
   );
 }
 
+/* A toggle.
+
+   The wrapper MUST be a <label>. The real checkbox is `width:0;height:0;
+   opacity:0` (see .switch input in prototype.css) — the thing you can see
+   and click is the <span> after it, which has no connection to the input on
+   its own. As a <span> wrapper, clicking the toggle did nothing at all, and
+   only keyboard users could change it.
+
+   Tests that call .click() on the input do not catch this, because that
+   bypasses the layout entirely. It has to be clicked like a person would. */
 export function Switch({ checked, onChange, disabled, label }: {
   checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string;
 }) {
   return (
-    <span className="switch">
-      <input type="checkbox" checked={checked} disabled={disabled} aria-label={label} onChange={(e) => onChange(e.target.checked)} />
+    <label className="switch" title={label}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.checked)}
+      />
       <span />
-    </span>
+    </label>
   );
 }
 

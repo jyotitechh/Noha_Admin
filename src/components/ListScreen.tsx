@@ -76,7 +76,13 @@ export function ListScreen<T extends { id: string }>({
       <div className="card">
         <Empty icon="db" title="Not in the connected project">
           {q.data.message}
-          <br />
+          {q.data.instead && (
+            <>
+              <br /><br />
+              <b className="ink2">{q.data.instead}</b>
+            </>
+          )}
+          <br /><br />
           Nothing is shown rather than sample data, so that what you see is
           only what is really there.
         </Empty>

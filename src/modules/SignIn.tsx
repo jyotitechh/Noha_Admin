@@ -27,16 +27,27 @@ export default function SignIn() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  /* Set on a deployed API, where the one-time code comes back in the response
+     and this is the only thing guarding it. Unset locally. */
+  const [passphrase, setPassphrase] = useState('');
+  const [needsPassphrase, setNeedsPassphrase] = useState(false);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
 
+  /* A 403 here is the deployed API declining to publish the staff list. That
+     is the intended answer, not a failure, so it is simply left empty. */
   useEffect(() => { api.get<Account[]>('/auth/accounts').then(setAccounts).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get<{ passphraseRequired?: boolean }>('/meta')
+      .then((m) => setNeedsPassphrase(!!m.passphraseRequired))
+      .catch(() => {});
+  }, []);
   useEffect(() => { if (step === 'otp') boxes.current[0]?.focus(); }, [step]);
 
   async function send(toEmail: string) {
     setBusy(true);
     setError('');
     try {
-      const r = await requestCode(toEmail);
+      const r = await requestCode(toEmail, passphrase);
       setEmail(toEmail);
       setName(r.name);
       setDevCode(r.devCode);
@@ -115,8 +126,32 @@ export default function SignIn() {
                   onChange={(e) => { setEmail(e.target.value); setError(''); }}
                 />
               </label>
+              {/* Only on a deployed API. There is no mailer yet, so the code
+                  comes back in the response — this is what stops a stranger
+                  asking for it. */}
+              {needsPassphrase && (
+                <label className="fld mt12">
+                  <span className="lbl">Office passphrase</span>
+                  <input
+                    className={'inp' + (error ? ' err' : '')}
+                    type="password"
+                    autoComplete="current-password"
+                    value={passphrase}
+                    placeholder="Shared with the office"
+                    onChange={(e) => { setPassphrase(e.target.value); setError(''); }}
+                  />
+                  <span className="small muted mt4">
+                    This console is reachable from the internet, so sign-in needs the
+                    shared passphrase as well as your address.
+                  </span>
+                </label>
+              )}
               {error && <div className="small mt8" style={{ color: 'var(--bad)', fontWeight: 600 }}>{error}</div>}
-              <button className="btn pri mt16" style={{ width: '100%' }} disabled={busy || !email.trim()}>
+              <button
+                className="btn pri mt16"
+                style={{ width: '100%' }}
+                disabled={busy || !email.trim() || (needsPassphrase && !passphrase)}
+              >
                 {busy ? 'Sending…' : 'Send the code'}
               </button>
             </form>

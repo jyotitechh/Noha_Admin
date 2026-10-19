@@ -22,6 +22,8 @@ const SCREENS: Record<string, ComponentType> = {
   'queues/main': lazy(() => import('@/modules/Queues')),
 
   'members/registrations': lazy(() => import('@/modules/members/Registrations')),
+  'members/approved': lazy(() => import('@/modules/members/Approved')),
+  'approles/people': lazy(() => import('@/modules/approles/People')),
   'members/register': lazy(() => import('@/modules/members/Register')),
   'members/videocheck': lazy(() => import('@/modules/members/VideoCheck')),
 
