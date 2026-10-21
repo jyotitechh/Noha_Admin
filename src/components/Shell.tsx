@@ -10,6 +10,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/state/auth';
 import { useQueues } from '@/state/queues';
+import { api } from '@/lib/api';
+import { useQuery } from '@/lib/useQuery';
 import { GROUPS, MODULES, buildProgress, type ModuleDef } from '@/modules/registry';
 import { Icon, Avatar, Age } from './ui';
 import logo from '@/assets/logo.png';
@@ -255,6 +257,9 @@ function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
+  /* Undefined until the server has answered, so nothing flashes meanwhile. */
+  const meta = useQuery(() => api.get<{ dataSource?: string }>('/meta'), []);
+  const onSample = !!meta.data && meta.data.dataSource !== 'catalyst';
   const [navOpen, setNavOpen] = useState(false);
   const [palette, setPalette] = useState(false);
 
@@ -308,9 +313,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
 
           <span className="sp" style={{ flex: 1 }} />
-          <span className="proto-pill" title="Every name, number and amount on these screens is sample data.">
-            Prototype · sample data
-          </span>
+          {/* Gone on real data. It stays only when the server has fallen back to
+              the built-in sample set — for instance because its Catalyst
+              settings are missing — so invented members can never sit on screen
+              looking real. */}
+          {onSample && (
+            <span className="proto-pill" title="Every name, number and amount on these screens is sample data.">
+              Sample data
+            </span>
+          )}
           <QueueBell />
           <MeMenu />
         </header>

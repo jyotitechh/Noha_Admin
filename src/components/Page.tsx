@@ -61,7 +61,7 @@ export function Planned({ mod, tab }: { mod: ModuleDef; tab: TabDef }) {
       <Note tone="mute" icon="layers">
         <b>Not built yet in this React console.</b> This screen is routed, and the
         data behind it is already in the API, but the screen itself has not been
-        written. {tab.from && <>It comes from <b>{tab.from}</b> in the HTML prototype at <code className="mono">admin/index.html</code>, which still works and can be opened alongside this one.</>}
+        written.
       </Note>
 
       <div className="card">
