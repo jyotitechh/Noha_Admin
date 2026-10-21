@@ -1,7 +1,8 @@
 /* Sign in.
 
-   NO ZOHO SINGLE SIGN-ON. This is a local email + six-digit code flow that
-   stands in for it. The prototype's screen had a "Continue with Zoho" button;
+   NO ZOHO SINGLE SIGN-ON. This is a mobile number + six-digit code flow that
+   stands in for it. Staff are members: they sign in with the number they
+   registered with in the Noah app. The prototype's screen had a "Continue with Zoho" button;
    the layout is otherwise the same, so putting Zoho back is a matter of
    adding the button and pointing it at the callback.
 
@@ -15,12 +16,12 @@ import { useAuth } from '@/state/auth';
 import { Icon, Note } from '@/components/ui';
 import logo from '@/assets/logo.png';
 
-interface Account { email: string; name: string; title: string; role: string; roleName: string }
+interface Account { mobile: string; name: string; title: string; role: string; roleName: string }
 
 export default function SignIn() {
   const { requestCode, verify } = useAuth();
   const [step, setStep] = useState<'start' | 'otp'>('start');
-  const [email, setEmail] = useState('');
+  const [mobile, setMobile] = useState('');
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [devCode, setDevCode] = useState('');
   const [name, setName] = useState('');
@@ -43,14 +44,14 @@ export default function SignIn() {
   }, []);
   useEffect(() => { if (step === 'otp') boxes.current[0]?.focus(); }, [step]);
 
-  async function send(toEmail: string) {
+  async function send(toMobile: string) {
     setBusy(true);
     setError('');
     try {
-      const r = await requestCode(toEmail, passphrase);
-      setEmail(toEmail);
+      const r = await requestCode(toMobile, passphrase);
+      setMobile(toMobile);
       setName(r.name);
-      setDevCode(r.devCode);
+      setDevCode(r.devCode ?? '');
       setDigits(['', '', '', '', '', '']);
       setStep('otp');
     } catch (e) {
@@ -64,7 +65,7 @@ export default function SignIn() {
     setBusy(true);
     setError('');
     try {
-      await verify(email, code);
+      await verify(mobile, code);
       /* The provider sets the user; the router takes it from here. */
     } catch (e) {
       setError((e as Error).message);
@@ -106,24 +107,26 @@ export default function SignIn() {
           <div className="si-card">
             <h2>Sign in</h2>
             <p className="muted mt0">
-              Enter the address your staff account uses. We will send a six-digit code.
+              Enter the mobile number you registered with in the Noah app. If a
+              super administrator has given you access, we will send a six-digit code.
             </p>
 
             <form
-              onSubmit={(e) => { e.preventDefault(); if (email.trim()) send(email.trim()); }}
+              onSubmit={(e) => { e.preventDefault(); if (mobile.trim()) send(mobile.trim()); }}
               style={{ marginTop: 16 }}
             >
               <label className="fld">
-                <span className="lbl">Work email address</span>
+                <span className="lbl">Mobile number</span>
                 <input
-                  id="si-email"
+                  id="si-mobile"
                   className={'inp' + (error ? ' err' : '')}
-                  type="email"
+                  type="tel"
+                  inputMode="tel"
                   autoComplete="username"
                   autoFocus
-                  value={email}
-                  placeholder="name@karunasadan.org"
-                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                  value={mobile}
+                  placeholder="+91 98765 43210"
+                  onChange={(e) => { setMobile(e.target.value); setError(''); }}
                 />
               </label>
               {/* Only on a deployed API. There is no mailer yet, so the code
@@ -142,7 +145,7 @@ export default function SignIn() {
                   />
                   <span className="small muted mt4">
                     This console is reachable from the internet, so sign-in needs the
-                    shared passphrase as well as your address.
+                    shared passphrase as well as your number.
                   </span>
                 </label>
               )}
@@ -150,23 +153,25 @@ export default function SignIn() {
               <button
                 className="btn pri mt16"
                 style={{ width: '100%' }}
-                disabled={busy || !email.trim() || (needsPassphrase && !passphrase)}
+                disabled={busy || !mobile.trim() || (needsPassphrase && !passphrase)}
               >
                 {busy ? 'Sending…' : 'Send the code'}
               </button>
             </form>
 
-            {/* Prototype only. A real console does not list its own staff. */}
+            {/* Test accounts only: one fixed number per role, so each can be tried
+                without a real person. Never real staff: a sign-in page that
+                listed them would be a directory for anyone probing it. */}
             {accounts.length > 0 && (
               <div className="mt20">
-                <div className="sect-title">Prototype — pick an account to try a role</div>
+                <div className="sect-title">Test accounts — pick a role to try</div>
                 <div className="card" style={{ maxHeight: 210, overflow: 'auto' }}>
                   <ul className="list">
                     {accounts.slice(0, 8).map((a) => (
-                      <li key={a.email} className="click" onClick={() => send(a.email)}>
+                      <li key={a.mobile} className="click" onClick={() => send(a.mobile)}>
                         <span className="grow">
                           <span className="t1">{a.name}</span>
-                          <span className="t2">{a.roleName}</span>
+                          <span className="t2 mono">{a.mobile}</span>
                         </span>
                         <Icon name="chev-r" />
                       </li>
@@ -185,7 +190,7 @@ export default function SignIn() {
           <div className="si-card">
             <h2>Enter the code</h2>
             <p className="muted mt0">
-              A six-digit code for <b>{name || email}</b>. It lasts five minutes and works once.
+              A six-digit code for <b>{name || mobile}</b>. It lasts five minutes and works once.
             </p>
 
             <div className="otp mt16" role="group" aria-label="One-time code">
@@ -210,14 +215,18 @@ export default function SignIn() {
 
             {error && <div className="small mt8" style={{ color: 'var(--bad)', fontWeight: 600 }}>{error}</div>}
 
-            {/* Prototype only: there is no mailer, so the code is shown here. */}
-            {devCode && (
+            {/* Prototype only: there is no SMS gateway yet, so the code is shown
+                here. It is absent for test accounts in production, where the
+                person testing already knows it. */}
+            {devCode ? (
               <div className="mt16">
                 <Note tone="warn" icon="key">
-                  Nothing is emailed in this build. Your code is{' '}
+                  Nothing is texted in this build. Your code is{' '}
                   <b className="mono" style={{ fontSize: 15, letterSpacing: '.08em' }}>{devCode}</b>.
                 </Note>
               </div>
+            ) : (
+              <p className="xs muted mt16">Enter the test code you were given.</p>
             )}
 
             <button
@@ -230,7 +239,7 @@ export default function SignIn() {
             </button>
 
             <button className="btn ghost mt8" style={{ width: '100%' }} onClick={() => { setStep('start'); setError(''); }}>
-              Use a different address
+              Use a different number
             </button>
           </div>
         )}

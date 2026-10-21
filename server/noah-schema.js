@@ -58,6 +58,16 @@ export const NOAH_TABLES = {
   threadMessages: '27145000000135980',
   appRegistrations: '27145000000134560',
   appChangeRequests: '27145000000128317',
+
+  /* Who may sign in to THIS console, and as what. The office's schema has no
+     place for it: users.is_admin / is_super_admin are two flags, and the
+     console has ten roles. Catalyst is at its 191-table cap, so this is a
+     table the Catalyst developer sets up (or repurposes from an empty shell)
+     and we are given the id of. See docs/CONSOLE-ACCESS.md.
+
+     A getter, so it reads the environment when asked and is simply absent
+     until it is set. */
+  get consoleStaff() { return process.env.CATALYST_TABLE_CONSOLE_STAFF || ''; },
 };
 const T = NOAH_TABLES;
 
@@ -759,6 +769,7 @@ export async function patchRegistrationInNoah(registration, patch) {
 export async function surveyTables() {
   const out = [];
   for (const name of Object.keys(NOAH_TABLES)) {
+    if (!NOAH_TABLES[name]) continue; /* an optional table that is not set */
     try {
       const rows = await io.getRows(NOAH_TABLES[name], { max: 1000 });
       out.push({ table: name, rows: rows.length, sample: rows[0] ?? null });
@@ -787,6 +798,7 @@ export const EXPECTED_COLUMNS = {
     'connectedPastor', 'connectedLeader', 'form_submit', 'video_consent_submit',
   ],
   files: ['uid', 'path', 'extension', 'size', 'fileType', 'remoteSource', 'archived', 'uploadedAt', 'isPublic'],
+  consoleStaff: ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'],
   appRegistrations: [
     'memberRowId', 'status', 'reviewNote', 'reviewedAt', 'submittedAt', 'nationality',
     'idProofType', 'idProofFileId', 'signatureText', 'declarationAccepted',
@@ -801,9 +813,14 @@ export async function verifySchema() {
   const byName = new Map(live.map((t) => [t.name, t.id]));
   const report = [];
 
+  const liveIds = new Set(live.map((t) => t.id));
   for (const [name, id] of Object.entries(NOAH_TABLES)) {
+    if (!id) continue; /* an optional table that is not set */
     const liveId = byName.get(name);
-    const entry = { table: name, id, liveId: liveId || null, idOk: liveId === id, rows: null, missing: [], checked: false };
+    /* consoleStaff may be a repurposed shell with another name, so it is
+       enough that the id exists; every other table must also be the one named. */
+    const idOk = name === 'consoleStaff' ? liveIds.has(id) : liveId === id;
+    const entry = { table: name, id, liveId: liveId || null, idOk, rows: null, missing: [], checked: false };
     if (entry.idOk) {
       try {
         const rows = await io.getRows(id, { max: 5 });
@@ -821,4 +838,176 @@ export async function verifySchema() {
     report.push(entry);
   }
   return report;
+}
+
+/* ---------- who may sign in to the console ----------
+
+   Staff are members. A member becomes console staff in one of two ways:
+
+     1. The OFFICE flagged their login `users.is_super_admin` in its own system.
+        They are a super administrator, and the console cannot change that: it
+        is the office's flag, and the app reads it too.
+
+     2. A super administrator gave them a role here. That is a row in the
+        console-staff table: which member, which of the console's roles, and
+        whether the access is Active, Suspended or Revoked.
+
+   Either way the person is identified by their MOBILE NUMBER, the same one they
+   register with in the Noah app, so there is nothing new to remember.
+
+   `users.is_admin` is deliberately NOT read. The app uses it to pick who answers
+   the "church office" chat (the oldest such user), so treating every console
+   user as one would quietly change who members are talking to. */
+
+/** Digits only, with the country code: '+91 98765 43210' -> '919876543210'.
+    A bare ten-digit number is taken as Indian, which is what people type. */
+export function mobileKey(input) {
+  const raw = String(input ?? '').trim();
+  const d = digits(raw);
+  if (!raw.startsWith('+') && d.length === 10) return '91' + d;
+  return d;
+}
+
+const memberFullName = (m) =>
+  [m?.firstName, m?.middleName, m?.lastName].filter(Boolean).join(' ') || '(no name yet)';
+
+/** Is there a console-staff table to read and write? */
+export const consoleStaffEnabled = () => !!T.consoleStaff;
+
+/* A console role the table may carry. Anything else is ignored on the way in:
+   a typo in a Catalyst row must not become a role nobody defined. */
+const readRole = (r, allowed) => (allowed.includes(String(r)) ? String(r) : null);
+
+/**
+ * Every staff identity Catalyst knows of, as the console's Staff screen and
+ * sign-in need them. `allowedRoles` is the list of role ids the console defines.
+ */
+export async function loadStaffDirectory(allowedRoles) {
+  const { members, users } = await snapshot();
+  const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
+  const memberOfUser = new Map(members.map((m) => [String(m.userId), m]));
+  const out = [];
+  const seen = new Set(); /* member row ids already listed */
+
+  const base = (m, user) => {
+    const archived = asBool(m?.archived) || asBool(user?.archived);
+    return {
+      memberRowId: m ? String(m.ROWID) : null,
+      userRowId: user ? String(user.ROWID) : (m?.userId ? String(m.userId) : null),
+      name: m ? memberFullName(m) : '(no member row yet)',
+      email: m?.emailId1 || '',
+      mobile: phoneOf(m, user),
+      mobileKey: mobileKey(phoneOf(m, user)),
+      blocked: archived,
+      mfa: false, locs: ['All locations'], overrides: [], to: null,
+    };
+  };
+
+  /* 1. The office's own super-admin flag. */
+  for (const u of users) {
+    if (!asBool(u.is_super_admin)) continue;
+    const m = memberOfUser.get(String(u.ROWID));
+    out.push({
+      ...base(m, u),
+      id: `flag-${u.ROWID}`,
+      rowId: null,
+      title: 'Super administrator (set by the office)',
+      role: 'super',
+      status: asBool(u.archived) ? 'Blocked' : 'Active',
+      from: ist(u.CREATEDTIME), lastIn: null,
+      source: 'catalyst-flag',
+      grantedBy: 'the office',
+    });
+    if (m) seen.add(String(m.ROWID));
+  }
+
+  /* 2. Roles given from the console. */
+  if (consoleStaffEnabled()) {
+    const rows = await io.getRows(T.consoleStaff);
+    for (const r of rows) {
+      const mid = String(r.memberRowId ?? '');
+      const m = memberById.get(mid);
+      if (!m || seen.has(mid)) continue; /* an office flag outranks a row */
+      const role = readRole(r.role, allowedRoles);
+      if (!role) continue;
+      const user = users.find((x) => same(x.ROWID, m.userId));
+      const b = base(m, user);
+      const status = b.blocked ? 'Blocked' : (r.status || 'Active');
+      out.push({
+        ...b,
+        id: String(r.ROWID),
+        rowId: String(r.ROWID),
+        title: r.title || '',
+        role,
+        status,
+        from: utc(r.grantedAt) || ist(r.CREATEDTIME),
+        lastIn: utc(r.lastSignedInAt),
+        source: 'catalyst',
+        grantedBy: r.grantedBy || '',
+      });
+      seen.add(mid);
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Find one staff identity by the number they sign in with. */
+export async function findStaffByMobile(mobile, allowedRoles) {
+  const key = mobileKey(mobile);
+  if (!key) return null;
+  return (await loadStaffDirectory(allowedRoles)).find((s) => s.mobileKey === key) ?? null;
+}
+
+/** Approved members who are not staff yet: who a super administrator may give
+    access to. Someone who has not been approved cannot be given the console. */
+export async function staffCandidates(allowedRoles, search = '') {
+  const [members, staff] = await Promise.all([loadMembers(), loadStaffDirectory(allowedRoles)]);
+  const have = new Set(staff.filter((s) => s.status !== 'Revoked').map((s) => s.memberRowId));
+  const q = String(search).toLowerCase().trim();
+  return members
+    /* A member with no name is half a registration: the live data has one that
+       is marked approved. Nobody is given the console without a name to give it to. */
+    .filter((m) => m.approved && !m.blocked && !have.has(m.rowId) && !m.name.startsWith('('))
+    .filter((m) => !q || [m.name, m.mobile, m.email].some((v) => String(v || '').toLowerCase().includes(q)))
+    .map((m) => ({ rowId: m.rowId, name: m.name, mobile: m.mobile, email: m.email, loc: m.loc }))
+    .slice(0, 50);
+}
+
+/** Give a member a console role, or restore one that was revoked. */
+export async function grantConsoleAccess({ memberRowId, role, title, by }) {
+  if (!consoleStaffEnabled()) {
+    throw Object.assign(new Error('No console-staff table is configured.'), { code: 'no_table' });
+  }
+  const at = stamp();
+  const rows = await io.getRows(T.consoleStaff);
+  const mine = rows.find((r) => same(r.memberRowId, memberRowId));
+  const row = { role, title: title || '', status: 'Active', grantedBy: by || '', grantedAt: at };
+
+  if (mine) {
+    await io.update(T.consoleStaff, { ROWID: String(mine.ROWID), ...row });
+  } else {
+    await io.insert(T.consoleStaff, { memberRowId: String(memberRowId), ...row });
+  }
+  clearCache();
+  /* The id comes from reading it back, never from the insert response. */
+  const fresh = (await io.getRows(T.consoleStaff)).find((r) => same(r.memberRowId, memberRowId));
+  if (!fresh) throw new Error('The access row was written but could not be read back.');
+  return String(fresh.ROWID);
+}
+
+/** Change a staff row: role, title or status. */
+export async function updateConsoleStaff(rowId, patch) {
+  if (!consoleStaffEnabled()) {
+    throw Object.assign(new Error('No console-staff table is configured.'), { code: 'no_table' });
+  }
+  const out = { ROWID: String(rowId) };
+  for (const k of ['role', 'title', 'status']) if (k in patch) out[k] = patch[k];
+  await io.update(T.consoleStaff, out);
+  clearCache();
+}
+
+/** Stamp a sign-in on the row. Never worth failing a sign-in over. */
+export async function touchStaffSignIn(rowId) {
+  if (!consoleStaffEnabled() || !rowId) return;
+  await io.update(T.consoleStaff, { ROWID: String(rowId), lastSignedInAt: stamp() });
 }

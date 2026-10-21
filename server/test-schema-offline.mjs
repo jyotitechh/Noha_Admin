@@ -152,9 +152,9 @@ const draftId = await S.createRegistrationInNoah({
   agreed: true, signature: 'Meera Nair', videoSecs: 15,
 });
 check('an existing number reuses its login and member rather than duplicating',
-  tables[T.users].length === 5 && tables[T.members].length === 5);
+  tables[T.users].length === seed().users.length && tables[T.members].length === seed().members.length);
 check('its empty draft is filled in, not left beside a second row',
-  tables[T.appRegistrations].length === 4 && draftId === '27145000000128676');
+  tables[T.appRegistrations].length === seed().appRegistrations.length && draftId === '27145000000128676');
 check('…and now reads pending', tables[T.appRegistrations].find((x) => x.ROWID === draftId).status === 'pending');
 
 reset(seed());
@@ -192,7 +192,7 @@ check('a flag for a member with no membersExtra row creates it first', tables[T.
 check('…joined by id = member ROWID', tables[T.membersExtra].at(-1).id === M.office && tables[T.membersExtra].at(-1).isLeader === true);
 
 const all = await S.allMemberRoles();
-check('everyone\'s roles are listed, including members with no extra row', all.size === 5 && all.get(M.blank).memberType === null);
+check('everyone\'s roles are listed, including members with no extra row', all.size === seed().members.length && all.get(M.blank).memberType === null);
 
 /* ================================================================== */
 section('A decision written straight to the tables (the fallback)');
@@ -237,6 +237,184 @@ check('…and the old reason is cleared', rec.reviewNote === '');
 reset(seed());
 await S.activateMemberOnly(M.draft);
 check('the repair only marks the member verified', tables[T.members].find((x) => x.ROWID === M.draft).isUnVerified === false && wrote('appRegistrations').length === 0);
+
+/* ================================================================== */
+section('Who may sign in: staff are members, found by number');
+
+const ROLES = ['super', 'membership', 'finance', 'events', 'moderator', 'content', 'comms', 'jverifier', 'jadmin', 'pastor'];
+const dirOf = async () => S.loadStaffDirectory(ROLES);
+const staffTable = () => tables[T.consoleStaff];
+
+check('a bare ten-digit number is taken as Indian', S.mobileKey('9000000555') === '919000000555');
+check('a +91 number with spaces is the same key', S.mobileKey('+91 90000 00555') === '919000000555');
+check('another country code is left alone', S.mobileKey('+971 50 123 4567') === '971501234567');
+
+reset(seed());
+let dir = await dirOf();
+const boss = dir.find((x) => x.memberRowId === M.boss);
+check('the office flag is_super_admin makes a super administrator', boss?.role === 'super' && boss.source === 'catalyst-flag' && boss.status === 'Active');
+check('...identified by the number they register with', boss?.mobileKey === '919000000555', boss?.mobileKey);
+check('...named from their member row', boss?.name === 'Anitha Varghese');
+check('an ordinary approved member is NOT staff', !dir.some((x) => x.memberRowId === M.approved));
+check('is_admin alone does NOT make someone staff (the app uses it for the office chat)', !dir.some((x) => x.userRowId === U.bare));
+check('findStaffByMobile finds them by the number as typed',
+  (await S.findStaffByMobile('+91 90000 00555', ROLES))?.memberRowId === M.boss
+  && (await S.findStaffByMobile('9000000555', ROLES))?.memberRowId === M.boss);
+check('an unknown number finds nobody', (await S.findStaffByMobile('+91 90000 99999', ROLES)) === null);
+check('an empty number finds nobody', (await S.findStaffByMobile('', ROLES)) === null);
+
+/* ---------- who can be given access ---------- */
+let cands = await S.staffCandidates(ROLES);
+check('approved members are candidates', cands.some((c) => c.rowId === M.approved) && cands.some((c) => c.rowId === M.office));
+check('...someone still waiting on approval is not', !cands.some((c) => c.rowId === M.draft));
+check('...someone who is already staff is not', !cands.some((c) => c.rowId === M.boss));
+check('...a member with no name is not, even if marked approved', !cands.some((c) => c.rowId === M.blank));
+check('candidates can be searched by name', (await S.staffCandidates(ROLES, 'anand')).map((c) => c.rowId).join() === M.approved);
+check('...and by number', (await S.staffCandidates(ROLES, '9000000779')).map((c) => c.rowId).join() === M.approved);
+
+/* ---------- giving a role ---------- */
+const rowId = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', title: 'Accounts', by: 'Anitha Varghese' });
+check('granting writes a row in the staff table', staffTable().length === 1 && staffTable()[0].role === 'finance');
+check('...the member id is stored as a string, intact', staffTable()[0].memberRowId === M.approved);
+check('...with who gave it, and when', staffTable()[0].grantedBy === 'Anitha Varghese' && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(staffTable()[0].grantedAt));
+check('...the id returned is read back, not the rounded one from the insert', rowId === staffTable()[0].ROWID && /^\d{17}$/.test(rowId), rowId);
+
+dir = await dirOf();
+const fin = dir.find((x) => x.memberRowId === M.approved);
+check('the new staff member is in the directory with their role', fin?.role === 'finance' && fin.status === 'Active' && fin.source === 'catalyst');
+check('...and found by their registered number', (await S.findStaffByMobile('+91 9000000779', ROLES))?.role === 'finance');
+check('...and no longer a candidate', !(await S.staffCandidates(ROLES)).some((c) => c.rowId === M.approved));
+
+/* ---------- changing and revoking ---------- */
+await S.updateConsoleStaff(rowId, { role: 'content' });
+check('a role can be changed', (await S.findStaffByMobile('9000000779', ROLES)).role === 'content');
+await S.updateConsoleStaff(rowId, { status: 'Suspended' });
+check('a suspended row reads Suspended', (await S.findStaffByMobile('9000000779', ROLES)).status === 'Suspended');
+await S.updateConsoleStaff(rowId, { status: 'Revoked' });
+check('a revoked row stays, marked Revoked, so the history is kept',
+  staffTable().length === 1 && (await S.findStaffByMobile('9000000779', ROLES)).status === 'Revoked');
+check('...and they are a candidate again', (await S.staffCandidates(ROLES)).some((c) => c.rowId === M.approved));
+const again = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'events', by: 'Anitha Varghese' });
+check('granting again restores the same row rather than adding a second', staffTable().length === 1 && again === rowId);
+check('...with the new role, Active', staffTable()[0].role === 'events' && staffTable()[0].status === 'Active');
+
+/* ---------- things that must not become access ---------- */
+reset(seed());
+await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+staffTable()[0].role = 'wizard';
+check('a row with a role nobody defined gives no access', !(await dirOf()).some((x) => x.memberRowId === M.approved));
+
+reset(seed());
+staffTable().push({ ROWID: '27145000000290001', memberRowId: '27145000000000001', role: 'finance', status: 'Active' });
+check('a row pointing at a member that does not exist gives no access', (await dirOf()).length === 1);
+
+reset(seed());
+staffTable().push({ ROWID: '27145000000290002', memberRowId: M.boss, role: 'finance', status: 'Active' });
+dir = await dirOf();
+check('the office flag outranks a console row for the same member',
+  dir.filter((x) => x.memberRowId === M.boss).length === 1 && dir.find((x) => x.memberRowId === M.boss).role === 'super');
+
+reset(seed());
+await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+tables[T.members].find((m) => m.ROWID === M.approved).archived = true;
+S.clearCache();
+const gone = (await dirOf()).find((x) => x.memberRowId === M.approved);
+check('an archived member is Blocked, whatever their row says', gone.status === 'Blocked' && gone.blocked === true);
+
+reset(seed());
+await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+tables[T.users].find((u) => u.ROWID === U.otp).archived = true;
+S.clearCache();
+check('a blocked login (users.archived) is Blocked too', (await dirOf()).find((x) => x.memberRowId === M.approved).status === 'Blocked');
+
+reset(seed());
+const stamped = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+await S.touchStaffSignIn(stamped);
+check('a sign-in is stamped on the row', /^\d{4}-/.test(staffTable()[0].lastSignedInAt || ''));
+
+/* ---------- no table yet ---------- */
+reset(seed());
+const savedTable = process.env.CATALYST_TABLE_CONSOLE_STAFF;
+process.env.CATALYST_TABLE_CONSOLE_STAFF = '';
+let noTable = null;
+try { await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' }); } catch (e) { noTable = e; }
+check('with no staff table, granting fails with a clear code', noTable?.code === 'no_table', noTable?.message);
+check('...the office super administrator still works without it', (await dirOf()).some((x) => x.memberRowId === M.boss));
+check('...and the table is reported as not set up', !S.consoleStaffEnabled());
+process.env.CATALYST_TABLE_CONSOLE_STAFF = savedTable;
+
+/* ================================================================== */
+section('Signing in: the number, the test accounts, and what is closed');
+
+const ST = await import('./staff.js');
+const withEnv = async (patch, fn) => {
+  const keys = Object.keys(patch);
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) { if (patch[k] === undefined) delete process.env[k]; else process.env[k] = patch[k]; }
+  try { return await fn(); } finally {
+    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
+};
+
+reset(seed());
+await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined, TEST_LOGIN_OTP: undefined }, async () => {
+  check('outside production, test login is on by default', ST.testLoginEnabled());
+  check('...with the documented one-time code', ST.testOtp() === '123456');
+  const t = ST.testAccounts();
+  check('there is a test account for every role', t.length === 10 && new Set(t.map((x) => x.role)).size === 10);
+  check('...each with its own number', new Set(t.map((x) => x.mobileKey)).size === 10);
+  check('...the first is the super administrator', t[0].role === 'super' && t[0].mobile === '+91 9000000001', `${t[0].role} ${t[0].mobile}`);
+
+  const viaTest = await ST.resolveStaff({ mobile: '+91 9000000003' });
+  check('a test number resolves to its role', viaTest.staff?.role === 'finance' && viaTest.staff.source === 'test', JSON.stringify(viaTest).slice(0, 120));
+  check('...typed without the +91 as well', (await ST.resolveStaff({ mobile: '9000000003' })).staff?.role === 'finance');
+});
+
+await withEnv({ NODE_ENV: 'production', ENABLE_TEST_LOGIN: undefined, TEST_LOGIN_OTP: undefined }, async () => {
+  check('in production, test login is OFF by default', !ST.testLoginEnabled(), JSON.stringify(ST.testLoginStatus()));
+  check('...and its numbers are not accounts', !!(await ST.resolveStaff({ mobile: '+91 9000000001' })).error);
+});
+await withEnv({ NODE_ENV: 'production', ENABLE_TEST_LOGIN: 'true', TEST_LOGIN_OTP: undefined }, async () => {
+  check('in production, asking for it is not enough: there is no default code',
+    !ST.testLoginEnabled() && /TEST_LOGIN_OTP/.test(ST.testLoginStatus().why), JSON.stringify(ST.testLoginStatus()));
+});
+await withEnv({ NODE_ENV: 'production', ENABLE_TEST_LOGIN: 'true', TEST_LOGIN_OTP: '482913' }, async () => {
+  check('in production it needs both, and then works', ST.testLoginEnabled() && ST.testOtp() === '482913');
+});
+await withEnv({ NODE_ENV: 'development', ENABLE_TEST_LOGIN: 'false' }, async () => {
+  check('ENABLE_TEST_LOGIN=false turns it off anywhere', !ST.testLoginEnabled());
+});
+
+await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
+  reset(seed());
+  const real = await ST.resolveStaff({ mobile: '+91 90000 00555' });
+  check('a real super administrator signs in by number', real.staff?.role === 'super' && real.staff.source === 'catalyst-flag', JSON.stringify(real).slice(0, 140));
+
+  const unknown = await ST.resolveStaff({ mobile: '+91 90000 77777' });
+  check('a number with no access is told so', /does not have access/.test(unknown.error || ''), unknown.error);
+  check('...someone who is only a member is not staff', /does not have access/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+  check('a junk number is refused', /not a mobile number/.test((await ST.resolveStaff({ mobile: '12' })).error || ''));
+  check('nothing at all asks for a number', /mobile number/.test((await ST.resolveStaff({})).error || ''));
+
+  const sample = await ST.resolveStaff({ email: 'anitha.varghese@karunasadan.org' });
+  check('THE BACKDOOR IS CLOSED: a sample person email does not sign in on live data',
+    !sample.staff && /mobile number/.test(sample.error || ''), JSON.stringify(sample).slice(0, 140));
+
+  const id = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+  check('a member given a role signs in with their registered number',
+    (await ST.resolveStaff({ mobile: '+91 90000 00779' })).staff?.role === 'finance');
+  await S.updateConsoleStaff(id, { status: 'Suspended' });
+  check('...suspended, they cannot', /suspended/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+  await S.updateConsoleStaff(id, { status: 'Revoked' });
+  check('...revoked, they cannot', /revoked/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+  await S.updateConsoleStaff(id, { status: 'Active' });
+  tables[T.members].find((m) => m.ROWID === M.approved).archived = true; S.clearCache();
+  check('...archived as a member, they cannot', /blocked/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+
+  const listed = await ST.listStaff();
+  check('the Staff screen lists the real people and the test accounts',
+    listed.some((x) => x.source === 'catalyst-flag') && listed.filter((x) => x.source === 'test').length === 10);
+});
 
 /* ================================================================== */
 section('The cache');

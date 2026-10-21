@@ -16,7 +16,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, roleById } from './db.js';
-import { staffByEmail, allStaff, markSignedIn, live } from './store.js';
+import { allStaff, live } from './store.js';
+import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -59,6 +60,8 @@ function saveSessions() {
 }
 
 loadSessions();
+
+const production = () => process.env.NODE_ENV === 'production';
 
 /** Six digits, as the prototype's sign-in screen expects. */
 const sixDigits = () => String(Math.floor(100000 + Math.random() * 900000));
@@ -114,27 +117,45 @@ export function checkPassphrase(given, who = 'unknown') {
   return { ok: false, error: 'That passphrase is not right.' };
 }
 
-export async function requestCode(email) {
-  const staff = await staffByEmail(email);
-  if (!staff) return { ok: false, error: 'No staff account uses that address.' };
-  if (staff.status && staff.status !== 'Active') {
-    return { ok: false, error: `That account is ${String(staff.status).toLowerCase()}. Ask a super administrator to re-enable it.` };
-  }
-  const code = sixDigits();
-  codes.set(staff.email.toLowerCase(), { code, expires: Date.now() + CODE_TTL_MS, tries: 0 });
-  console.log(`[auth] one-time code for ${staff.email}: ${code}`);
+/* Who is asking, as a key the code is filed under: their number, or for the
+   sample people (no Catalyst) their email. */
+const keyOf = ({ mobile, email }) => (mobile ? mobileKey(mobile) : String(email || '').toLowerCase());
+
+/**
+ * Send a code to someone who is allowed to sign in.
+ *
+ * There is no SMS gateway yet, so the code is returned in the response, which
+ * is why the deployed console is behind a passphrase. Test accounts get their
+ * fixed code instead, and in production that is not echoed: whoever is testing
+ * knows it.
+ */
+export async function requestCode({ mobile, email } = {}) {
+  const found = await resolveStaff({ mobile, email });
+  if (!found.staff) return { ok: false, error: found.error };
+  const staff = found.staff;
+
+  const isTest = staff.source === 'test';
+  const code = isTest ? testOtp() : sixDigits();
+  codes.set(keyOf({ mobile, email }), { code, expires: Date.now() + CODE_TTL_MS, tries: 0 });
+
+  /* Real codes are not written to the log in production: a host's logs are read
+     by more people than the code is meant for. */
+  if (!production()) console.log(`[auth] one-time code for ${staff.name}: ${code}`);
+
   return {
     ok: true,
-    email: staff.email,
+    mobile: staff.mobile || undefined,
+    email: staff.email || undefined,
     name: staff.name,
-    /* Prototype only. Remove with the real mailer. */
-    devCode: code,
+    test: isTest || undefined,
+    /* Prototype only. Remove with the SMS gateway. */
+    devCode: isTest && production() ? undefined : code,
     expiresInSeconds: CODE_TTL_MS / 1000,
   };
 }
 
-export async function verifyCode(email, code) {
-  const key = String(email || '').toLowerCase();
+export async function verifyCode({ mobile, email } = {}, code) {
+  const key = keyOf({ mobile, email });
   const entry = codes.get(key);
   if (!entry) return { ok: false, error: 'Ask for a new code.' };
   if (Date.now() > entry.expires) {
@@ -150,13 +171,22 @@ export async function verifyCode(email, code) {
   }
   codes.delete(key);
 
-  const staff = await staffByEmail(email);
+  /* Look them up again rather than trusting the moment the code was sent: they
+     may have been suspended or revoked since, and the code must not outlive
+     that. */
+  const found = await resolveStaff({ mobile, email });
+  if (!found.staff) return { ok: false, error: found.error };
+  const staff = found.staff;
+
   const token = randomUUID();
   const session = {
     token,
     staffId: staff.id,
     rowId: staff.rowId,
-    email: staff.email,
+    memberRowId: staff.memberRowId ?? null,
+    source: staff.source,
+    email: staff.email || '',
+    mobile: staff.mobile || '',
     name: staff.name,
     title: staff.title || '',
     role: staff.role,
@@ -164,17 +194,20 @@ export async function verifyCode(email, code) {
   };
   sessions.set(token, session);
   saveSessions();
-  /* Stamp the sign-in on the Staff row. Not worth failing the sign-in over. */
-  if (staff.rowId) markSignedIn(staff.rowId).catch(() => {});
+  /* Stamp the sign-in. Not worth failing the sign-in over. */
+  markStaffSignedIn(staff).catch(() => {});
   return { ok: true, token, user: publicUser(session) };
 }
 
 /** The accounts the sign-in screen offers. Prototype affordance. */
 export async function listAccounts() {
-  const rows = await allStaff();
-  return rows
-    .filter((s) => s.status === 'Active')
-    .map((s) => ({ email: s.email, name: s.name, title: s.title, role: s.role, roleName: roleById(s.role).name }));
+  /* Only the test accounts are ever offered before sign-in. Real staff are
+     real people, and a sign-in page that lists them is a directory for anyone
+     probing it. Empty when test login is off. */
+  if (!testLoginEnabled()) return [];
+  return testAccounts().map((a) => ({
+    mobile: a.mobile, name: a.name, title: a.title, role: a.role, roleName: roleById(a.role).name,
+  }));
 }
 
 export { live };
@@ -184,6 +217,8 @@ export const publicUser = (s) => ({
   name: s.name,
   title: s.title,
   email: s.email,
+  mobile: s.mobile || '',
+  source: s.source || 'sample',
   role: s.role,
   roleName: roleById(s.role).name,
   perms: roleById(s.role).perms,
@@ -194,6 +229,26 @@ export function sessionFor(token) {
   if (!s) return null;
   if (Date.now() > s.expires) { sessions.delete(token); saveSessions(); return null; }
   return s;
+}
+
+/**
+ * Change or end every session a staff member holds.
+ *
+ * Revoking someone's access has to take effect NOW, not when their session
+ * runs out twelve hours later: the person being removed is, by definition,
+ * someone the office no longer wants in. With `patch` it updates the role
+ * they are signed in as instead, so a promotion or demotion applies at once.
+ * Returns how many sessions it touched.
+ */
+export function refreshSessions(staffId, patch = null) {
+  let n = 0;
+  for (const [token, sess] of sessions) {
+    if (sess.staffId !== staffId) continue;
+    if (patch) Object.assign(sess, patch); else sessions.delete(token);
+    n++;
+  }
+  if (n) saveSessions();
+  return n;
 }
 
 /* Signing out must outlive a restart too, or the token would come back. */

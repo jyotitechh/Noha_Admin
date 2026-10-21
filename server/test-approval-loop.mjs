@@ -8,7 +8,7 @@
    when testing by hand. */
 
 const BASE = (process.argv[2] || 'http://localhost:4000') + '/api';
-const STAFF = 'anitha.varghese@karunasadan.org';
+const STAFF = process.env.STAFF_MOBILE || '+91 9000000001'; /* the test super administrator */
 
 const j = async (res) => {
   const t = await res.text();
@@ -28,8 +28,8 @@ const appSays = async (mobile) => {
 };
 
 /* --- sign in as the office --- */
-const asked = await post('/auth/request-code', { email: STAFF });
-const signedIn = await post('/auth/verify', { email: STAFF, code: asked.devCode });
+const asked = await post('/auth/request-code', { mobile: STAFF });
+const signedIn = await post('/auth/verify', { mobile: STAFF, code: asked.devCode });
 const token = signedIn.token;
 if (!token) { console.error('Could not sign in:', asked, signedIn); process.exit(1); }
 console.log(`\n  Signed in as ${signedIn.user.name} (${signedIn.user.roleName})\n`);

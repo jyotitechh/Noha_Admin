@@ -72,6 +72,20 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const path = url.pathname;
 
+  /* A control hook for tests only: change a row in the fake Catalyst, as if the
+     office had edited it there. This process exists only for the offline
+     harness, on 127.0.0.1, with no real data behind it. */
+  if (req.method === 'POST' && path === '/_fake/patch') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const { table, rowId, set } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    const row = (tables[T[table]] || []).find((r) => r.ROWID === String(rowId));
+    if (!row) return err(res, 404, 'no_such_row', 'No such row in the fake.');
+    Object.assign(row, set);
+    S.clearCache();
+    return send(res, 200, { ok: true });
+  }
+
   if (req.headers['x-admin-key'] !== KEY) return err(res, 401, 'invalid_admin_key', 'The admin key is not valid.');
 
   let body = {};

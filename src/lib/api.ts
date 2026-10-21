@@ -95,6 +95,10 @@ export const api = {
 
 export interface User {
   id: string; name: string; title: string; email: string;
+  /* The number they signed in with, and where their access comes from:
+     'catalyst' (given in the console), 'catalyst-flag' (the office's own
+     super-admin flag), 'test' or 'sample'. */
+  mobile?: string; source?: string;
   role: string; roleName: string; perms: string[];
 }
 

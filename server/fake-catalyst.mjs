@@ -5,7 +5,11 @@
    The rows copy the shapes seen in the live project, including the awkward
    ones; see seed() below. */
 
+import './fake-env.mjs';
 import * as S from './noah-schema.js';
+
+/* The console-staff table exists in the fake, so the grant flow can be tested. */
+process.env.CATALYST_TABLE_CONSOLE_STAFF = '27145000000299001';
 
 export { S };
 export const T = S.NOAH_TABLES;
@@ -50,8 +54,8 @@ export { tables, writes, reset };
 
 /* ---------- fixtures ---------- */
 
-export const U = { otp: '27145000000117981', draft: '27145000000126927', office: '27145000000141595', pastor: '27145000000138578', bare: '27145000000141592' };
-export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028' };
+export const U = { otp: '27145000000117981', draft: '27145000000126927', office: '27145000000141595', pastor: '27145000000138578', bare: '27145000000141592', boss: '27145000000151001' };
+export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028', boss: '27145000000151002' };
 
 export const seed = () => ({
   users: [
@@ -60,6 +64,8 @@ export const seed = () => ({
     { ROWID: U.office, number: '9000000778', countryCode: '+91', archived: false, is_member: true },
     { ROWID: U.pastor, number: '9000000100', countryCode: '+91', archived: false, is_member: true },
     { ROWID: U.bare, number: '9000000101', countryCode: '+91', archived: false, is_admin: true },
+    /* The office's own super administrator: flagged in its system, not by the console. */
+    { ROWID: U.boss, number: '9000000555', countryCode: '+91', archived: false, is_super_admin: true, is_member: true, CREATEDTIME: '2025-06-01 09:00:00:000' },
   ],
   members: [
     /* Approved through the app: registration approved, office verified. */
@@ -85,6 +91,7 @@ export const seed = () => ({
       CREATEDTIME: '2025-01-01 10:00:00:000',
     },
     { ROWID: M.pastor, id: M.pastor, userId: U.pastor, countryCode: '+91', mobileNumber1: '9000000100', status: true, isUnVerified: true, archived: false, memberType: 'pastor', firstName: 'Fr', lastName: 'Thomas', gender: 1, CREATEDTIME: '2026-10-01 10:00:00:000' },
+    { ROWID: M.boss, id: M.boss, userId: U.boss, countryCode: '+91', mobileNumber1: '9000000555', status: true, isUnVerified: false, archived: false, firstName: 'Anitha', lastName: 'Varghese', gender: 2, emailId1: 'anitha@example.com', CREATEDTIME: '2025-06-01 09:00:00:000' },
     { ROWID: M.blank, id: M.blank, userId: U.bare, countryCode: '+91', mobileNumber1: '9000000101', status: true, isUnVerified: true, archived: false, CREATEDTIME: '2026-10-19 16:00:00:000' },
   ],
   membersExtra: [

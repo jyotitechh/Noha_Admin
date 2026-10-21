@@ -764,14 +764,8 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     res.json({ ok: true, role });
   });
 
-  app.post('/api/staff/:id/status', ...guard('staff.manage'), (req, res) => {
-    const s = find('STAFF', req.params.id);
-    if (!s) return notFound(res);
-    const before = { status: s.status };
-    s.status = req.body?.to || 'Suspended';
-    log(req, 'Changed staff account status', 'Staff and permissions', s.name, before, { status: s.status }, req.body?.remark || '');
-    res.json({ ok: true, staff: s });
-  });
+  /* Staff access (granting, changing, suspending, revoking) lives in
+     routes/staff.js. */
 
   /* ================= reports ================= */
 

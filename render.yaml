@@ -49,5 +49,20 @@ services:
       - key: ADMIN_PASSPHRASE
         sync: false
 
+      # --- who may sign in to the console (docs/CONSOLE-ACCESS.md) ------
+      # Test accounts are OFF in production unless you turn them on, and are
+      # deliberately NOT listed as keys here: Render re-applies this file on every
+      # push, so a fixed value would overwrite what you set in the dashboard.
+      # To try the console with the fixed test numbers, add these two in the
+      # Render dashboard (Environment):
+      #     ENABLE_TEST_LOGIN = true
+      #     TEST_LOGIN_OTP    = <a code you choose>
+      # There is no default code, because this repository is public. Remove them
+      # again before real use: a test super administrator sees real members' data.
+      # The id of the table that holds console roles, once the Catalyst developer
+      # has created it. Add it in the dashboard; until then only the office's own
+      # super administrators can sign in by number.
+      # - key: CATALYST_TABLE_CONSOLE_STAFF
+
       - key: NODE_ENV
         value: production

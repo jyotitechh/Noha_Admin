@@ -7,7 +7,7 @@
    back off again, so the project is left as it was found. */
 
 const BASE = (process.argv[2] || 'http://localhost:4000') + '/api';
-const STAFF = 'anitha.varghese@karunasadan.org';
+const STAFF = process.env.STAFF_MOBILE || '+91 9000000001'; /* the test super administrator */
 
 const j = async (r) => { const t = await r.text(); try { return t ? JSON.parse(t) : {}; } catch { return { raw: t.slice(0, 200) }; } };
 const post = (p, b, t) => fetch(BASE + p, { method: 'POST', headers: { 'content-type': 'application/json', ...(t ? { authorization: 'Bearer ' + t } : {}) }, body: JSON.stringify(b ?? {}) }).then(j);
@@ -35,8 +35,8 @@ await post('/app/registration', {
   videoSeconds: 19, phone: MOBILE,
 });
 
-const asked = await post('/auth/request-code', { email: STAFF });
-const me = await post('/auth/verify', { email: STAFF, code: asked.devCode });
+const asked = await post('/auth/request-code', { mobile: STAFF });
+const me = await post('/auth/verify', { mobile: STAFF, code: asked.devCode });
 const token = me.token;
 
 const queue = await get('/data/REGISTRATIONS?state=pending', token);

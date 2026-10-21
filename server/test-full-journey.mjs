@@ -13,7 +13,7 @@
    never collides with the Catalyst developer's test rows. */
 
 const BASE = (process.argv[2] || 'http://localhost:4000') + '/api';
-const STAFF = 'anitha.varghese@karunasadan.org';
+const STAFF = process.env.STAFF_MOBILE || '+91 9000000001'; /* the test super administrator */
 
 const j = async (res) => {
   const t = await res.text();
@@ -80,8 +80,8 @@ step(3, 'They submit the six steps', submitted.ok === true,
 if (!submitted.ok) { console.log('\n  Stopping: the submission failed.\n'); process.exit(1); }
 
 /* ---------- 4. it is in Catalyst ---------- */
-const asked = await post('/auth/request-code', { email: STAFF });
-const signedIn = await post('/auth/verify', { email: STAFF, code: asked.devCode });
+const asked = await post('/auth/request-code', { mobile: STAFF });
+const signedIn = await post('/auth/verify', { mobile: STAFF, code: asked.devCode });
 const token = signedIn.token;
 
 const queue = await get('/data/REGISTRATIONS?state=pending', token);

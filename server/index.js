@@ -15,6 +15,7 @@ import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
+import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
 import { check } from './catalyst.js';
 import { NOAH_TABLES } from './noah-schema.js';
@@ -22,6 +23,7 @@ import { queuesFor } from './queues.js';
 import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
+import mountStaff from './routes/staff.js';
 
 const PORT = Number(process.env.PORT) || 4000;
 const app = express();
@@ -187,7 +189,7 @@ app.post('/api/auth/request-code', async (req, res) => {
     const gate = checkPassphrase(req.body?.passphrase, req.ip);
     if (!gate.ok) return res.status(401).json({ ok: false, error: gate.error, needsPassphrase: true });
 
-    const r = await requestCode(req.body?.email || '');
+    const r = await requestCode({ mobile: req.body?.mobile, email: req.body?.email });
     res.status(r.ok ? 200 : 400).json(r);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
@@ -196,9 +198,9 @@ app.post('/api/auth/request-code', async (req, res) => {
 
 app.post('/api/auth/verify', async (req, res) => {
   try {
-  const r = await verifyCode(req.body?.email || '', req.body?.code || '');
+  const r = await verifyCode({ mobile: req.body?.mobile, email: req.body?.email }, req.body?.code || '');
   if (!r.ok) return res.status(400).json(r);
-  audit(r.user.name, roleById(r.user.role).name, 'Signed in', 'Access', 'Staff account', null, { method: 'Email one-time code' });
+  audit(r.user.name, roleById(r.user.role).name, 'Signed in', 'Access', 'Staff account', null, { method: r.user.source === 'test' ? 'Test account' : 'Mobile one-time code' });
   res.json(r);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
@@ -228,7 +230,7 @@ app.post('/api/auth/sign-out', requireSession, (req, res) => {
    instead of offering a menu. */
 app.get('/api/auth/accounts', async (_req, res) => {
   if (passphraseRequired()) {
-    return res.status(403).json({ error: 'Not available on this deployment. Type the staff address instead.' });
+    return res.status(403).json({ error: 'Not available on this deployment. Type your mobile number instead.' });
   }
   try {
     res.json(await listAccounts());
@@ -326,6 +328,15 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
     REGISTRATIONS: () => listRegistrations({ state: req.query.state, search: req.query.q }),
     MEMBERS: () => listMembers({ search: req.query.q, loc: req.query.loc, status: req.query.status }),
     AUD: () => listAudit(),
+    /* Staff are members with a role, found by mobile number. The sample people
+       are not staff once Catalyst is connected. */
+    STAFF: async () => {
+      const q = String(req.query.q || '').toLowerCase().trim();
+      const rows = await listStaff();
+      return q
+        ? rows.filter((s) => [s.name, s.email, s.mobile, s.title, s.role].some((v) => String(v || '').toLowerCase().includes(q)))
+        : rows;
+    },
   };
   if (live() && FROM_CATALYST[name]) {
     try {
@@ -416,6 +427,7 @@ for (const method of ['get', 'post', 'patch', 'put', 'delete']) {
     )));
 }
 
+mountStaff(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
@@ -453,6 +465,9 @@ process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.mess
 app.listen(PORT, () => {
   console.log(`\n  Karuna Sadan admin — mock API on http://localhost:${PORT}`);
   console.log(`  Sample data pinned to Friday 9 October 2026, 10:30 IST.`);
-  console.log(`  Sign in with any active staff email, for example ${db.STAFF[0].email}.`);
-  console.log(`  The one-time code is printed here and returned in the response.\n`);
+  console.log(testLoginEnabled()
+    ? `  Test sign-in is ON: +91 90000 00001 (super administrator) to ...10, one-time code ${process.env.NODE_ENV === 'production' ? 'from TEST_LOGIN_OTP' : testOtp()}.`
+    : `  Test sign-in is off (${testLoginStatus().why}).`);
+  console.log(`  Real staff sign in with their mobile number; see docs/CONSOLE-ACCESS.md.
+`);
 });

@@ -16,8 +16,8 @@
 const BASE = (process.argv[2] || 'http://localhost:4000').replace(/\/+$/, '') + '/api';
 
 /* A staff sign-in, for the admin half. Override for a different setup:
-     STAFF_EMAIL=... STAFF_TOKEN=... node server/contract-test.mjs <url> */
-const STAFF_EMAIL = process.env.STAFF_EMAIL || 'anitha.varghese@karunasadan.org';
+     STAFF_MOBILE=... node server/contract-test.mjs <url> */
+const STAFF_MOBILE = process.env.STAFF_MOBILE || '+91 9000000001'; /* the test super administrator */
 
 let pass = 0;
 const failures = [];
@@ -171,10 +171,10 @@ console.log('\n  Admin — the office decides\n');
 
 let token = process.env.STAFF_TOKEN || '';
 if (!token) {
-  const ask = await call('POST', '/auth/request-code', { email: STAFF_EMAIL });
+  const ask = await call('POST', '/auth/request-code', { mobile: STAFF_MOBILE });
   const code = ask.body?.devCode;
   if (code) {
-    const verified = await call('POST', '/auth/verify', { email: STAFF_EMAIL, code });
+    const verified = await call('POST', '/auth/verify', { mobile: STAFF_MOBILE, code });
     token = verified.body?.token || '';
   }
 }
@@ -247,10 +247,10 @@ if (!token) {
   const noAuth = await call('GET', '/data/REGISTRATIONS');
   check('no session gets 401', noAuth.status === 401, `got ${noAuth.status}`);
 
-  const contentEditor = process.env.CONTENT_EMAIL || 'rohan.pawar@karunasadan.org';
-  const ask2 = await call('POST', '/auth/request-code', { email: contentEditor });
+  const contentEditor = process.env.CONTENT_MOBILE || '+91 9000000006'; /* the test content editor */
+  const ask2 = await call('POST', '/auth/request-code', { mobile: contentEditor });
   if (ask2.body?.devCode) {
-    const v2 = await call('POST', '/auth/verify', { email: contentEditor, code: ask2.body.devCode });
+    const v2 = await call('POST', '/auth/verify', { mobile: contentEditor, code: ask2.body.devCode });
     const t2 = v2.body?.token;
     const refused = await call('POST', `/registrations/${regId}/approve`, {}, t2);
     check('a content editor cannot approve a registration', refused.status === 403,

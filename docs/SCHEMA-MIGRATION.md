@@ -125,4 +125,6 @@ meter and billing are in the Catalyst console for org `60063007256`.
 - **Chat, notifications and device tokens** are read-only and not shown.
 - **Content tables** (`dailyMana`, `dailyPrayers`, …) exist as empty shells, so
   those screens still show "not in the connected project".
-- **Console staff** still sign in from the console's own list, not `users`.
+- **Console staff** now sign in by mobile number and are members: see
+  [CONSOLE-ACCESS.md](CONSOLE-ACCESS.md). Giving a role needs a small table that
+  the Catalyst developer has to create.
