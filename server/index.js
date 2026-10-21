@@ -14,6 +14,7 @@
 import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
+import { channels } from './deliver.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
@@ -178,6 +179,9 @@ app.get('/api/meta', (_req, res) => {
        offering the staff account menu. Saying it is required gives nothing
        away; the passphrase itself never leaves the server. */
     passphraseRequired: passphraseRequired(),
+    /* Which ways of getting a code are really set up: the sign-in screen says
+       "we will text you" or "we will email you" only when that is true. */
+    codeChannels: channels(),
   });
 });
 
@@ -192,7 +196,9 @@ app.post('/api/auth/request-code', async (req, res) => {
     if (!gate.ok) return res.status(401).json({ ok: false, error: gate.error, needsPassphrase: true });
 
     const r = await requestCode({ mobile: req.body?.mobile, email: req.body?.email });
-    res.status(r.ok ? 200 : 400).json(r);
+    const { status, ...body } = r;
+    if (r.retryAfter) res.set('Retry-After', String(r.retryAfter));
+    res.status(status || (r.ok ? 200 : 400)).json(body);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
   }
@@ -202,7 +208,7 @@ app.post('/api/auth/verify', async (req, res) => {
   try {
   const r = await verifyCode({ mobile: req.body?.mobile, email: req.body?.email }, req.body?.code || '');
   if (!r.ok) return res.status(400).json(r);
-  audit(r.user.name, roleById(r.user.role).name, 'Signed in', 'Access', 'Staff account', null, { method: r.user.source === 'test' ? 'Test account' : 'Mobile one-time code' });
+  audit(r.user.name, roleById(r.user.role).name, 'Signed in', 'Access', 'Staff account', null, { method: r.user.source === 'test' ? 'Test account' : req.body?.mobile ? 'Mobile one-time code' : 'Email one-time code' });
   res.json(r);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });

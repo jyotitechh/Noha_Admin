@@ -7,9 +7,10 @@
    session after the Zoho callback instead of after `verify`, and leave the
    rest of the API untouched. The console's side is src/state/auth.tsx.
 
-   The code is NOT emailed anywhere. `requestCode` returns it in the response
-   (and prints it to the console) because this is a prototype. A real
-   implementation must send it out of band and never return it. */
+   The code is texted (mobile number) or emailed (address) by deliver.js once
+   that channel is configured. Until it is, `requestCode` falls back to returning
+   the code in the response, which is only acceptable on a developer's machine
+   or behind the office passphrase. */
 
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -18,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { db, roleById } from './db.js';
 import { allStaff, live } from './store.js';
 import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
+import { channels, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -39,7 +41,10 @@ const sessions = new Map();
    never committed, and not written at all when NODE_ENV is production — a
    deployed server should use a real session store, not a file. */
 const SESSION_FILE = resolve(dirname(fileURLToPath(import.meta.url)), '..', '.sessions.json');
-const persistSessions = process.env.NODE_ENV !== 'production';
+/* SESSIONS_FILE=off keeps sessions in memory only. The offline test harness sets
+   it, so running the tests cannot overwrite the file a developer's own sign-in
+   lives in. */
+const persistSessions = process.env.NODE_ENV !== 'production' && process.env.SESSIONS_FILE !== 'off';
 
 function loadSessions() {
   if (!persistSessions || !existsSync(SESSION_FILE)) return;
@@ -119,15 +124,52 @@ export function checkPassphrase(given, who = 'unknown') {
 
 /* Who is asking, as a key the code is filed under: their number, or for the
    sample people (no Catalyst) their email. */
-const keyOf = ({ mobile, email }) => (mobile ? mobileKey(mobile) : String(email || '').toLowerCase());
+const keyOf = ({ mobile, email }) => (mobile ? mobileKey(mobile) : String(email || '').trim().toLowerCase());
+
+/* Sending costs money (SMS) and lands in someone's pocket, so asking for a code
+   is limited per person: not again within the cooldown, and not more than a few
+   times an hour. A ceiling across everyone bounds the bill if something loops.
+   Only real sends count; the test accounts and the on-screen code cost nothing. */
+const RESEND_AFTER_MS = 30 * 1000;
+const MAX_PER_HOUR = 5;
+const MAX_ALL_PER_HOUR = 200;
+const HOUR_MS = 60 * 60 * 1000;
+/** key -> times a code was sent to them, in the last hour */
+const sends = new Map();
+let allSends = [];
+
+function throttle(key) {
+  const now = Date.now();
+  allSends = allSends.filter((t) => now - t < HOUR_MS);
+  const mine = (sends.get(key) || []).filter((t) => now - t < HOUR_MS);
+  sends.set(key, mine);
+
+  if (mine.length && now - mine[mine.length - 1] < RESEND_AFTER_MS) {
+    const wait = Math.ceil((RESEND_AFTER_MS - (now - mine[mine.length - 1])) / 1000);
+    return { error: `A code was just sent. You can ask for another in ${wait} seconds.`, status: 429, retryAfter: wait };
+  }
+  if (mine.length >= MAX_PER_HOUR) {
+    return { error: 'Too many codes asked for in the last hour. Try again later.', status: 429 };
+  }
+  if (allSends.length >= MAX_ALL_PER_HOUR) {
+    return { error: 'Sign-in is busy. Try again in a little while.', status: 429 };
+  }
+  return null;
+}
+
+const recordSend = (key) => {
+  const now = Date.now();
+  sends.get(key).push(now);
+  allSends.push(now);
+};
 
 /**
  * Send a code to someone who is allowed to sign in.
  *
- * There is no SMS gateway yet, so the code is returned in the response, which
- * is why the deployed console is behind a passphrase. Test accounts get their
- * fixed code instead, and in production that is not echoed: whoever is testing
- * knows it.
+ * By mobile number it is texted; by email it is emailed. If that channel is not
+ * set up on this server the code is returned in the response instead, as the
+ * prototype always did, which is only acceptable locally or behind the office
+ * passphrase. Test accounts get their fixed code and nothing is sent.
  */
 export async function requestCode({ mobile, email } = {}) {
   const found = await resolveStaff({ mobile, email });
@@ -135,21 +177,59 @@ export async function requestCode({ mobile, email } = {}) {
   const staff = found.staff;
 
   const isTest = staff.source === 'test';
+  const via = mobile ? 'sms' : 'email';
+  const key = keyOf({ mobile, email });
+  const delivering = !isTest && channels()[via];
+
+  /* Neither a real channel nor a gate: the code would go to whoever asked.
+     That is only ever the prototype's behaviour on someone's own machine. */
+  if (!isTest && !delivering && production() && !passphraseRequired()) {
+    return {
+      ok: false, status: 503,
+      error: `Codes cannot be ${via === 'sms' ? 'texted' : 'emailed'} yet: ${via === 'sms' ? 'SMS' : 'email'} is not set up on this server.`
+        + (channels()[via === 'sms' ? 'email' : 'sms'] ? ` Sign in with your ${via === 'sms' ? 'email' : 'mobile number'} instead.` : ''),
+    };
+  }
+
+  if (delivering) {
+    const wait = throttle(key);
+    if (wait) return { ok: false, ...wait };
+  }
+
   const code = isTest ? testOtp() : sixDigits();
-  codes.set(keyOf({ mobile, email }), { code, expires: Date.now() + CODE_TTL_MS, tries: 0 });
+  const to = via === 'sms' ? e164(key) : key;
+
+  if (delivering) {
+    try {
+      await sendCode({ via, to, code, ttlMs: CODE_TTL_MS });
+    } catch (err) {
+      return { ok: false, status: 502, error: err.message };
+    }
+    recordSend(key);
+  }
+  codes.set(key, { code, expires: Date.now() + CODE_TTL_MS, tries: 0 });
 
   /* Real codes are not written to the log in production: a host's logs are read
-     by more people than the code is meant for. */
-  if (!production()) console.log(`[auth] one-time code for ${staff.name}: ${code}`);
+     by more people than the code is meant for. Nor when it has been sent: then
+     the log would be a second copy of something meant for one inbox. */
+  if (!production() && !delivering) console.log(`[auth] one-time code for ${staff.name}: ${code}`);
 
   return {
     ok: true,
-    mobile: staff.mobile || undefined,
-    email: staff.email || undefined,
-    name: staff.name,
+    /* Asked for by one thing (a number, an address), answered with nothing about
+       the other: otherwise typing someone's email would hand back their phone
+       number. The name goes too once a message is really sent; it is then
+       shown only to whoever holds the inbox or the phone. */
+    name: delivering ? undefined : staff.name,
     test: isTest || undefined,
-    /* Prototype only. Remove with the SMS gateway. */
-    devCode: isTest && production() ? undefined : code,
+    /* How it went: 'sms' or 'email' when it was really sent (and then to where,
+       masked), or nothing when the code is on screen instead. */
+    via: delivering ? via : undefined,
+    sentTo: delivering ? (via === 'sms' ? maskMobile(to) : maskEmail(to)) : undefined,
+    resendAfterSeconds: delivering ? RESEND_AFTER_MS / 1000 : undefined,
+    /* Only when nothing was sent. Test accounts in production do not get it:
+       whoever is testing knows the code. */
+    devCode: delivering || (isTest && production()) ? undefined : code,
     expiresInSeconds: CODE_TTL_MS / 1000,
   };
 }

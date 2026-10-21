@@ -896,6 +896,8 @@ export async function loadStaffDirectory(allowedRoles) {
       userRowId: user ? String(user.ROWID) : (m?.userId ? String(m.userId) : null),
       name: m ? memberFullName(m) : '(no member row yet)',
       email: m?.emailId1 || '',
+      /* Every address on the member row, lower-cased, for signing in by email. */
+      emails: [m?.emailId1, m?.emailId2].map((e) => String(e || '').trim().toLowerCase()).filter(Boolean),
       mobile: phoneOf(m, user),
       mobileKey: mobileKey(phoneOf(m, user)),
       blocked: archived,
@@ -956,6 +958,22 @@ export async function findStaffByMobile(mobile, allowedRoles) {
   const key = mobileKey(mobile);
   if (!key) return null;
   return (await loadStaffDirectory(allowedRoles)).find((s) => s.mobileKey === key) ?? null;
+}
+
+/**
+ * Find one staff identity by an email address on their member row.
+ *
+ * Returns { staff } , { staff: null } when nobody has it, or { ambiguous: true }
+ * when more than one person does. Two people sharing an address is common in a
+ * family; picking one of them would sign someone in as the wrong person, so
+ * the caller refuses and sends them to their mobile number instead.
+ */
+export async function findStaffByEmail(email, allowedRoles) {
+  const want = String(email || '').trim().toLowerCase();
+  if (!want) return { staff: null };
+  const hits = (await loadStaffDirectory(allowedRoles)).filter((s) => s.emails?.includes(want));
+  if (hits.length > 1) return { ambiguous: true };
+  return { staff: hits[0] ?? null };
 }
 
 /** Approved members who are not staff yet: who a super administrator may give

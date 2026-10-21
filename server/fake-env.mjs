@@ -12,4 +12,7 @@ Object.assign(process.env, {
   CATALYST_CLIENT_ID: 'offline',
   CATALYST_CLIENT_SECRET: 'offline',
   CATALYST_REFRESH_TOKEN: 'offline',
+  /* Tests sign people in. They must not write those sessions over a developer's
+     own .sessions.json (and so sign them out of their running console). */
+  SESSIONS_FILE: 'off',
 });

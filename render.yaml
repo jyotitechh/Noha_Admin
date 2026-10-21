@@ -49,6 +49,26 @@ services:
       - key: ADMIN_PASSPHRASE
         sync: false
 
+      # --- how the sign-in code reaches people (docs/CONSOLE-ACCESS.md) --
+      # Email (any SMTP account) and SMS (Twilio). Fill in either or both; a
+      # channel left blank is simply off, and sign-in says so. Secrets: never in git.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMS_PROVIDER
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+
       # --- who may sign in to the console (docs/CONSOLE-ACCESS.md) ------
       # Test accounts are OFF in production unless you turn them on, and are
       # deliberately NOT listed as keys here: Render re-applies this file on every

@@ -15,9 +15,10 @@ found"*: the page was deployed, its server never was.
 
 ## Why the API cannot simply be made public
 
-Sign-in here is a prototype. There is no mailer, so `POST /auth/request-code`
-returns the one-time code **in the response**, and `GET /auth/accounts` lists
-every member of staff. On `localhost` that is a convenience. On a public URL it
+Until email or SMS is set up on the server (see `docs/CONSOLE-ACCESS.md`),
+`POST /auth/request-code` returns the one-time code **in the response**, and
+`GET /auth/accounts` lists the test accounts. (With neither a channel nor a
+passphrase, a deployed server now refuses instead.) On `localhost` that is a convenience. On a public URL it
 means anyone who finds the address can ask for the super administrator's code,
 be given it, and sign in — and behind that sit 49 members' names, mobile
 numbers, dates of birth, addresses, Aadhaar and PAN numbers, photographs, ID
@@ -50,7 +51,9 @@ Set these yourself in Render's dashboard — the values never go in git:
 | `CATALYST_CLIENT_SECRET` | from `.env.local` |
 | `CATALYST_REFRESH_TOKEN` | from `.env.local` — the new one, once you have added the File Store scopes |
 | `NOAH_ADMIN_API_KEY` | from `ADMIN_API_KEY.txt`, when the Catalyst developer sends it. Leave blank until then; approvals still work and warn that the member was not emailed |
-| `ADMIN_PASSPHRASE` | **you choose this.** A long phrase, shared with the office. Nothing else guards the sign-in code |
+| `ADMIN_PASSPHRASE` | **you choose this.** A long phrase, shared with the office. Until email or SMS is set up, nothing else guards the sign-in code |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | the mailbox that emails sign-in codes. Optional; see `docs/CONSOLE-ACCESS.md` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | the account that texts sign-in codes. Optional; Indian numbers need DLT registration first |
 
 The rest (`CATALYST_PROJECT_ID`, `ORG_ID`, `SCHEMA`, `FILE_FOLDER_ID`,
 `NOAH_API_BASE`, `ALLOWED_ORIGINS`, `NODE_ENV`) are already in `render.yaml` —

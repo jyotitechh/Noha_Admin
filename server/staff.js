@@ -18,7 +18,7 @@
 import { db, roleById } from './db.js';
 import { live, isNoah, staffByEmail, allStaff } from './store.js';
 import {
-  mobileKey, findStaffByMobile, loadStaffDirectory, consoleStaffEnabled, touchStaffSignIn,
+  mobileKey, findStaffByMobile, findStaffByEmail, loadStaffDirectory, consoleStaffEnabled, touchStaffSignIn,
 } from './noah-schema.js';
 
 export { mobileKey };
@@ -66,7 +66,8 @@ export function testAccounts() {
       memberRowId: null,
       name: `Test · ${r.name}`,
       title: 'Test account',
-      email: '',
+      /* `.test` is reserved and can never be a real mailbox. */
+      email: `${r.id}@console.test`,
       mobile,
       mobileKey: mobileKey(mobile),
       role: r.id,
@@ -79,6 +80,18 @@ export function testAccounts() {
 }
 
 const roleIds = () => db.ROLES.map((r) => r.id);
+
+/** A found member of staff, if their access is switched on. Same rule whichever
+    way they identified themselves. */
+function usable(s, what, key) {
+  if (s.blocked || s.status === 'Blocked') {
+    return { error: `That ${what} is blocked. The member is archived, or their login is.` };
+  }
+  if (s.status !== 'Active') {
+    return { error: `That access is ${String(s.status).toLowerCase()}. Ask a super administrator to restore it.` };
+  }
+  return { staff: { ...s, key } };
+}
 
 /**
  * Find who is signing in. Returns { staff } or { error }.
@@ -102,20 +115,36 @@ export async function resolveStaff({ mobile, email } = {}) {
       if (!s) {
         return { error: 'That number does not have access to this console. Ask a super administrator to give you a role.' };
       }
-      if (s.blocked || s.status === 'Blocked') {
-        return { error: 'That number is blocked. The member is archived, or their login is.' };
-      }
-      if (s.status !== 'Active') {
-        return { error: `That access is ${String(s.status).toLowerCase()}. Ask a super administrator to restore it.` };
-      }
-      return { staff: { ...s, key } };
+      return usable(s, 'number', key);
     }
     return { error: 'That number does not have access to this console.' };
   }
 
   if (email) {
+    const addr = String(email).trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) return { error: 'That is not an email address.' };
+
+    if (testLoginEnabled()) {
+      const t = testAccounts().find((a) => a.email === addr);
+      if (t) return { staff: { ...t, key: addr } };
+    }
+
+    /* Live data: the address has to be on a member's row, and that member has
+       to have been given a role, exactly as with a mobile number. */
+    if (live() && isNoah()) {
+      const r = await findStaffByEmail(addr, roleIds());
+      if (r.ambiguous) {
+        return { error: 'More than one person uses that address. Sign in with your mobile number instead.' };
+      }
+      if (!r.staff) {
+        return { error: 'That address does not have access to this console. Ask a super administrator to give you a role.' };
+      }
+      return usable(r.staff, 'address', addr);
+    }
+    /* Catalyst connected, but not the schema that carries members. */
     if (live()) return { error: 'Sign in with your mobile number.' };
-    const s = await staffByEmail(email);
+
+    const s = await staffByEmail(addr);
     if (!s) return { error: 'No staff account uses that address.' };
     if (s.status && s.status !== 'Active') {
       return { error: `That account is ${String(s.status).toLowerCase()}. Ask a super administrator to re-enable it.` };

@@ -398,7 +398,7 @@ await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
 
   const sample = await ST.resolveStaff({ email: 'anitha.varghese@karunasadan.org' });
   check('THE BACKDOOR IS CLOSED: a sample person email does not sign in on live data',
-    !sample.staff && /mobile number/.test(sample.error || ''), JSON.stringify(sample).slice(0, 140));
+    !sample.staff && /does not have access/.test(sample.error || ''), JSON.stringify(sample).slice(0, 140));
 
   const id = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
   check('a member given a role signs in with their registered number',
@@ -415,6 +415,326 @@ await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
   check('the Staff screen lists the real people and the test accounts',
     listed.some((x) => x.source === 'catalyst-flag') && listed.filter((x) => x.source === 'test').length === 10);
 });
+
+/* ================================================================== */
+section('Signing in by email as well as by number');
+
+await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
+  reset(seed());
+  const anitha = 'anitha@example.com'; /* the office's own super administrator */
+  const anand = 'anand@example.com';   /* an approved member, not staff yet */
+  const memberRow = (id) => tables[T.members].find((x) => x.ROWID === id);
+
+  const viaEmail = await ST.resolveStaff({ email: `  ${anitha.toUpperCase()} ` });
+  check('an address on a staff member\'s row signs them in, whatever its case or spacing',
+    viaEmail.staff?.role === 'super' && viaEmail.staff.source === 'catalyst-flag', JSON.stringify(viaEmail).slice(0, 140));
+  check('...as the same person their number finds',
+    viaEmail.staff?.memberRowId === (await ST.resolveStaff({ mobile: '+91 90000 00555' })).staff?.memberRowId);
+
+  check('an address with no access is told so', /does not have access/.test((await ST.resolveStaff({ email: 'nobody@example.com' })).error || ''));
+  check('...an ordinary member is not staff by email either', /does not have access/.test((await ST.resolveStaff({ email: anand })).error || ''));
+  check('not an address is refused', /not an email address/.test((await ST.resolveStaff({ email: 'anitha' })).error || ''));
+  check('...one with no dot after the @ too', /not an email address/.test((await ST.resolveStaff({ email: 'a@b' })).error || ''));
+
+  const id = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+  check('a member given a role signs in by email too', (await ST.resolveStaff({ email: anand })).staff?.role === 'finance');
+  await S.updateConsoleStaff(id, { status: 'Suspended' });
+  check('...suspended, they cannot', /suspended/.test((await ST.resolveStaff({ email: anand })).error || ''));
+  await S.updateConsoleStaff(id, { status: 'Active' });
+
+  memberRow(M.approved).emailId2 = 'anand.work@example.com'; S.clearCache();
+  check('the second address on the row works as well', (await ST.resolveStaff({ email: 'Anand.Work@example.com' })).staff?.role === 'finance');
+
+  /* Two people on one address: signing in as whichever came first would hand
+     one of them the other's access. */
+  memberRow(M.boss).emailId2 = anand; S.clearCache();
+  const shared = await ST.resolveStaff({ email: anand });
+  check('an address two staff share signs nobody in', !shared.staff && /More than one person/.test(shared.error || ''), JSON.stringify(shared).slice(0, 140));
+  check('...and points them at their number, which still works', (await ST.resolveStaff({ mobile: '9000000779' })).staff?.role === 'finance');
+  delete memberRow(M.boss).emailId2; S.clearCache();
+
+  memberRow(M.approved).archived = true; S.clearCache();
+  check('...archived as a member, they cannot', /blocked/.test((await ST.resolveStaff({ email: anand })).error || ''));
+  memberRow(M.approved).archived = false; S.clearCache();
+
+  const t = await ST.resolveStaff({ email: 'super@console.test' });
+  check('each test account has an email that can never be a real mailbox',
+    t.staff?.role === 'super' && t.staff.source === 'test' && ST.testAccounts().every((a) => a.email.endsWith('@console.test')), JSON.stringify(t).slice(0, 100));
+});
+await withEnv({ NODE_ENV: 'production', ENABLE_TEST_LOGIN: undefined }, async () => {
+  check('...and in production they are not accounts', !!(await ST.resolveStaff({ email: 'super@console.test' })).error);
+});
+
+/* ================================================================== */
+section('How the code gets there: texted to a number, emailed to an address');
+
+const D = await import('./deliver.js');
+const A = await import('./auth.js');
+
+/* Nothing real is sent: both transports write to an outbox instead. */
+const outbox = [];
+const realTransport = { ...D.transport };
+D.transport.email = async (mail) => { outbox.push({ via: 'email', ...mail }); };
+D.transport.sms = async (to, text) => { outbox.push({ via: 'sms', to, text }); };
+const codeIn = (msg) => (msg.text.match(/\b(\d{6})\b/) || [])[1];
+
+const EMAIL = { SMTP_HOST: 'smtp.test', SMTP_USER: 'u', SMTP_PASS: 'p', SMTP_FROM: 'Karuna Sadan <no-reply@karunasadan.test>' };
+const TWILIO = { SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+15005550006', TWILIO_MESSAGING_SERVICE_SID: undefined };
+const NONE = Object.fromEntries(Object.keys({ ...EMAIL, ...TWILIO }).map((k) => [k, undefined]));
+
+/* Time is moved by hand, so the resend rules can be tested without waiting. */
+const realNow = Date.now;
+let clock = realNow();
+Date.now = () => clock;
+const tick = (s) => { clock += s * 1000; };
+
+try {
+  /* ---------- what counts as set up ---------- */
+  await withEnv({ ...NONE }, async () => {
+    check('with nothing configured, neither channel is on', !D.channels().email && !D.channels().sms);
+  });
+  await withEnv({ ...NONE, ...EMAIL }, async () => {
+    check('email needs host, user, password and a from address', D.channels().email && !D.channels().sms);
+  });
+  await withEnv({ ...NONE, ...EMAIL, SMTP_PASS: undefined }, async () => {
+    check('...a missing password means it is not on', !D.channels().email);
+  });
+  await withEnv({ ...NONE, ...TWILIO }, async () => {
+    check('SMS is on with an account and a sending number', D.channels().sms && !D.channels().email);
+  });
+  await withEnv({ ...NONE, ...TWILIO, TWILIO_FROM: undefined }, async () => {
+    check('...but not with no number to send from', !D.channels().sms);
+  });
+  await withEnv({ ...NONE, ...TWILIO, TWILIO_FROM: undefined, TWILIO_MESSAGING_SERVICE_SID: 'MG1' }, async () => {
+    check('...a messaging service stands in for a number', D.channels().sms);
+  });
+  check('the masks show where to look without the whole thing',
+    D.maskMobile('+919000000555') === '+91••••••0555' && D.maskEmail('anitha@example.com') === 'a•••@example.com',
+    `${D.maskMobile('+919000000555')} ${D.maskEmail('anitha@example.com')}`);
+  check('a number goes to the provider as + and digits', D.e164('919000000555') === '+919000000555');
+
+  /* ---------- by number: a text ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...TWILIO, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    outbox.length = 0;
+    const logged = [];
+    const realLog = console.log;
+    console.log = (...a) => logged.push(a.join(' '));
+    let r;
+    try { r = await A.requestCode({ mobile: '+91 90000 00555' }); } finally { console.log = realLog; }
+
+    check('asking by number texts the code', r.ok && r.via === 'sms' && outbox.length === 1 && outbox[0].via === 'sms', JSON.stringify(r).slice(0, 160));
+    check('...to the number in full, in the form providers want', outbox[0].to === '+919000000555', outbox[0].to);
+    check('...the message carries the code and how long it lasts', /^\d{6} is your Karuna Sadan console code/.test(outbox[0].text) && /5 minutes/.test(outbox[0].text), outbox[0].text);
+    check('the reply does NOT hand the code back once it has been sent', r.devCode === undefined && !JSON.stringify(r).includes(codeIn(outbox[0])));
+    check('...it says where it went, masked', r.sentTo === '+91••••••0555' && !JSON.stringify(r).includes('9000000555'), r.sentTo);
+    check('...and when it may be asked for again', r.resendAfterSeconds === 30);
+    check('...and it is not written to the server log either', !logged.some((l) => l.includes(codeIn(outbox[0]))), logged.join('|'));
+
+    check('a wrong code does not sign in', !(await A.verifyCode({ mobile: '+91 90000 00555' }, '000000')).ok || codeIn(outbox[0]) === '000000');
+    const signed = await A.verifyCode({ mobile: '+91 90000 00555' }, codeIn(outbox[0]));
+    check('the code that was texted signs them in', signed.ok && signed.user.role === 'super' && !!signed.token, JSON.stringify(signed).slice(0, 120));
+    check('...and works once', !(await A.verifyCode({ mobile: '+91 90000 00555' }, codeIn(outbox[0]))).ok);
+  });
+
+  /* ---------- by address: an email ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...EMAIL, ADMIN_PASSPHRASE: undefined }, async () => {
+    outbox.length = 0;
+    tick(60);
+    const r = await A.requestCode({ email: ' Anitha@Example.com ' });
+    check('asking by address emails the code', r.ok && r.via === 'email' && outbox.length === 1 && outbox[0].via === 'email', JSON.stringify(r).slice(0, 160));
+    check('...to the address, tidied', outbox[0].to === 'anitha@example.com', outbox[0].to);
+    check('...with the code in the subject, so it shows before the message is opened', /^\d{6} is your Karuna Sadan console code$/.test(outbox[0].subject), outbox[0].subject);
+    check('...the same code in the body, in plain text and HTML', outbox[0].text.includes(codeIn({ text: outbox[0].subject })) && outbox[0].html.includes(codeIn({ text: outbox[0].subject })));
+    check('...and not handed back in the reply', r.devCode === undefined && r.sentTo === 'a•••@example.com', JSON.stringify(r).slice(0, 140));
+    check('typing someone\'s email does not hand back their phone number, their name or their address',
+      !JSON.stringify(r).includes('9000000555') && r.name === undefined && r.mobile === undefined && r.email === undefined, JSON.stringify(r));
+
+    const code = codeIn({ text: outbox[0].subject });
+    const signed = await A.verifyCode({ email: 'anitha@example.com' }, code);
+    check('the emailed code signs them in', signed.ok && signed.user.role === 'super', JSON.stringify(signed).slice(0, 120));
+    check('...a code asked for by email does not sign in by number',
+      !(await A.verifyCode({ mobile: '+91 90000 00555' }, code)).ok);
+  });
+
+  /* ---------- the person must have access first ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...EMAIL, ...TWILIO, ADMIN_PASSPHRASE: undefined }, async () => {
+    outbox.length = 0;
+    const a = await A.requestCode({ email: 'stranger@example.com' });
+    const b = await A.requestCode({ mobile: '+91 90000 77777' });
+    check('nothing is sent to an address or number with no access', !a.ok && !b.ok && outbox.length === 0, JSON.stringify([a, b]).slice(0, 200));
+  });
+
+  /* ---------- a code that was sent to the right person is not valid after they lose access ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...EMAIL, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    outbox.length = 0;
+    tick(120);
+    const gid = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+    await A.requestCode({ email: 'anand@example.com' });
+    await S.updateConsoleStaff(gid, { status: 'Revoked' });
+    const late = await A.verifyCode({ email: 'anand@example.com' }, codeIn({ text: outbox[0].subject }));
+    check('access revoked after the code was sent: the code no longer works', !late.ok && /revoked/.test(late.error || ''), JSON.stringify(late));
+  });
+
+  /* ---------- how often ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...TWILIO, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    outbox.length = 0;
+    tick(120);
+    /* Their own person, so no earlier block's sends count against them. */
+    await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' });
+    const num = { mobile: '+91 90000 00779' };
+    const first = await A.requestCode(num);
+    const again = await A.requestCode(num);
+    check('asking twice at once sends one text', first.ok && !again.ok && again.status === 429 && outbox.length === 1, JSON.stringify(again));
+    check('...and says how long to wait', /in \d+ seconds/.test(again.error || '') && again.retryAfter > 0, again.error);
+    tick(31);
+    check('...after the wait, another is allowed', (await A.requestCode(num)).ok && outbox.length === 2);
+    for (let i = 0; i < 3; i++) { tick(31); await A.requestCode(num); }
+    tick(31);
+    const sixth = await A.requestCode(num);
+    check('five an hour, then it stops', !sixth.ok && sixth.status === 429 && /Too many/.test(sixth.error || '') && outbox.length === 5, `${outbox.length} ${JSON.stringify(sixth)}`);
+    tick(3600);
+    check('...and starts again an hour later', (await A.requestCode(num)).ok);
+  });
+
+  /* ---------- the provider fails ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...TWILIO, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    tick(7200);
+    const was = D.transport.sms;
+    D.transport.sms = async () => { throw new Error('Twilio refused: account AC123 suspended for +919000000555'); };
+    const errLog = console.error; const seen = [];
+    console.error = (...a) => seen.push(a.join(' '));
+    let r;
+    try { r = await A.requestCode({ mobile: '+91 90000 00555' }); } finally { console.error = errLog; D.transport.sms = was; }
+    check('a provider failure is reported, not hidden', !r.ok && r.status === 502, JSON.stringify(r));
+    check('...in plain words, without the provider\'s account and number details', /could not be texted/.test(r.error) && !/AC123|9000000555|Twilio/.test(r.error), r.error);
+    check('...the detail goes to the server log, with the number masked', seen.length === 1 && /suspended/.test(seen[0]) && /sms to \+91•+0555 failed/.test(seen[0]), seen.join('|'));
+    check('...no code is left waiting to be guessed', !(await A.verifyCode({ mobile: '+91 90000 00555' }, '123456')).ok);
+    check('...and a failed send does not use up their hourly allowance', (await A.requestCode({ mobile: '+91 90000 00555' })).ok);
+  });
+
+  /* ---------- nothing set up ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    outbox.length = 0;
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('locally, with nothing set up, the code is shown on screen as before', r.ok && /^\d{6}$/.test(r.devCode) && r.via === undefined && outbox.length === 0, JSON.stringify(r));
+  });
+  await withEnv({ NODE_ENV: 'production', ...NONE, ENABLE_TEST_LOGIN: undefined, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    tick(7200);
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('deployed with nothing set up and no passphrase, it will NOT hand the code to whoever asks',
+      !r.ok && r.status === 503 && r.devCode === undefined && /not set up/.test(r.error), JSON.stringify(r));
+  });
+  await withEnv({ NODE_ENV: 'production', ...NONE, ...EMAIL, ENABLE_TEST_LOGIN: undefined, ADMIN_PASSPHRASE: undefined }, async () => {
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('...and when the other channel works it says to use that', /Sign in with your email/.test(r.error || ''), r.error);
+  });
+  await withEnv({ NODE_ENV: 'production', ...NONE, ENABLE_TEST_LOGIN: undefined, ADMIN_PASSPHRASE: 'office-secret' }, async () => {
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('behind the office passphrase, the old on-screen code still works', r.ok && /^\d{6}$/.test(r.devCode), JSON.stringify(r).slice(0, 120));
+  });
+  await withEnv({ NODE_ENV: 'production', ...NONE, ...TWILIO, ENABLE_TEST_LOGIN: undefined, ADMIN_PASSPHRASE: 'office-secret' }, async () => {
+    tick(7200);
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('once SMS is set up the passphrase deployment stops showing codes', r.ok && r.devCode === undefined && r.via === 'sms', JSON.stringify(r).slice(0, 140));
+  });
+
+  /* ---------- test accounts are never sent anything ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...EMAIL, ...TWILIO, ENABLE_TEST_LOGIN: undefined, ADMIN_PASSPHRASE: undefined }, async () => {
+    outbox.length = 0;
+    const byNumber = await A.requestCode({ mobile: '+91 90000 00001' });
+    const byEmail = await A.requestCode({ email: 'super@console.test' });
+    const again = await A.requestCode({ mobile: '+91 90000 00001' });
+    check('a test account gets its fixed code and no message, by number or by email',
+      byNumber.devCode === '123456' && byEmail.devCode === '123456' && outbox.length === 0 && byNumber.test, JSON.stringify([byNumber, byEmail]).slice(0, 200));
+    check('...and is not throttled, so the suites can sign in as often as they like', again.ok);
+    check('...it signs in by email with that code', (await A.verifyCode({ email: 'super@console.test' }, '123456')).ok);
+  });
+
+  /* ---------- the real transports ---------- */
+  Date.now = realNow;
+  Object.assign(D.transport, realTransport);
+  await withEnv({ ...NONE, ...TWILIO }, async () => {
+    const realFetch = globalThis.fetch;
+    let call = null;
+    globalThis.fetch = async (url, init) => { call = { url: String(url), init }; return new Response(JSON.stringify({ sid: 'SM1' }), { status: 201 }); };
+    try { await realTransport.sms('+919000000555', '123456 is your code'); } finally { globalThis.fetch = realFetch; }
+    const body = new URLSearchParams(String(call?.init.body));
+    check('Twilio is called on the account\'s own messages endpoint', call?.url === 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json', call?.url);
+    check('...with the account sid and token as basic auth', call?.init.headers.Authorization === 'Basic ' + Buffer.from('AC123:tok').toString('base64'));
+    check('...the number, the sender and the text in the form body', body.get('To') === '+919000000555' && body.get('From') === '+15005550006' && body.get('Body') === '123456 is your code', String(call?.init.body));
+    check('...a form post, not JSON', call?.init.headers['Content-Type'] === 'application/x-www-form-urlencoded' && call?.init.method === 'POST');
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ code: 21608, message: 'unverified number' }), { status: 400 });
+    let failure = null;
+    try { await realTransport.sms('+919000000555', 'x'); } catch (e) { failure = e; } finally { globalThis.fetch = realFetch; }
+    check('Twilio\'s refusal becomes an error that names its code', /400 \/ 21608/.test(failure?.message || '') && /unverified number/.test(failure.message), failure?.message);
+  });
+  await withEnv({ ...NONE, ...TWILIO, TWILIO_FROM: undefined, TWILIO_MESSAGING_SERVICE_SID: 'MG77' }, async () => {
+    const realFetch = globalThis.fetch;
+    let body = null;
+    globalThis.fetch = async (_u, init) => { body = new URLSearchParams(String(init.body)); return new Response('{}', { status: 201 }); };
+    try { await realTransport.sms('+919000000555', 'x'); } finally { globalThis.fetch = realFetch; }
+    check('with a messaging service, that is sent instead of a number', body?.get('MessagingServiceSid') === 'MG77' && !body.has('From'));
+  });
+
+  /* A real SMTP conversation, against a tiny server in this process: the only
+     way to know an email actually leaves, not just that our function was called. */
+  const net = await import('node:net');
+  const received = [];
+  const smtp = net.createServer((sock) => {
+    let inData = false, buf = '', body = '';
+    const say = (s) => sock.write(s + '\r\n');
+    say('220 sink ESMTP');
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      for (;;) {
+        if (inData) {
+          body += buf; buf = '';
+          if (body.endsWith('\r\n.\r\n')) { inData = false; received.push(body); body = ''; say('250 queued'); continue; }
+          return;
+        }
+        const i = buf.indexOf('\r\n');
+        if (i < 0) return;
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        const verb = line.slice(0, 4).toUpperCase();
+        if (verb === 'EHLO') sock.write('250-sink\r\n250 AUTH PLAIN\r\n');
+        else if (verb === 'AUTH') say('235 ok');
+        else if (verb === 'DATA') { say('354 go'); inData = true; }
+        else if (verb === 'QUIT') { say('221 bye'); sock.end(); return; }
+        else say('250 ok');
+      }
+    });
+  });
+  await new Promise((ok) => smtp.listen(0, '127.0.0.1', ok));
+  try {
+    await withEnv({ ...NONE, ...EMAIL, SMTP_HOST: '127.0.0.1', SMTP_PORT: String(smtp.address().port) }, async () => {
+      let sendErr = null;
+      const errLog = console.error; console.error = (...a) => { sendErr = a.join(' '); };
+      try { await D.sendCode({ via: 'email', to: 'anitha@example.com', code: '482913', ttlMs: 300000 }); } catch { /* reported by the check below */ } finally { console.error = errLog; }
+      check('...and the first of those: an email really goes out over SMTP', received.length === 1, `${received.length} received; ${sendErr || 'no error'}`);
+      const mail = received[0] || '';
+      check('...to the right person, from the configured sender', /To: anitha@example\.com/i.test(mail) && /From: .*no-reply@karunasadan\.test/i.test(mail), mail.slice(0, 300));
+      check('...with the code in the subject and the body', /Subject: 482913 is your Karuna Sadan console code/.test(mail) && mail.includes('482913'));
+    });
+  } finally { smtp.close(); }
+
+  await withEnv({ ...NONE, ...EMAIL, SMTP_HOST: '127.0.0.1', SMTP_PORT: '1' }, async () => {
+    const errLog = console.error; console.error = () => {};
+    let failure = null;
+    try { await D.sendCode({ via: 'email', to: 'anitha@example.com', code: '111111', ttlMs: 300000 }); } catch (e) { failure = e; } finally { console.error = errLog; }
+    check('a mail server that cannot be reached is a plain failure, not a hang or a crash',
+      failure?.code === 'delivery_failed' && /could not be emailed/.test(failure.message) && !/ECONNREFUSED|127\.0\.0\.1/.test(failure.message), failure?.message);
+  });
+} finally {
+  Date.now = realNow;
+  Object.assign(D.transport, realTransport);
+}
 
 /* ================================================================== */
 section('Content: what the office authors');

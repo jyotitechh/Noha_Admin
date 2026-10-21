@@ -1,7 +1,7 @@
 /* Who is signed in, and what they may do.
 
-   NO ZOHO SINGLE SIGN-ON. Sign-in is the local email + one-time-code flow in
-   server/auth.js. When Zoho SSO goes in, replace `requestCode` and `verify`
+   NO ZOHO SINGLE SIGN-ON. Sign-in is the local mobile-or-email + one-time-code
+   flow in server/auth.js. When Zoho SSO goes in, replace `requestCode` and `verify`
    with the Zoho redirect and callback — `can`, `user` and everything that
    reads them stay as they are.
 
@@ -11,15 +11,28 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, getToken, setToken, type User } from '@/lib/api';
 
+/** How someone signs in: by mobile number (a code is texted) or by email (a code is emailed). */
+export type Identity = { mobile: string; email?: undefined } | { email: string; mobile?: undefined };
+
+export interface CodeSent {
+  name: string;
+  devCode?: string;
+  test?: boolean;
+  via?: 'sms' | 'email';
+  sentTo?: string;
+  resendAfterSeconds?: number;
+}
+
 interface AuthValue {
   user: User | null;
   loading: boolean;
   /** True when the signed-in role holds any one of `perm`. */
   can: (perm?: string | string[]) => boolean;
-  /* `devCode` is only present while there is no SMS gateway, and for test
-     accounts outside production. */
-  requestCode: (mobile: string, passphrase?: string) => Promise<{ name: string; devCode?: string; test?: boolean }>;
-  verify: (mobile: string, code: string) => Promise<void>;
+  /* `devCode` is only present when nothing was really sent: no SMS or email
+     set up on the server, and test accounts outside production. `via` and
+     `sentTo` say how it went when it was sent. */
+  requestCode: (who: Identity, passphrase?: string) => Promise<CodeSent>;
+  verify: (who: Identity, code: string) => Promise<void>;
   viewAs: (role: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -39,13 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const requestCode = useCallback(async (mobile: string, passphrase?: string) => {
-    const r = await api.post<{ name: string; devCode?: string; test?: boolean }>('/auth/request-code', { mobile, passphrase });
-    return r;
+  const requestCode = useCallback(async (who: Identity, passphrase?: string) => {
+    return api.post<CodeSent>('/auth/request-code', { ...who, passphrase });
   }, []);
 
-  const verify = useCallback(async (mobile: string, code: string) => {
-    const r = await api.post<{ token: string; user: User }>('/auth/verify', { mobile, code });
+  const verify = useCallback(async (who: Identity, code: string) => {
+    const r = await api.post<{ token: string; user: User }>('/auth/verify', { ...who, code });
     setToken(r.token);
     setUser(r.user);
   }, []);

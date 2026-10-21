@@ -206,8 +206,23 @@ const unknown = await call('POST', '/auth/request-code', { mobile: '+91 90000 77
 check('a number with no access is refused, and told why', unknown.status === 400 && /does not have access/.test(unknown.body?.error || ''), unknown.text.slice(0, 120));
 check('a member who is not staff is refused too', (await call('POST', '/auth/request-code', { mobile: ANAND })).status === 400);
 const viaEmail = await call('POST', '/auth/request-code', { email: 'anitha.varghese@karunasadan.org' });
-check('THE BACKDOOR IS CLOSED: a sample person email does not sign in', viaEmail.status === 400 && /mobile number/.test(viaEmail.body?.error || ''), viaEmail.text.slice(0, 120));
+check('THE BACKDOOR IS CLOSED: a sample person email does not sign in', viaEmail.status === 400 && /does not have access/.test(viaEmail.body?.error || ''), viaEmail.text.slice(0, 120));
 check('a junk number is refused', (await call('POST', '/auth/request-code', { mobile: '12' })).status === 400);
+check('a junk address is refused', (await call('POST', '/auth/request-code', { email: 'nope' })).status === 400);
+
+/* By email as well as by number. This harness has no SMTP, so the code comes
+   back on screen, which is what an unconfigured server does. */
+const bossMail = await call('POST', '/auth/request-code', { email: 'Anitha@Example.com' });
+check('the office super administrator can ask for a code by email', bossMail.status === 200 && /^\d{6}$/.test(bossMail.body?.devCode || ''), bossMail.text.slice(0, 140));
+check('...and the reply does not give away their phone number', !/9000000555/.test(bossMail.text), bossMail.text.slice(0, 140));
+const mailIn = await call('POST', '/auth/verify', { email: 'anitha@example.com', code: bossMail.body?.devCode });
+check('...and signs in with it', mailIn.status === 200 && mailIn.body?.user?.role === 'super' && mailIn.body.user.source === 'catalyst-flag', mailIn.text.slice(0, 140));
+check('a code asked for by email is not good for the number', (await call('POST', '/auth/verify', { mobile: BOSS, code: bossMail.body?.devCode })).status === 400);
+const testMail = await call('POST', '/auth/request-code', { email: 'finance@console.test' });
+const testMailIn = await call('POST', '/auth/verify', { email: 'finance@console.test', code: testMail.body?.devCode });
+check('a test account signs in by email too', testMailIn.status === 200 && testMailIn.body?.user?.role === 'finance', testMailIn.text.slice(0, 140));
+const metaNow = await call('GET', '/meta');
+check('/meta says which ways of getting a code are set up', metaNow.body?.codeChannels && metaNow.body.codeChannels.email === false && metaNow.body.codeChannels.sms === false, JSON.stringify(metaNow.body?.codeChannels));
 
 const ask = await call('POST', '/auth/request-code', { mobile: BOSS });
 check('a wrong code is refused', (await call('POST', '/auth/verify', { mobile: BOSS, code: '000000' })).status === 400);
