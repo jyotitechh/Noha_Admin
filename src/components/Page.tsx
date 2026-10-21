@@ -19,7 +19,6 @@ export function PageHeader({ mod, tab, actions }: { mod: ModuleDef; tab?: TabDef
         <div className="grow">
           <h1>{mod.title}</h1>
           <div className="meta">
-            {mod.sec && <span className="sec-ref" title="Engineering brief section">§{mod.sec}</span>}
             {mod.badges?.map((id) => {
               const q = byId[id];
               if (!q?.count) return null;
