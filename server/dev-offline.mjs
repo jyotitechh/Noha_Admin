@@ -54,7 +54,7 @@ globalThis.fetch = (url, init) => {
   return realFetch(url, init);
 };
 
-const { S, T, tables, reset, seed } = await import('./fake-catalyst.mjs');
+const { S, T, tables, reset, seed, makeReady } = await import('./fake-catalyst.mjs');
 reset(seed());
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -75,6 +75,14 @@ http.createServer(async (req, res) => {
   /* A control hook for tests only: change a row in the fake Catalyst, as if the
      office had edited it there. This process exists only for the offline
      harness, on 127.0.0.1, with no real data behind it. */
+  /* "The Catalyst developer added the columns": a content table starts accepting writes. */
+  if (req.method === 'POST' && path === '/_fake/ready') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const { table } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    return makeReady(table) ? send(res, 200, { ok: true }) : err(res, 404, 'no_such_table', 'No such content table in the fake.');
+  }
+
   if (req.method === 'POST' && path === '/_fake/patch') {
     const chunks = [];
     for await (const c of req) chunks.push(c);

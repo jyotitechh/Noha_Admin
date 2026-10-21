@@ -350,6 +350,123 @@ check('...suspending', actions.some((a) => /Suspended console access/.test(a)));
 check('...and revoking', actions.some((a) => /Revoked console access/.test(a)));
 check('...and sign-ins say which kind they were', actions.some((a) => /Signed in/.test(a)));
 
+/* ================================================================== */
+section('Content, media and school, over HTTP');
+
+const fakeReady = (table) =>
+  fetch(CONTROL + '/_fake/ready', { method: 'POST', body: JSON.stringify({ table }) }).then((r) => r.json());
+
+const editor = await signIn('+91 90000 00006');     /* the test content editor */
+const finance = await signIn('+91 90000 00003');    /* the test finance officer */
+const ET = editor.token;
+const FT = finance.token;
+
+const types = await call('GET', '/content/types', null, ET);
+check('the content editor can read what can be authored', types.status === 200 && types.body?.types?.length === 15, `${types.status}`);
+check('...grouped into content, media and school', Object.keys(types.body?.sections || {}).join() === 'content,media,school');
+check('...with seven languages on offer', types.body?.languages?.length === 7);
+check('...and each kind says which fields it has', types.body.types.every((t) => t.fields.length > 2 && t.table));
+check('finance cannot read it (403)', (await call('GET', '/content/types', null, FT)).status === 403);
+check('...nor list content', (await call('GET', '/content/manna', null, FT)).status === 403);
+check('...nor write it', (await call('POST', '/content/manna', {}, FT)).status === 403);
+check('it needs a sign-in', (await call('GET', '/content/types')).status === 401);
+check('an unknown kind is a 404', (await call('GET', '/content/nonsense', null, ET)).status === 404);
+
+/* ---------- Catalyst, before the columns exist ---------- */
+const empty = await call('GET', '/content/manna', null, ET);
+check('a table with no columns yet lists as empty', empty.status === 200 && empty.body.rows.length === 0 && empty.body.source === 'catalyst', empty.text.slice(0, 120));
+
+const MANNA = { title: 'Walking by faith', publishDate: '2026-10-20', text: 'A verse (John 3:16)', content: 'The message of the day.', prayer: 'A short prayer.' };
+const notYet = await call('POST', '/content/manna', MANNA, ET);
+check('saving into it is refused, in plain words', notYet.status === 502 && /Catalyst refused it/.test(notYet.body?.error || ''), `${notYet.status} ${notYet.text.slice(0, 140)}`);
+check('...pointing at the document that lists the columns', /CONTENT-TABLES/.test(notYet.body?.hint || ''));
+
+const tube = await call('GET', '/content/tubeVideos', null, ET);
+check('Noah Tube says its table does not exist', tube.body?.notReady?.code === 'no_table', tube.text.slice(0, 160));
+const tubeSave = await call('POST', '/content/tubeVideos', { title: 'X', videoUrl: 'https://example.com/v' }, ET);
+check('...and saving to it is refused as not ready (409)', tubeSave.status === 409 && tubeSave.body?.notReady === true, tubeSave.text.slice(0, 120));
+
+/* ---------- checking what is sent ---------- */
+const invalid = await call('POST', '/content/manna', {}, ET);
+check('a blank form names every field that is missing (400)', invalid.status === 400 && ['title', 'publishDate', 'text', 'content', 'prayer'].every((k) => invalid.body?.errors?.[k]), invalid.text.slice(0, 140));
+const badLink = await call('POST', '/content/manna', { ...MANNA, imageUrl: 'javascript:alert(1)' }, ET);
+check('a link that is not http(s) is refused', badLink.status === 400 && !!badLink.body?.errors?.imageUrl);
+
+/* ---------- once the Catalyst developer has added the columns ---------- */
+await fakeReady('dailyMana');
+const made = await call('POST', '/content/manna', { ...MANNA, language: 'en', published: false }, ET);
+check('the devotional is saved', made.status === 201 && made.body?.ok === true, `${made.status} ${made.text.slice(0, 140)}`);
+
+const mannaList = await call('GET', '/content/manna', null, ET);
+const entry = mannaList.body?.rows?.[0];
+check('...and listed, as a draft', mannaList.body?.rows?.length === 1 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
+check('...with a string id', typeof entry?.id === 'string' && entry.id.length >= 15);
+check('...and the language and date came back as sent', entry?.language === 'en' && entry?.publishDate === '2026-10-20');
+
+const pub = await call('POST', `/content/manna/${entry.id}/publish`, { on: true }, ET);
+check('publishing it works', pub.status === 200 && pub.body?.on === true, pub.text.slice(0, 100));
+check('...and it is live', (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 1);
+
+const patched = await call('PATCH', `/content/manna/${entry.id}`, { title: 'Walking by faith, revised' }, ET);
+check('a change is saved', patched.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows[0].title === 'Walking by faith, revised');
+check('...and the rest of it is kept', (await call('GET', '/content/manna', null, ET)).body.rows[0].prayer === 'A short prayer.');
+check('a change that empties a required field is refused', (await call('PATCH', `/content/manna/${entry.id}`, { title: '' }, ET)).status === 400);
+
+const down = await call('POST', `/content/manna/${entry.id}/publish`, { on: false }, ET);
+check('taking it down works', down.status === 200 && (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 0);
+
+check('a kind with no publish step says so (400)', (await call('POST', '/content/mannaCategories/1/publish', { on: true }, ET)).status === 400);
+
+const del = await call('DELETE', `/content/manna/${entry.id}`, null, ET);
+check('deleting works', del.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows.length === 0);
+check('finance cannot delete (403)', (await call('DELETE', `/content/manna/${entry.id}`, null, FT)).status === 403);
+
+/* ---------- it is all recorded ---------- */
+const audit2 = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows?.map((a) => `${a.action}|${a.rec}`) || [];
+check('creating is in the audit log, with the title', audit2.some((a) => /Created devotional\|Daily Manna: Walking by faith/.test(a)), audit2.slice(0, 5).join(' / '));
+check('...publishing', audit2.some((a) => /^Published devotional/.test(a)));
+check('...taking down', audit2.some((a) => /^Took down devotional/.test(a)));
+check('...changing', audit2.some((a) => /^Changed devotional/.test(a)));
+check('...deleting', audit2.some((a) => /^Deleted devotional/.test(a)));
+
+/* ---------- the rest of the kinds are reachable ---------- */
+const kinds = ['mannaCategories', 'prayers', 'confessions', 'dictionary', 'dictionaryCategories', 'noahgramPosts',
+  'noahgramCategories', 'tubeVideos', 'tubeCategories', 'bibleSchools', 'courses', 'courseCategories', 'courseSections', 'courseLessons'];
+const reach = await Promise.all(kinds.map((k) => call('GET', `/content/${k}`, null, ET)));
+check('every kind of content answers a list request', reach.every((r) => r.status === 200), reach.map((r, i) => `${kinds[i]}:${r.status}`).join(' '));
+
+/* ================================================================== */
+section('One person, everything about them');
+
+const membership = await signIn('+91 90000 00002');   /* members.view, edit and pii */
+const verifier = await signIn('+91 90000 00008');     /* Jodie verifier: no members.view */
+
+const person = await call('GET', `/people/${ANAND_ID}`, null, BT);
+check('the person page loads for a super administrator', person.status === 200 && person.body?.member?.name === 'Anand Rao', `${person.status} ${person.text.slice(0, 120)}`);
+check('...with the registration they made', person.body?.registration?.id === APPROVED_REG && person.body.registration.state === 'approved');
+check('...and the ids of their photo, ID and video', !!person.body?.registration?.fileIds?.video && !!person.body.registration.fileIds.photo && !!person.body.registration.fileIds.idProof);
+check('...who their pastor is', person.body?.pastoral?.pastor?.name === 'Fr Thomas', JSON.stringify(person.body?.pastoral));
+check('...whether they are a partner', person.body?.partnership?.isPartner === true);
+check('...and says family and groups are not recorded yet, rather than empty',
+  person.body?.family?.recorded === false && /no columns/.test(person.body.family.why) && person.body?.groups?.recorded === false);
+
+check('their phone, email and address are masked until revealed',
+  /•/.test(person.body?.member?.mobile) && /•/.test(person.body.member.email) && person.body.member.masked === true && !/9000000779/.test(person.body.member.mobile),
+  JSON.stringify({ m: person.body?.member?.mobile, e: person.body?.member?.email }));
+
+const reveal = await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token);
+check('revealing them is allowed with the permission', reveal.status === 200 && reveal.body?.mobile === '+919000000779' && reveal.body?.email === 'anand@example.com', reveal.text.slice(0, 120));
+const aud3 = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || [];
+check('...and written to the audit log, against the member', aud3.some((a) => /Revealed contact details/.test(a.action) && a.rec === ANAND_ID), aud3.slice(0, 3).map((a) => `${a.action}|${a.rec}`).join(' / '));
+
+const asFinance = await call('GET', `/people/${ANAND_ID}`, null, FT);
+check('finance may see the person (members.view)', asFinance.status === 200);
+check('...but not the registration, which holds the ID number', asFinance.body?.registration === null && asFinance.body?.registrationHidden === true);
+check('...and cannot reveal contact details (403)', (await call('GET', `/people/${ANAND_ID}/contact`, null, FT)).status === 403);
+check('a role with no access to members is refused (403)', (await call('GET', `/people/${ANAND_ID}`, null, verifier.token)).status === 403);
+check('it needs a sign-in', (await call('GET', `/people/${ANAND_ID}`)).status === 401);
+check('an unknown member is a 404', (await call('GET', '/people/1', null, BT)).status === 404);
+
 console.log('\n' + '─'.repeat(64));
 console.log(fails.length
   ? `\n  \x1b[31m${fails.length} failed\x1b[0m, ${pass} passed:\n${fails.map((f) => '   - ' + f).join('\n')}\n`

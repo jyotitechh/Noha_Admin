@@ -15,7 +15,7 @@
    keep their signatures. */
 
 import { getRows, insert, update, configured } from './catalyst.js';
-import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, rejectInNoah, canEnterApp, createRegistrationInNoah, patchRegistrationInNoah } from './noah-schema.js';
+import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, rejectInNoah, canEnterApp, createRegistrationInNoah, patchRegistrationInNoah, loadPerson } from './noah-schema.js';
 import { db, audit as memAudit } from './db.js';
 
 /* Table ids. Empty by default — set CATALYST_TABLE_* in .env.local for the
@@ -336,4 +336,36 @@ export async function listAudit() {
   if (!live() || !TABLES.AuditLog) return db.AUD;
   const rows = await getRows(TABLES.AuditLog);
   return rows.map(toAudit).sort((a, b) => +b.at - +a.at).slice(0, 200);
+}
+
+/* ---------- one person ---------- */
+
+/** Everything about one member, for the person page. */
+export async function personProfile(id) {
+  if (live() && isNoah()) return loadPerson(id);
+  if (live()) return null; /* the flat schema has no person page */
+
+  /* The sample data: the same shape, built from the generated roll. */
+  const m = db.MEMBERS.find((x) => String(x.id) === String(id));
+  if (!m) return null;
+  const regs = db.REGISTRATIONS
+    .filter((r) => r.memberId === m.id)
+    .sort((a, b) => +b.at - +a.at);
+  const person = (pid, list) => {
+    const p = list.find((x) => x.id === pid);
+    return p ? { rowId: p.id, name: p.name, mobile: '' } : null;
+  };
+  const kin = db.MEMBERS.filter((x) => m.family && x.family === m.family && x.id !== m.id);
+  return {
+    member: { ...m, rowId: m.id, approved: m.status === 'Active', blocked: false },
+    registration: regs[0] ?? null,
+    earlier: regs.slice(1).map((r) => ({ id: r.id, state: r.state, at: r.at, remark: r.remark })),
+    pastoral: { pastor: person(m.pastor, db.PASTORS), cellLeader: person(m.leader, db.LEADERS), cell: m.cell ?? null },
+    partnership: { isPartner: !!m.partner, expiresOn: null },
+    family: {
+      recorded: true,
+      rows: kin.map((k) => ({ rowId: k.id, name: k.name, rel: k.rel, age: k.age, kid: !!k.kid })),
+    },
+    groups: { recorded: true, rows: [] },
+  };
 }

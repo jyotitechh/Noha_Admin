@@ -25,15 +25,23 @@ const SCREENS: Record<string, ComponentType> = {
   'members/approved': lazy(() => import('@/modules/members/Approved')),
   'approles/people': lazy(() => import('@/modules/approles/People')),
   'members/register': lazy(() => import('@/modules/members/Register')),
-  'members/videocheck': lazy(() => import('@/modules/members/VideoCheck')),
 
   'community/prayer-inbox': lazy(() => import('@/modules/community/PrayerInbox')),
   'community/queue': lazy(() => import('@/modules/community/Moderation')),
   'community/flagged': lazy(() => import('@/modules/community/Flagged')),
   'community/praise': lazy(() => import('@/modules/community/Praise')),
 
-  'content/manna': lazy(() => import('@/modules/content/Manna')),
+  /* Authoring: every one of these is a ContentManager, drawn from the server's
+     definitions. See modules/content/screens.tsx. */
+  'content/manna': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Manna }))),
+  'content/prayers': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Prayers }))),
+  'content/confessions': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Confessions }))),
+  'content/dictionary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Dictionary }))),
   'content/announce': lazy(() => import('@/modules/content/Announce')),
+  'media/noahgram': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Noahgram }))),
+  'media/noahtube': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.NoahTube }))),
+  'school/bibleschool': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.BibleSchool }))),
+  'school/courses': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Courses }))),
 
   'events/events': lazy(() => import('@/modules/events/Events')),
   'events/passes': lazy(() => import('@/modules/events/Passes')),

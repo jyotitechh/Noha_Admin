@@ -13,8 +13,9 @@ import { collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { Table, type Column } from '@/components/Table';
 import { Drawer } from '@/components/layers';
-import { Chip, Empty, Failed, Kpi, Kpis, Kv, Loading, Note, Seg, Who } from '@/components/ui';
+import { Chip, Empty, Failed, Kpi, Kpis, Loading, Note, Seg, Who } from '@/components/ui';
 import { fd, fdt, since } from '@/lib/format';
+import { PersonDetail } from '@/components/PersonDetail';
 import type { Registration } from '@/lib/types';
 
 type Row = Registration & { rawStatus?: string; memberRowId?: string };
@@ -189,25 +190,10 @@ export default function Approved() {
               )}
             </ul>
 
-            {open.remark && (
-              <>
-                <div className="sect-title">What the member was told</div>
-                <div className="card pad"><p style={{ margin: 0 }}>“{open.remark}”</p></div>
-              </>
-            )}
-
             <hr className="div" />
-            <div className="sect-title">Their details</div>
-            <Kv rows={[
-              ['Name', open.fullName],
-              ['Mobile', <span key="m" className="mono">{open.mobile}</span>],
-              ['Email', open.email || '—'],
-              ['Address', [open.line1, open.line2, open.city, open.region, open.pin].filter(Boolean).join(', ') || '—'],
-              ['ID proof', open.idType ? `${open.idType} ${open.idNumber}` : '—'],
-              ['Declaration', open.agreed ? `accepted in ${open.declarationLang}, signed "${open.signature}"` : 'not accepted'],
-              ['Video', open.videoSecs ? `${open.videoSecs} seconds` : 'none'],
-              ['Member record', open.memberId ? <span key="x" className="mono">{open.memberId}</span> : '—'],
-            ]} />
+            {/* Everything about them, with the photograph, ID and video already
+                open: see components/PersonDetail. */}
+            <PersonDetail memberRowId={open.memberRowId ?? open.memberId ?? ''} />
           </>
         )}
       </Drawer>

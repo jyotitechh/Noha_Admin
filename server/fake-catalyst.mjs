@@ -27,6 +27,7 @@ function reset(seed) {
   for (const id of Object.values(T)) tables[id] ||= [];
   writes.length = 0;
   S.clearCache();
+  resetContent();
 }
 
 S.io.getRows = async (id) => (tables[id] || []).map((r) => ({ ...r }));
@@ -120,3 +121,59 @@ export const seed = () => ({
     { ROWID: '27145000000141593', memberRowId: M.blank, status: 'approved', CREATEDTIME: '2026-10-19 16:00:01:000' },
   ],
 });
+
+/* ---------- the content tables ----------
+
+   In the real project most content tables are EMPTY SHELLS: they exist with
+   Catalyst's four system columns and nothing else, so a save is refused. The
+   fake behaves the same, so the console's handling of that is tested, and a
+   test can "give the table its columns" with makeReady(). Noah Tube's `videos`
+   and `videoCategories` are not in the project at all. */
+
+import { TYPES } from './content-types.js';
+
+const contentIds = new Map();   /* table name -> fake id */
+const shells = new Set();       /* ids that refuse a write */
+const MISSING = new Set(['videos', 'videoCategories']);
+
+TYPES.forEach((t, i) => {
+  if (MISSING.has(t.table)) return;
+  contentIds.set(t.table, String(27145000000300001n + BigInt(i)));
+});
+
+/** Reset every content table to an empty shell. Called by reset(). */
+export function resetContent() {
+  shells.clear();
+  for (const id of contentIds.values()) { shells.add(id); tables[id] = []; }
+}
+
+/** Give a table its columns, so it accepts writes. */
+export function makeReady(name) {
+  const id = contentIds.get(name);
+  if (!id) return false;
+  shells.delete(id);
+  return true;
+}
+
+export const contentTableId = (name) => contentIds.get(name);
+
+const baseInsert = S.io.insert;
+const baseUpdate = S.io.update;
+const refuse = () => { throw new Error('Catalyst: The column does not exist in this table.'); };
+
+S.io.insert = async (id, row) => (shells.has(String(id)) ? refuse() : baseInsert(id, row));
+S.io.update = async (id, row) => (shells.has(String(id)) ? refuse() : baseUpdate(id, row));
+S.io.remove = async (id, rowIds) => {
+  if (shells.has(String(id))) refuse();
+  const rows = tables[id] || [];
+  for (const r of [].concat(rowIds)) {
+    const at = rows.findIndex((x) => x.ROWID === String(r));
+    if (at >= 0) rows.splice(at, 1);
+  }
+  writes.push({ op: 'remove', table: id, rowIds });
+  return { ok: true };
+};
+S.io.listTables = async () => [
+  ...Object.entries(T).filter(([, id]) => id).map(([name, id]) => ({ name, id })),
+  ...[...contentIds.entries()].map(([name, id]) => ({ name, id })),
+];

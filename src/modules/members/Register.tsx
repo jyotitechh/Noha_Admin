@@ -5,13 +5,14 @@
    itself shows a masked number so the column is still useful. */
 
 import { useMemo, useState } from 'react';
-import { api, collection } from '@/lib/api';
+import { collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
-import { useToast, Drawer } from '@/components/layers';
+import { Drawer } from '@/components/layers';
+import { PersonDetail } from '@/components/PersonDetail';
 import { Table, type Column } from '@/components/Table';
-import { Btn, Chip, Icon, Kpi, Kpis, Kv, Note, Status, Who, Failed, Loading, Empty } from '@/components/ui';
-import { fd, num, since } from '@/lib/format';
+import { Chip, Kpi, Kpis, Note, Status, Who, Failed, Loading, Empty } from '@/components/ui';
+import { fd, num } from '@/lib/format';
 import type { Member } from '@/lib/types';
 
 /** Enough of a number to recognise, not enough to use. */
@@ -22,10 +23,8 @@ export default function Register() {
   const [loc, setLoc] = useState('');
   const [status, setStatus] = useState('Active');
   const [open, setOpen] = useState<Member | null>(null);
-  const [contact, setContact] = useState<{ mobile: string; email: string; address: string } | null>(null);
 
-  const { can, user } = useAuth();
-  const { toast } = useToast();
+  const { can } = useAuth();
 
   const q = useQuery(
     () => collection<Member>('MEMBERS', { q: search || undefined, loc: loc || undefined, status: status || undefined, limit: 500 }),
@@ -44,16 +43,6 @@ export default function Register() {
     };
   }, [all.data]);
 
-  /* Revealing contact details is itself an action, and it is logged. */
-  async function reveal(m: Member) {
-    try {
-      const c = await api.get<{ mobile: string; email: string; address: string }>(`/members/${m.id}/contact`);
-      setContact(c);
-      toast('Contact details revealed. This is in the audit log.', 'warn');
-    } catch (e) {
-      toast((e as Error).message, 'bad');
-    }
-  }
 
   const columns: Column<Member>[] = [
     { key: 'name', label: 'Member', cell: (m) => <Who name={m.name} sub={<span className="mono">{m.id}</span>} /> },
@@ -101,7 +90,7 @@ export default function Register() {
           search={search}
           onSearch={setSearch}
           searchPlaceholder="Name, member number, mobile or email"
-          onRowClick={(m) => { setOpen(m); setContact(null); }}
+          onRowClick={setOpen}
           pageSize={25}
           toolbar={
             <>
@@ -123,72 +112,13 @@ export default function Register() {
 
       <Drawer
         open={!!open}
-        onClose={() => { setOpen(null); setContact(null); }}
+        onClose={() => setOpen(null)}
         width="wide"
         title={open?.name ?? ''}
         sub={open ? <><span className="mono">{open.id}</span> · {open.loc} · member since {fd(open.joined)}</> : ''}
       >
-        {open && (
-          <div className="dw-cols">
-            <div>
-              <div className="sect-title">Who they are</div>
-              <Kv rows={[
-                ['Name', open.name],
-                ['Age', `${open.age}`],
-                ['Gender', open.g === 'M' ? 'Male' : 'Female'],
-                ['Status', <Status key="s">{open.status}</Status>],
-                ['Language', open.lang],
-                ['Partner', open.partner ? 'Yes' : 'No'],
-              ]} />
-
-              <div className="sect-title">Where they belong</div>
-              <Kv rows={[
-                ['Congregation', open.loc],
-                ['Cell', open.cell ?? <span className="muted">Not in a cell</span>],
-                ['Address', open.address],
-              ]} />
-            </div>
-
-            <div>
-              <div className="sect-title">Contact details</div>
-              {contact ? (
-                <>
-                  <Kv rows={[
-                    ['Mobile', <span key="m" className="mono">{contact.mobile}</span>],
-                    ['Email', contact.email],
-                  ]} />
-                  <Note tone="warn" icon="history">
-                    This reveal is in the audit log against your name.
-                  </Note>
-                </>
-              ) : (
-                <>
-                  <Kv rows={[
-                    ['Mobile', <span key="m" className="mono muted">{mask(open.mobile)}</span>],
-                    ['Email', <span key="e" className="muted">hidden</span>],
-                  ]} />
-                  {can('members.pii') ? (
-                    <Btn icon="eye" onClick={() => reveal(open)}>Reveal contact details</Btn>
-                  ) : (
-                    <Note tone="mute" icon="lock">
-                      Your role ({user?.roleName}) cannot reveal contact details.
-                    </Note>
-                  )}
-                </>
-              )}
-
-              <div className="sect-title">In the app</div>
-              <Kv rows={[
-                ['Last opened the app', open.lastActive ? since(open.lastActive) : <span className="muted">Never</span>],
-                ['Profile photo', <Status key="p">{open.photo}</Status>],
-                ['Zoho CRM', <Status key="c">{open.crm}</Status>],
-                ...(open.fromRegistration
-                  ? [['Registered through', <span key="r" className="applink"><Icon name="mobile" />the Noah app · {open.fromRegistration}</span>] as [string, React.ReactNode]]
-                  : []),
-              ]} />
-            </div>
-          </div>
-        )}
+        {/* Everything about them, in one place: see components/PersonDetail. */}
+        {open && <PersonDetail memberRowId={(open as Member & { rowId?: string }).rowId ?? open.id} />}
       </Drawer>
     </div>
   );

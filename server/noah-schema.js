@@ -34,14 +34,14 @@
    IDS. A ROWID is past Number.MAX_SAFE_INTEGER: keep it a string, and never
    take it from an insert response (Catalyst sends it unquoted there). */
 
-import { getRows, getRow, update, insert, listTables } from './catalyst.js';
+import { getRows, getRow, update, insert, remove, listTables } from './catalyst.js';
 
 /* Every Catalyst call goes through this object, not straight to the imports.
    The schema logic — joins, the access gate, roles, the shape of a decision —
    is where the mistakes are, and testing it should not need the network or
    spend Catalyst's Data Store allowance. A test swaps these for an in-memory
    copy of the tables (see test-schema-offline.mjs). */
-export const io = { getRows, getRow, update, insert, listTables };
+export const io = { getRows, getRow, update, insert, remove, listTables };
 
 /* Table ids in noah-backend (27145000000040056), Development.
    `npm run check:schema` confirms each still points at the table it names. */
@@ -1010,4 +1010,48 @@ export async function updateConsoleStaff(rowId, patch) {
 export async function touchStaffSignIn(rowId) {
   if (!consoleStaffEnabled() || !rowId) return;
   await io.update(T.consoleStaff, { ROWID: String(rowId), lastSignedInAt: stamp() });
+}
+
+/* ---------- one person, everything about them ----------
+
+   The person page: who they are, the registration they made (with its three
+   uploads), who their pastor and cell leader are, whether they are a covenant
+   partner, and their family and groups.
+
+   Pastor, cell leader and partnership are on membersExtra and are real. Family
+   and groups are not: their tables (membersRelations, kids, kidsConnect,
+   groups, groupsConnect) exist in Catalyst with no columns yet, so there is
+   nothing to read. They are reported as "not recorded" with the reason, rather
+   than shown as empty, because "this person has no family" and "families are
+   not stored yet" are very different things to tell an office. */
+
+export async function loadPerson(memberRowId) {
+  const [members, regs, raw] = await Promise.all([loadMembers(), loadRegistrations(), snapshot()]);
+  const member = members.find((m) => m.rowId === String(memberRowId));
+  if (!member) return null;
+
+  /* Their registrations, newest first. The newest is the one on show. */
+  const mine = regs
+    .filter((r) => r.memberRowId === member.rowId)
+    .sort((a, b) => +(b.at ?? 0) - +(a.at ?? 0));
+
+  const x = raw.extras.find((e) => same(e.id, member.rowId)) || {};
+  const byRow = new Map(raw.members.map((m) => [String(m.ROWID), m]));
+  const who = (id) => {
+    const m = id ? byRow.get(String(id)) : null;
+    return m ? { rowId: String(m.ROWID), name: memberFullName(m), mobile: phoneOf(m) } : null;
+  };
+
+  return {
+    member,
+    registration: mine[0] ?? null,
+    earlier: mine.slice(1).map((r) => ({ id: r.id, state: r.state, at: r.at, remark: r.remark })),
+    pastoral: { pastor: who(x.connectedPastor), cellLeader: who(x.connectedLeader), cell: null },
+    partnership: {
+      isPartner: asBool(x.isPartner),
+      expiresOn: utc(x.partnershipExpireOn),
+    },
+    family: { recorded: false, rows: [], why: 'Families are not stored in Catalyst yet: their tables exist but have no columns.' },
+    groups: { recorded: false, rows: [], why: 'Groups are not stored in Catalyst yet: their tables exist but have no columns.' },
+  };
 }

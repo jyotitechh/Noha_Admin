@@ -301,6 +301,14 @@ export const update = (tableId, rows) =>
     body: JSON.stringify([].concat(rows)),
   });
 
+/** Delete rows by ROWID. Needs ZohoCatalyst.tables.rows.DELETE, which the
+    console's token already carries. Ids stay strings: they are past
+    Number.MAX_SAFE_INTEGER. */
+export const remove = (tableId, rowIds) =>
+  call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row?ids=${[].concat(rowIds).map(String).join(',')}`, {
+    method: 'DELETE',
+  });
+
 /** Escape a value for ZCQL. Single quotes are doubled, as in SQL. */
 export const q = (v) => {
   if (v === null || v === undefined) return 'NULL';

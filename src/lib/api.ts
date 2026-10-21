@@ -27,12 +27,18 @@ export class ApiError extends Error {
   status: number;
   needs?: string[];
   youAre?: string;
-  constructor(status: number, message: string, extra?: { needs?: string[]; youAre?: string }) {
+  /* field -> message, when the server refused a form field by field. */
+  errors?: Record<string, string>;
+  /* What to do about it, when the server knows. */
+  hint?: string;
+  constructor(status: number, message: string, extra?: { needs?: string[]; youAre?: string; errors?: Record<string, string>; hint?: string }) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.needs = extra?.needs;
     this.youAre = extra?.youAre;
+    this.errors = extra?.errors;
+    this.hint = extra?.hint;
   }
 }
 
@@ -80,6 +86,8 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, body?.error || `Request failed (${res.status}).`, {
       needs: body?.needs,
       youAre: body?.youAre,
+      errors: body?.errors,
+      hint: body?.hint,
     });
   }
   return body as T;
@@ -89,6 +97,7 @@ export const api = {
   get: <T,>(path: string) => call<T>(path),
   post: <T,>(path: string, body?: unknown) => call<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   patch: <T,>(path: string, body?: unknown) => call<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+  del: <T,>(path: string) => call<T>(path, { method: 'DELETE' }),
 };
 
 /* ---------- shapes ---------- */

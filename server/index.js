@@ -24,6 +24,8 @@ import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
 import mountStaff from './routes/staff.js';
+import mountPeople from './routes/people.js';
+import mountContent from './routes/content.js';
 
 const PORT = Number(process.env.PORT) || 4000;
 const app = express();
@@ -428,6 +430,8 @@ for (const method of ['get', 'post', 'patch', 'put', 'delete']) {
 }
 
 mountStaff(app, { requireSession, requirePerm });
+mountPeople(app, { requireSession, requirePerm });
+mountContent(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 

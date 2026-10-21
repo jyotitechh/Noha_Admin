@@ -417,6 +417,135 @@ await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
 });
 
 /* ================================================================== */
+section('Content: what the office authors');
+
+const C = await import('./content.js');
+const CT = await import('./content-types.js');
+const FC = await import('./fake-catalyst.mjs');
+const manna = CT.typeById('manna');
+
+/* ---------- the definitions ---------- */
+check('there are fifteen kinds of content across content, media and school', CT.TYPES.length === 15
+  && new Set(CT.TYPES.map((t) => t.section)).size === 3, `${CT.TYPES.length}`);
+check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 15 && CT.TYPES.every((t) => t.table));
+check('every field a kind names as its title exists', CT.TYPES.every((t) => t.fields.some((f) => f.key === t.title)));
+check('every publish flag is a real toggle field', CT.TYPES.every((t) => !t.publish || t.fields.some((f) => f.key === t.publish && f.kind === 'toggle')));
+check('every ref points at a kind that exists', CT.TYPES.every((t) => t.fields.every((f) => f.kind !== 'ref' || CT.typeById(f.ref))));
+check('the Daily Manna asks for what the Laravel backend requires',
+  ['title', 'text', 'content', 'prayer', 'publishDate'].every((k) => manna.fields.find((f) => f.key === k)?.required));
+
+/* ---------- checking what is sent ---------- */
+const good = { title: 'Walking by faith', publishDate: '2026-10-20', text: 'A verse', content: 'The message', prayer: 'A prayer' };
+check('a complete devotional passes', Object.keys(C.validate(manna, good).errors).length === 0);
+const bad = C.validate(manna, {});
+check('missing required fields are each named',
+  ['title', 'publishDate', 'text', 'content', 'prayer'].every((k) => bad.errors[k]), Object.keys(bad.errors).join());
+check('a bad date is refused', !!C.validate(manna, { ...good, publishDate: '20/10/2026' }).errors.publishDate);
+check('an impossible date is refused', !!C.validate(manna, { ...good, publishDate: '2026-13-45' }).errors.publishDate);
+check('a language off the list is refused', !!C.validate(manna, { ...good, language: 'xx' }).errors.language);
+check('a language on it passes', !C.validate(manna, { ...good, language: 'ml' }).errors.language);
+check('a link must be http(s)', !!C.validate(manna, { ...good, imageUrl: 'javascript:alert(1)' }).errors.imageUrl);
+check('...data: links too', !!C.validate(manna, { ...good, imageUrl: 'data:text/html,x' }).errors.imageUrl);
+check('...but a real one passes', !C.validate(manna, { ...good, imageUrl: 'https://example.com/a.jpg' }).errors.imageUrl);
+check('a colour must be a hex colour', !!C.validate(CT.typeById('noahgramCategories'), { name: 'X', backgroundColor: 'blue' }).errors.backgroundColor);
+check('a number must be a number', !!C.validate(CT.typeById('courses'), { name: 'X', donationAmount: 'lots' }).errors.donationAmount);
+check('...and not negative', !!C.validate(CT.typeById('courses'), { name: 'X', donationAmount: -5 }).errors.donationAmount);
+check('a very long title is refused', !!C.validate(manna, { ...good, title: 'x'.repeat(256) }).errors.title);
+check('long text has Catalyst\'s own limit', !!C.validate(manna, { ...good, content: 'x'.repeat(10001) }).errors.content);
+check('empty optional fields become null, not empty strings',
+  C.validate(manna, good).value.categoryId === null && C.validate(manna, good).value.language === null);
+check('a toggle left out is false', C.validate(manna, good).value.published === false);
+check('an update checks only what it sends', Object.keys(C.validate(manna, { title: 'New' }, { partial: true }).errors).length === 0
+  && Object.keys(C.validate(manna, { title: 'New' }, { partial: true }).value).join() === 'title');
+check('...but still refuses an emptied required field', !!C.validate(manna, { title: '' }, { partial: true }).errors.title);
+
+/* ---------- against Catalyst: not ready ---------- */
+reset(seed());
+check('the fake knows the content tables', !!FC.contentTableId('dailyMana') && !FC.contentTableId('videos'));
+const shellList = await C.listContent('manna');
+check('an empty-shell table lists as empty, not as an error', shellList.rows.length === 0 && shellList.source === 'catalyst' && !shellList.notReady);
+
+let refused = null;
+try { await C.createContent('manna', good, { canPublish: true }); } catch (e) { refused = e; }
+check('saving into an empty shell is refused, plainly', refused?.status === 502 && /Catalyst refused it/.test(refused.message), refused?.message);
+check('...with a pointer to what is missing', /CONTENT-TABLES/.test(refused?.extra?.hint || ''));
+
+const noVideos = await C.listContent('tubeVideos');
+check('a table that is not in the project says so', noVideos.notReady?.code === 'no_table' && /videos/.test(noVideos.notReady.why), JSON.stringify(noVideos.notReady));
+let missing = null;
+try { await C.createContent('tubeVideos', { title: 'X', videoUrl: 'https://example.com/v' }, { canPublish: true }); } catch (e) { missing = e; }
+check('...and saving to it is refused as not ready', missing?.status === 409 && missing.extra.notReady === true, missing?.message);
+
+/* ---------- against Catalyst: once the columns exist ---------- */
+FC.makeReady('dailyMana');
+FC.makeReady('dailyMannaCategories');
+const tid = FC.contentTableId('dailyMana');
+
+const made = await C.createContent('manna', { ...good, language: 'en', showOnObituary: true, published: false }, { canPublish: true });
+check('a devotional is saved to its table', FC.tables[tid].length === 1 && made.title === 'Walking by faith');
+const stored = FC.tables[tid][0];
+check('...with the right columns and types',
+  stored.title === 'Walking by faith' && stored.publishDate === '2026-10-20' && stored.showOnObituary === true
+  && stored.published === false && stored.categoryId === null && stored.language === 'en', JSON.stringify(stored).slice(0, 220));
+
+let list = await C.listContent('manna');
+check('...and listed with a string id', list.rows.length === 1 && typeof list.rows[0].id === 'string' && /^\d{17}$/.test(list.rows[0].id), list.rows[0]?.id);
+check('...as a draft', list.rows[0].live === false);
+
+const rid = list.rows[0].id;
+await C.publishContent('manna', rid, true, { canPublish: true });
+check('publishing sets the publish column', FC.tables[tid][0].published === true);
+check('...and it lists as live', (await C.listContent('manna')).rows[0].live === true);
+check('...and can be filtered to live and to draft',
+  (await C.listContent('manna', { state: 'live' })).rows.length === 1 && (await C.listContent('manna', { state: 'draft' })).rows.length === 0);
+await C.publishContent('manna', rid, false, { canPublish: true });
+check('taking it down clears it', FC.tables[tid][0].published === false);
+
+await C.updateContent('manna', rid, { title: 'Walking by faith, again' }, { canPublish: true });
+check('an update changes only what it sends', FC.tables[tid][0].title === 'Walking by faith, again' && FC.tables[tid][0].prayer === 'A prayer');
+check('searching finds it', (await C.listContent('manna', { q: 'again' })).rows.length === 1 && (await C.listContent('manna', { q: 'zzz' })).rows.length === 0);
+
+await C.createContent('manna', { ...good, title: 'Later one', publishDate: '2026-11-01' }, { canPublish: true });
+await C.createContent('manna', { ...good, title: 'Earlier one', publishDate: '2026-09-01' }, { canPublish: true });
+check('the newest date is listed first', (await C.listContent('manna')).rows.map((r) => r.title).join('|') === 'Later one|Walking by faith, again|Earlier one');
+
+await C.deleteContent('manna', rid);
+check('deleting removes the row', FC.tables[tid].length === 2 && !FC.tables[tid].some((r) => r.ROWID === rid));
+
+/* ---------- a role that may write but not publish ---------- */
+let denied = null;
+try { await C.createContent('manna', { ...good, published: true }, { canPublish: false }); } catch (e) { denied = e; }
+check('writing is allowed but publishing is not, without the permission', denied?.status === 403, denied?.message);
+check('...a draft is fine', (await C.createContent('manna', { ...good, title: 'Just a draft', published: false }, { canPublish: false })).ok);
+let denied2 = null;
+try { await C.updateContent('manna', FC.tables[tid][0].ROWID, { published: true }, { canPublish: false }); } catch (e) { denied2 = e; }
+check('...and neither can an edit switch it on', denied2?.status === 403);
+
+let nopub = null;
+try { await C.publishContent('mannaCategories', '1', true, { canPublish: true }); } catch (e) { nopub = e; }
+check('a kind with no publish step says so', nopub?.status === 400 && /no publish step/.test(nopub.message), nopub?.message);
+
+/* ---------- the sample set, with no Catalyst connection ---------- */
+const savedSchema = process.env.CATALYST_SCHEMA;
+process.env.CATALYST_SCHEMA = 'flat';
+check('without the noah schema the content is the sample set', !C.onCatalyst());
+const sample = await C.listContent('manna');
+check('...there are sample devotionals to look at', sample.rows.length === 3 && sample.source === 'sample');
+check('...every kind has some sample entries', (await Promise.all(CT.TYPES.map((t) => C.listContent(t.id)))).every((r) => r.rows.length >= 2));
+check('...a sample devotional is linked to its sample category', sample.rows.some((r) => r.categoryId === 'mannaCategories-1'));
+await C.createContent('manna', good, { canPublish: true });
+check('...saving adds to it', (await C.listContent('manna')).rows.length === 4);
+const sid = (await C.listContent('manna')).rows.find((r) => r.title === 'Walking by faith' && r.prayer === 'A prayer').id;
+await C.publishContent('manna', sid, true, { canPublish: true });
+check('...publishing flips it', (await C.listContent('manna', { state: 'live' })).rows.some((r) => r.id === sid));
+await C.deleteContent('manna', sid);
+check('...deleting removes it', (await C.listContent('manna')).rows.length === 3);
+let ghost = null;
+try { await C.updateContent('manna', 'nope', { title: 'x' }, { canPublish: true }); } catch (e) { ghost = e; }
+check('...changing one that does not exist is a 404', ghost?.status === 404);
+process.env.CATALYST_SCHEMA = savedSchema;
+
+/* ================================================================== */
 section('The cache');
 
 reset(seed());

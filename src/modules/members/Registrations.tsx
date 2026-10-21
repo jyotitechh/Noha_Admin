@@ -23,7 +23,7 @@ import { Upload } from '@/components/Upload';
 const LANG = { en: 'English', hi: 'हिन्दी Hindi', mr: 'मराठी Marathi' } as const;
 
 /* The six steps, in the app's order, as the member worked through them. */
-function Steps({ r }: { r: Registration }) {
+export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) {
   return (
     <div>
       <div className="step">
@@ -69,7 +69,7 @@ function Steps({ r }: { r: Registration }) {
             ['Number', <span key="num" className="mono">{r.idNumber}</span>],
           ]} />
           <div className="mt12">
-            <Upload registrationId={r.id} kind="id" filename={r.idFile} sizeKb={Math.round(r.idSizeKb)} />
+            <Upload registrationId={r.id} kind="id" filename={r.idFile} sizeKb={Math.round(r.idSizeKb)} auto={auto} />
           </div>
         </div>
       </div>
@@ -78,7 +78,7 @@ function Steps({ r }: { r: Registration }) {
         <span className="n">4</span>
         <div className="body">
           <h4>Photograph</h4>
-          <Upload registrationId={r.id} kind="photo" filename={r.photoFile} sizeKb={Math.round(r.photoSizeKb)} />
+          <Upload registrationId={r.id} kind="photo" filename={r.photoFile} sizeKb={Math.round(r.photoSizeKb)} auto={auto} />
           <p className="small muted mt8 mb0">Check it against the face on the ID document.</p>
         </div>
       </div>
@@ -111,9 +111,14 @@ function Steps({ r }: { r: Registration }) {
             Video KYC
             {r.videoAttempt > 1 && <Chip tone="warn">Attempt {r.videoAttempt}</Chip>}
           </h4>
-          <Upload registrationId={r.id} kind="video" filename={r.videoFile} seconds={r.videoSecs} />
-          <p className="small muted mt12 mb0">What the member was asked to read:</p>
-          <div className="script mt8">“{r.script}”</div>
+          <Upload registrationId={r.id} kind="video" filename={r.videoFile} seconds={r.videoSecs} auto={auto} />
+          {/* Real registrations carry no script: only the sample data does. */}
+          {r.script && (
+            <>
+              <p className="small muted mt12 mb0">What the member was asked to read:</p>
+              <div className="script mt8">“{r.script}”</div>
+            </>
+          )}
         </div>
       </div>
     </div>

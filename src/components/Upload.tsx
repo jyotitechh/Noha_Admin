@@ -21,11 +21,14 @@ interface Props {
   /** Seconds, for the video. */
   seconds?: number;
   sizeKb?: number;
+  /** Open it as soon as it is on screen, instead of waiting for a click.
+      The person page does: the office is there to look at them. */
+  auto?: boolean;
 }
 
 const LABEL: Record<Kind, string> = { id: 'ID document', photo: 'Photograph', video: 'KYC video' };
 
-export function Upload({ registrationId, kind, filename, seconds, sizeKb }: Props) {
+export function Upload({ registrationId, kind, filename, seconds, sizeKb, auto = false }: Props) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [src, setSrc] = useState('');
   const [error, setError] = useState('');
@@ -58,6 +61,10 @@ export function Upload({ registrationId, kind, filename, seconds, sizeKb }: Prop
       setState('failed');
     }
   }
+
+  /* Opening on its own still goes through the same audited route, so looking
+     at a document is recorded whether or not someone clicked. */
+  useEffect(() => { if (auto) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [auto, registrationId, kind]);
 
   /* Release the blob when the drawer closes, or the browser holds every
      video the office has opened today. */

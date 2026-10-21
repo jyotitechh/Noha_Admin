@@ -123,8 +123,11 @@ meter and billing are in the Catalyst console for org `60063007256`.
   To apply one: write `newValue` to the column, set the request's `status`,
   `reviewedAt` and `reviewedByRowId`.
 - **Chat, notifications and device tokens** are read-only and not shown.
-- **Content tables** (`dailyMana`, `dailyPrayers`, …) exist as empty shells, so
-  those screens still show "not in the connected project".
+- **Content, media and school** have screens (Daily Manna, prayers, confessions, the
+  dream dictionary, Noahgram, Noah Tube, Bible school, courses) but their Catalyst
+  tables are empty shells, so a save is refused until the Catalyst developer adds
+  the columns; Noah Tube's two tables do not exist. See
+  [CONTENT-TABLES.md](CONTENT-TABLES.md) for exactly what to add.
 - **Console staff** now sign in by mobile number and are members: see
   [CONSOLE-ACCESS.md](CONSOLE-ACCESS.md). Giving a role needs a small table that
   the Catalyst developer has to create.
