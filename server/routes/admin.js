@@ -7,7 +7,7 @@
 import { db, audit, roleById as staffRole, find } from '../db.js';
 import { now, ri, sum, pct } from '../seed/helpers.js';
 import { live, registrationById, createMember, patchRegistration, writeAudit, listRegistrations, listMembers, approveRegistration, returnVideo, rejectRegistration } from '../store.js';
-import { downloadFile, fileScopeMissing } from '../catalyst.js';
+import { downloadFile, fileScopeMissing, explainCatalyst } from '../catalyst.js';
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
@@ -515,7 +515,8 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         });
       res.json({ rows, total: rows.length, offset: 0, limit: rows.length });
     } catch (err) {
-      res.status(503).json({ error: err.message });
+      const explained = explainCatalyst(err);
+      res.status(503).json({ error: explained?.message ?? err.message, ...(explained ? { code: explained.code } : {}) });
     }
   });
 

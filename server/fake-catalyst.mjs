@@ -177,3 +177,16 @@ S.io.listTables = async () => [
   ...Object.entries(T).filter(([, id]) => id).map(([name, id]) => ({ name, id })),
   ...[...contentIds.entries()].map(([name, id]) => ({ name, id })),
 ];
+
+/* ---------- an outage ----------
+
+   Catalyst answering every read with an error, as it does when the allowance is
+   used up or the token is wrong. setOutage('...') starts it, setOutage(null)
+   ends it. */
+let outage = null;
+export const setOutage = (message) => { outage = message; };
+const readsOk = S.io.getRows;
+S.io.getRows = async (...args) => {
+  if (outage) throw new Error(outage);
+  return readsOk(...args);
+};

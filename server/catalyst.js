@@ -387,3 +387,34 @@ if (process.argv[2] === '--scopes') {
   console.log('\n  Paste this into the self client, as one comma-separated line:\n');
   console.log('  ' + SCOPES.join(',') + '\n');
 }
+
+/* ---------- saying what went wrong, in words an office can act on ----------
+
+   "Catalyst refused the request: Catalyst: You have exhausted the free tier
+   allowance for Datastore - Fetch" is accurate and tells nobody what to do. The
+   two failures that actually happen are not the console's fault and have a
+   different person to go to, so they are named. Anything else is passed on as
+   it came. */
+export function explainCatalyst(err) {
+  const m = String(err?.message || err || '');
+
+  if (/exhausted the free tier|allowance for|payment method/i.test(m)) {
+    return {
+      status: 503,
+      code: 'catalyst_quota',
+      message:
+        'Catalyst has stopped answering: the free allowance for reading its database is used up, so the console has nothing to show. ' +
+        'Nothing is wrong with the console. Whoever owns the Catalyst account needs to add a payment method or wait for the allowance to reset ' +
+        '(Catalyst console, Billing). The Noah app and the Noah API read the same database, so they are affected too.',
+    };
+  }
+  if (/would not issue an access token|invalid_code|invalid_client/i.test(m)) {
+    return {
+      status: 503,
+      code: 'catalyst_auth',
+      message:
+        'The console cannot sign in to Catalyst: its CATALYST_CLIENT_ID, CATALYST_CLIENT_SECRET or CATALYST_REFRESH_TOKEN is missing or wrong on this server.',
+    };
+  }
+  return null;
+}

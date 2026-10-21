@@ -17,7 +17,7 @@ import { db, audit, can, roleById, page, matches, find } from './db.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
-import { check } from './catalyst.js';
+import { check, explainCatalyst } from './catalyst.js';
 import { NOAH_TABLES } from './noah-schema.js';
 import { queuesFor } from './queues.js';
 import { now } from './seed/helpers.js';
@@ -344,7 +344,8 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
     try {
       return res.json(page(await FROM_CATALYST[name](), req.query));
     } catch (err) {
-      return res.status(503).json({ error: err.message });
+      const explained = explainCatalyst(err);
+      return res.status(503).json({ error: explained?.message ?? err.message, ...(explained ? { code: explained.code } : {}) });
     }
   }
 
@@ -455,6 +456,11 @@ app.use((err, _req, res, _next) => {
 
   /* A Catalyst refusal is not this server falling over, and saying so helps
      whoever is looking at it work out which end to fix. */
+  /* The two Catalyst failures that really happen get a plain explanation and a
+     503: the console is fine, a service it depends on is not. */
+  const explained = explainCatalyst(err);
+  if (explained) return res.status(explained.status).json({ error: explained.message, code: explained.code });
+
   const fromCatalyst = /catalyst/i.test(err?.message || '');
   res.status(fromCatalyst ? 502 : 500).json({
     error: fromCatalyst

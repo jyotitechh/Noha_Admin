@@ -467,6 +467,47 @@ check('a role with no access to members is refused (403)', (await call('GET', `/
 check('it needs a sign-in', (await call('GET', `/people/${ANAND_ID}`)).status === 401);
 check('an unknown member is a 404', (await call('GET', '/people/1', null, BT)).status === 404);
 
+/* ================================================================== */
+section('When Catalyst stops answering');
+
+const outage = (message) =>
+  fetch(CONTROL + '/_fake/outage', { method: 'POST', body: JSON.stringify({ message }) }).then((r) => r.json());
+
+/* ---------- the allowance is used up ---------- */
+await outage('Catalyst: You have exhausted the free tier allowance for Datastore - Fetch. Please set up a payment method to continue using this resource.');
+
+const dash = await call('GET', '/dashboard', null, BT);
+check('the dashboard answers 503, not a bare 502', dash.status === 503, `${dash.status} ${dash.text.slice(0, 120)}`);
+check('...saying the allowance is used up, in plain words', /free allowance .* used up/.test(dash.body?.error || '') && /Nothing is wrong with the console/.test(dash.body?.error || ''), dash.body?.error);
+check('...naming who needs to act', /Whoever owns the Catalyst account/.test(dash.body?.error || ''));
+check('...with a code a screen can recognise', dash.body?.code === 'catalyst_quota');
+check('...without the raw Catalyst message the office cannot act on', !/Datastore - Fetch/.test(dash.body?.error || ''));
+
+const regsDown = await call('GET', '/data/REGISTRATIONS?limit=50', null, BT);
+check('the registration list says the same', regsDown.status === 503 && regsDown.body?.code === 'catalyst_quota', `${regsDown.status} ${regsDown.text.slice(0, 100)}`);
+const peopleDown = await call('GET', '/app-roles/people', null, BT);
+check('...and so does the people list', peopleDown.status === 503 && peopleDown.body?.code === 'catalyst_quota', `${peopleDown.status}`);
+
+/* things that need no Catalyst still work */
+check('sign-in still works (test accounts need no database)', (await call('POST', '/auth/request-code', { mobile: '+91 90000 00001' })).status === 200);
+check('the health check still answers, and costs nothing', (await call('GET', '/health')).status === 200);
+check('the work queues still load', (await call('GET', '/queues', null, BT)).status === 200);
+
+/* ---------- the settings are wrong ---------- */
+await outage('Catalyst would not issue an access token (400). invalid_code. Check CATALYST_* in .env.local.');
+const authDown = await call('GET', '/dashboard', null, BT);
+check('wrong Catalyst settings are named as that, not as an outage', authDown.status === 503 && authDown.body?.code === 'catalyst_auth' && /CATALYST_REFRESH_TOKEN/.test(authDown.body?.error || ''), authDown.text.slice(0, 160));
+
+/* ---------- anything else is passed on as it came ---------- */
+await outage('Catalyst: some other thing went wrong');
+const other = await call('GET', '/dashboard', null, BT);
+check('an unrecognised Catalyst error is still reported, as a 502', other.status === 502 && /some other thing/.test(other.body?.error || ''), `${other.status} ${other.text.slice(0, 100)}`);
+
+/* ---------- and it recovers ---------- */
+await outage(null);
+const recovered = await call('GET', '/dashboard', null, BT);
+check('when Catalyst answers again the dashboard comes back', recovered.status === 200 && Array.isArray(recovered.body?.cards), `${recovered.status} ${recovered.text.slice(0, 100)}`);
+
 console.log('\n' + '─'.repeat(64));
 console.log(fails.length
   ? `\n  \x1b[31m${fails.length} failed\x1b[0m, ${pass} passed:\n${fails.map((f) => '   - ' + f).join('\n')}\n`

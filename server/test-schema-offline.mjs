@@ -546,6 +546,18 @@ check('...changing one that does not exist is a 404', ghost?.status === 404);
 process.env.CATALYST_SCHEMA = savedSchema;
 
 /* ================================================================== */
+section('Explaining a Catalyst failure');
+
+const { explainCatalyst } = await import('./catalyst.js');
+const quota = explainCatalyst(new Error('Catalyst: You have exhausted the free tier allowance for Datastore - Fetch. Please set up a payment method.'));
+check('an exhausted allowance is recognised', quota?.code === 'catalyst_quota' && quota.status === 503);
+check('...and explained as nothing wrong with the console', /Nothing is wrong with the console/.test(quota?.message || ''));
+check('...naming the people it affects', /Noah app and the Noah API/.test(quota?.message || ''));
+check('a rejected token is recognised as wrong settings', explainCatalyst(new Error('Catalyst would not issue an access token (400). invalid_code.'))?.code === 'catalyst_auth');
+check('anything else is left alone, to be reported as it came', explainCatalyst(new Error('Catalyst: some other thing')) === null);
+check('a missing error is left alone', explainCatalyst(undefined) === null);
+
+/* ================================================================== */
 section('The cache');
 
 reset(seed());
