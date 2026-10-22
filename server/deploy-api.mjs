@@ -37,8 +37,12 @@ const testLogin = process.argv.includes('--test-login');
 
 const say = (s) => console.log(`\n  ${s}`);
 const fail = (s) => { console.error(`\n  ${s}\n`); process.exit(1); };
+/* The Catalyst CLI is run WITHOUT this project's own CATALYST_* settings. They name the DATA
+   project's organisation (the colleague's), which the CLI would try to use instead of the one
+   it is deploying into, and answer 401. */
+const cliEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CATALYST_')));
 const run = (cmd, cwd) => {
-  const r = spawnSync(cmd, { cwd, shell: true, stdio: 'inherit' });
+  const r = spawnSync(cmd, { cwd, shell: true, stdio: 'inherit', env: cliEnv() });
   if (r.status !== 0) fail(`FAILED: ${cmd}`);
 };
 
