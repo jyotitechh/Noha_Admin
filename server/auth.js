@@ -84,7 +84,10 @@ const sixDigits = () => String(Math.floor(100000 + Math.random() * 900000));
 
    This is a stopgap that makes deploying safe, not an auth system. It goes
    when the real mailer or Zoho SSO lands. */
-const PASSPHRASE = () => process.env.ADMIN_PASSPHRASE || '';
+/* Trimmed on both sides. A value pasted into a host's dashboard often carries a trailing
+   space or line break nobody can see, and a person typing it on the sign-in screen may add
+   one too. Neither should make the right passphrase look wrong. */
+const PASSPHRASE = () => String(process.env.ADMIN_PASSPHRASE || '').trim();
 export const passphraseRequired = () => !!PASSPHRASE();
 
 /* Slow down guessing. One instance, in memory: enough for a shared
@@ -111,15 +114,24 @@ export function checkPassphrase(given, who = 'unknown') {
     return { ok: false, error: `Too many attempts. Try again in ${Math.ceil((a.until - now) / 60000)} minutes.` };
   }
 
-  if (same(given || '', PASSPHRASE())) {
+  const typed = String(given ?? '').trim();
+  if (same(typed, PASSPHRASE())) {
     attempts.delete(who);
     return { ok: true };
   }
 
   a.n += 1;
+  const left = MAX_ATTEMPTS - a.n;
   if (a.n >= MAX_ATTEMPTS) { a.until = now + LOCKOUT_MS; a.n = 0; }
   attempts.set(who, a);
-  return { ok: false, error: 'That passphrase is not right.' };
+  return {
+    ok: false,
+    error: !typed
+      ? 'Enter the office passphrase.'
+      : left > 0
+        ? `That passphrase is not right. ${left} ${left === 1 ? 'try' : 'tries'} left before a ten-minute wait.`
+        : 'That passphrase is not right. Too many tries: wait ten minutes.',
+  };
 }
 
 /* Who is asking, as a key the code is filed under: their number, or for the

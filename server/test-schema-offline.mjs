@@ -1165,6 +1165,33 @@ const SS = await import('./schema-spec.js');
 }
 
 /* ================================================================== */
+section('The office passphrase');
+
+await withEnv({ ADMIN_PASSPHRASE: 'amber-river-cedar-4821' }, async () => {
+  check('the right passphrase passes', A.checkPassphrase('amber-river-cedar-4821', 'p1').ok);
+  check('...with a stray space or line break on what was typed', A.checkPassphrase('  amber-river-cedar-4821\n', 'p2').ok);
+  check('...a wrong one is refused', !A.checkPassphrase('amber-river-cedar-4822', 'p3').ok);
+  check('...the case matters', !A.checkPassphrase('Amber-River-Cedar-4821', 'p4').ok);
+  check('...nothing typed asks for it, rather than saying it is wrong', /Enter the office passphrase/.test(A.checkPassphrase('', 'p5').error) && /Enter the office passphrase/.test(A.checkPassphrase(undefined, 'p5').error));
+  const first = A.checkPassphrase('nope', 'p6');
+  check('a wrong one says how many tries are left', /7 tries left/.test(first.error), first.error);
+  let last;
+  for (let i = 0; i < 6; i++) last = A.checkPassphrase('nope', 'p6');
+  check('...counting down', /1 try left/.test(last.error), last.error);
+  const locked = A.checkPassphrase('nope', 'p6');
+  check('...then it locks, and says so', !locked.ok && /ten minutes/.test(locked.error), locked.error);
+  const stillLocked = A.checkPassphrase('amber-river-cedar-4821', 'p6');
+  check('...and even the right one waits while locked', !stillLocked.ok && /Too many attempts/.test(stillLocked.error), stillLocked.error);
+  check('...but one caller\'s lockout is not another\'s', A.checkPassphrase('amber-river-cedar-4821', 'someone-else').ok);
+});
+await withEnv({ ADMIN_PASSPHRASE: '  amber-river-cedar-4821\r\n' }, async () => {
+  check('a value pasted into a host\'s dashboard with a trailing line break still works', A.checkPassphrase('amber-river-cedar-4821', 'q1').ok && A.passphraseRequired());
+});
+await withEnv({ ADMIN_PASSPHRASE: '   ' }, async () => {
+  check('a passphrase of only spaces is not a passphrase: it is as if none were set', !A.passphraseRequired());
+});
+
+/* ================================================================== */
 section('Content: what the office authors');
 
 const C = await import('./content.js');
