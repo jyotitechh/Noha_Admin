@@ -79,10 +79,10 @@ services:
       #     TEST_LOGIN_OTP    = <a code you choose>
       # There is no default code, because this repository is public. Remove them
       # again before real use: a test super administrator sees real members' data.
-      # Console roles live in a table called consoleStaff, found by name. Create it
-      # once with `npm run catalyst:columns -- --apply` (docs/CONSOLE-ACCESS.md);
-      # until it exists only the office's own super administrators can sign in.
-      # Set CATALYST_TABLE_CONSOLE_STAFF only if the table has another name.
+      # Console roles are kept in six columns on membersExtra, added once with
+      # `npm run catalyst:columns -- --apply` (docs/CONSOLE-ACCESS.md); until they
+      # exist only the office's own super administrators can sign in.
+      # Set CATALYST_TABLE_CONSOLE_STAFF only for a separate table of its own.
 
       - key: NODE_ENV
         value: production

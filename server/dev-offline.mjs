@@ -54,7 +54,8 @@ globalThis.fetch = (url, init) => {
   return realFetch(url, init);
 };
 
-const { S, T, tables, reset, seed, makeReady, setOutage } = await import('./fake-catalyst.mjs');
+const { S, T, tables, reset, seed, makeReady, setOutage, removeTable, restoreTable, contentTableId } = await import('./fake-catalyst.mjs');
+const { forgetTables } = await import('./content.js');
 reset(seed());
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -91,6 +92,16 @@ http.createServer(async (req, res) => {
     for await (const c of req) chunks.push(c);
     const { table } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
     return makeReady(table) ? send(res, 200, { ok: true }) : err(res, 404, 'no_such_table', 'No such content table in the fake.');
+  }
+
+  /* A content table leaves the project, or comes back. */
+  if (req.method === 'POST' && path === '/_fake/table') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const { table, present } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    if (present === false) removeTable(table); else restoreTable(table);
+    forgetTables();
+    return send(res, 200, { ok: true, id: contentTableId(table) || null });
   }
 
   if (req.method === 'POST' && path === '/_fake/patch') {

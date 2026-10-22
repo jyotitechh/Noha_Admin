@@ -65,43 +65,43 @@ Rules that cannot be bypassed from the UI or the API:
   their session to expire. A role change applies to an open session at once.
 - Every grant, change, suspension and revocation is in the audit log.
 
-## What the Catalyst developer needs to create
+## Where the console keeps who has which role
 
 The office's schema has nowhere to say *which* console role someone has.
-`users.is_admin` / `is_super_admin` are two flags; the console has ten roles.
-So it needs one small table.
+`users.is_admin` / `is_super_admin` are two flags; the console has ten roles. So
+the console needs somewhere of its own.
 
-The console creates it for you: `npm run catalyst:columns -- --apply` makes a
-table called `consoleStaff` with the columns below (it needs the Self Client's
-`tables.ALL` and `tables.columns.ALL` scopes; see CATALYST-SETUP.md). If the
-project is already at Catalyst's table cap, it says so and the table has to be
-made by hand or an empty shell repurposed.
-
-Columns, all optional as Catalyst makes them:
+**The project is at Catalyst's 200-table cap**, so a table of its own cannot be
+made. The roles are kept in **six columns on `membersExtra`**, the member's own
+extra row (joined by `membersExtra.id = members.ROWID`, as the Noah tables
+already are). They cost no extra Data Store fetches, because `membersExtra` is read
+already. `npm run catalyst:columns -- --apply` adds them (it needs the Self Client's
+`tables.columns.ALL` scope; see CATALYST-SETUP.md).
 
 | Column | Type | Holds |
 |---|---|---|
-| `memberRowId` | varchar (or bigint) | `members.ROWID` of the person |
-| `role` | varchar(40) | one of: `super`, `membership`, `finance`, `events`, `moderator`, `content`, `comms`, `jverifier`, `jadmin`, `pastor` |
-| `status` | varchar(20) | `Active`, `Suspended` or `Revoked` |
-| `title` | varchar(100) | job title |
-| `grantedBy` | varchar(100) | who gave it |
-| `grantedAt` | datetime | when (UTC, `YYYY-MM-DD HH:mm:ss`) |
-| `lastSignedInAt` | datetime | stamped on each sign-in |
+| `consoleRole` | varchar | one of: `super`, `membership`, `finance`, `events`, `moderator`, `content`, `comms`, `jverifier`, `jadmin`, `pastor` |
+| `consoleStatus` | varchar | `Active`, `Suspended` or `Revoked` |
+| `consoleTitle` | varchar | job title |
+| `consoleGrantedBy` | varchar | who gave it |
+| `consoleGrantedAt` | datetime | when (UTC, `YYYY-MM-DD HH:mm:ss`) |
+| `consoleLastSignedInAt` | datetime | stamped on each sign-in |
 
-The console finds a table called `consoleStaff` by name, so nothing needs
-configuring. (If the table was made under another name, set
-`CATALYST_TABLE_CONSOLE_STAFF=<the table id>`, in `.env.local` and in Render's
-environment.) Run `npm run check:schema`: it confirms the table is there and has
-every column.
-A row with a role the console does not define, or pointing at a member that does
-not exist, is ignored rather than becoming access.
+These are columns the Noah app and the Noah API do not read, so they change nothing
+for members. They are an addition to the Catalyst developer's table: tell him.
+A row with a role the console does not define is ignored rather than becoming
+access. `npm run check:schema` confirms the columns are there.
 
-**Until it exists**, nothing is lost and nothing breaks:
+If a project does have room for a table of its own, the console uses it instead:
+make one called `consoleStaff` (columns `memberRowId`, `role`, `status`, `title`,
+`grantedBy`, `grantedAt`, `lastSignedInAt`) or set `CATALYST_TABLE_CONSOLE_STAFF`
+to its id. That is not needed here.
+
+**Until the columns exist**, nothing is lost and nothing breaks:
 
 - The office's super administrators (`users.is_super_admin`) can sign in by
   number and use the whole console.
-- *Give access to a member* shows what is missing instead of failing.
+- *Give access to a member* says what is missing instead of failing.
 - Test accounts work.
 
 ## Test accounts

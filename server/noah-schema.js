@@ -59,6 +59,11 @@ const TABLE_NAMES = [
   'threads', 'threadUserConnect', 'threadMessages', 'appRegistrations', 'appChangeRequests',
 ];
 
+/** The six columns on membersExtra that hold a member's console role. */
+export const CONSOLE_COLUMNS = [
+  'consoleRole', 'consoleStatus', 'consoleTitle', 'consoleGrantedBy', 'consoleGrantedAt', 'consoleLastSignedInAt',
+];
+
 const REF = 'tbl:';
 let tableIds = null;      /* Map name -> id, as of the last time it was listed */
 let tableIdsAt = 0;
@@ -116,15 +121,15 @@ export const io = {
    the columns this code uses. */
 export const NOAH_TABLES = Object.fromEntries(TABLE_NAMES.map((n) => [n, REF + n]));
 
-/* Who may sign in to THIS console, and as what. The office's schema has no
-   place for it: users.is_admin / is_super_admin are two flags, and the console
-   has ten roles. So it is one small table of its own, `consoleStaff`, which
-   `npm run catalyst:columns --apply` creates if the project has room for it
-   (see docs/CONSOLE-ACCESS.md).
+/* A table of its own for console roles, ONLY if the project has one.
 
-   A getter: CATALYST_TABLE_CONSOLE_STAFF (an id) wins when set, since the table
-   may have another name; otherwise it is there once a table called consoleStaff
-   exists in the project. Absent, the screens say so rather than failing. */
+   Who may sign in to THIS console, and as what, has no place in the office's
+   schema: users.is_admin / is_super_admin are two flags, and the console has ten
+   roles. The project is at Catalyst's 200-table cap, so the roles are kept in six
+   columns on membersExtra instead (see "where console roles are kept" below and
+   docs/CONSOLE-ACCESS.md). This getter is for a project that does have room:
+   CATALYST_TABLE_CONSOLE_STAFF (an id) wins when set; otherwise a table called
+   consoleStaff, if one exists. When neither, the columns are used. */
 Object.defineProperty(NOAH_TABLES, 'consoleStaff', {
   enumerable: true,
   get: () => process.env.CATALYST_TABLE_CONSOLE_STAFF || (tableExists('consoleStaff') ? REF + 'consoleStaff' : ''),
@@ -864,6 +869,7 @@ export const EXPECTED_COLUMNS = {
     'isBusCoordinator', 'isTranslator', 'isAvailableForMatrimony', 'isVIPMember', 'isBaptised',
     'allowRewards', 'isBlockedFromComment', 'isAlertList', 'alertListComment',
     'connectedPastor', 'connectedLeader', 'form_submit', 'video_consent_submit',
+    ...CONSOLE_COLUMNS,
   ],
   files: ['uid', 'path', 'extension', 'size', 'fileType', 'remoteSource', 'archived', 'uploadedAt', 'isPublic'],
   appChangeRequests: ['memberRowId', 'fieldId', 'oldValue', 'newValue', 'status', 'note', 'reviewedByRowId', 'reviewedAt'],
@@ -888,11 +894,8 @@ export async function verifySchema() {
 
   for (const name of Object.keys(EXPECTED_COLUMNS)) {
     const ref = NOAH_TABLES[name];
-    /* consoleStaff is optional until the table is created. */
-    if (!ref && name === 'consoleStaff') {
-      report.push({ table: name, id: null, exists: false, optional: true, missing: [], checked: false });
-      continue;
-    }
+    /* consoleStaff is a separate table only where a project has room for one. */
+    if (!ref && name === 'consoleStaff') continue;
     const id = byName.get(name) ?? (name === 'consoleStaff' ? process.env.CATALYST_TABLE_CONSOLE_STAFF : null);
     const exists = !!id && (byName.has(name) || liveIds.has(String(id)));
     const entry = { table: name, id: id || null, exists, missing: [], checked: false };
@@ -944,8 +947,59 @@ export function mobileKey(input) {
 const memberFullName = (m) =>
   [m?.firstName, m?.middleName, m?.lastName].filter(Boolean).join(' ') || '(no name yet)';
 
-/** Is there a console-staff table to read and write? */
-export const consoleStaffEnabled = () => !!T.consoleStaff;
+/* ---------- where console roles are kept ----------
+
+   Two ways, one shape.
+
+     'columns'  six columns on membersExtra: consoleRole, consoleStatus,
+                consoleTitle, consoleGrantedBy, consoleGrantedAt,
+                consoleLastSignedInAt. This is what the project uses: it is at
+                Catalyst's 200-table cap, so a table of its own cannot be made.
+                It costs no extra fetches either, because membersExtra is read
+                already.
+     'table'    a table of its own (CATALYST_TABLE_CONSOLE_STAFF, or one called
+                consoleStaff), for a project that has room.
+
+   Neither exists until `npm run catalyst:columns -- --apply` adds the columns;
+   until then the screens say what is missing rather than failing. */
+
+let extraColumns = null;   /* Set of membersExtra's column names, once read */
+let extraColumnsAt = 0;
+
+/** Read membersExtra's columns, to learn whether the console columns are there.
+    Free (no Data Store fetch). Asked again, at most once a minute, while unknown or missing. */
+export async function ensureStaffBackend(force = false) {
+  if (T.consoleStaff) return 'table';
+  const stale = !extraColumns || !hasConsoleColumns();
+  if (!force && !stale) return staffBackend();
+  if (!force && Date.now() - extraColumnsAt < 60_000 && extraColumns) return staffBackend();
+  extraColumnsAt = Date.now();
+  try {
+    extraColumns = new Set((await io.listColumns(T.membersExtra)).map((c) => c.name));
+  } catch { /* Catalyst unreachable: stays as it was, and is asked again */ }
+  return staffBackend();
+}
+
+const hasConsoleColumns = () => !!extraColumns && CONSOLE_COLUMNS.every((c) => extraColumns.has(c));
+
+/** 'table', 'columns', or null when roles cannot be stored yet. */
+export const staffBackend = () => (T.consoleStaff ? 'table' : hasConsoleColumns() ? 'columns' : null);
+
+/** Is there somewhere to read and write console roles? */
+export const consoleStaffEnabled = () => !!staffBackend();
+
+/** The console's role rows, whichever way they are stored, in one shape. */
+async function staffRows() {
+  if (staffBackend() === 'table') return io.getRows(T.consoleStaff);
+  const { extras } = await snapshot();
+  return extras
+    .filter((x) => String(x.consoleRole ?? '').trim())
+    .map((x) => ({
+      ROWID: x.ROWID, memberRowId: x.id, role: x.consoleRole, status: x.consoleStatus, title: x.consoleTitle,
+      grantedBy: x.consoleGrantedBy, grantedAt: x.consoleGrantedAt, lastSignedInAt: x.consoleLastSignedInAt,
+      CREATEDTIME: x.CREATEDTIME,
+    }));
+}
 
 /* A console role the table may carry. Anything else is ignored on the way in:
    a typo in a Catalyst row must not become a role nobody defined. */
@@ -956,6 +1010,7 @@ const readRole = (r, allowed) => (allowed.includes(String(r)) ? String(r) : null
  * sign-in need them. `allowedRoles` is the list of role ids the console defines.
  */
 export async function loadStaffDirectory(allowedRoles) {
+  await ensureStaffBackend();
   const { members, users } = await snapshot();
   const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
   const memberOfUser = new Map(members.map((m) => [String(m.userId), m]));
@@ -998,7 +1053,7 @@ export async function loadStaffDirectory(allowedRoles) {
 
   /* 2. Roles given from the console. */
   if (consoleStaffEnabled()) {
-    const rows = await io.getRows(T.consoleStaff);
+    const rows = await staffRows();
     for (const r of rows) {
       const mid = String(r.memberRowId ?? '');
       const m = memberById.get(mid);
@@ -1066,10 +1121,22 @@ export async function staffCandidates(allowedRoles, search = '') {
 
 /** Give a member a console role, or restore one that was revoked. */
 export async function grantConsoleAccess({ memberRowId, role, title, by }) {
+  await ensureStaffBackend();
   if (!consoleStaffEnabled()) {
-    throw Object.assign(new Error('No console-staff table is configured.'), { code: 'no_table' });
+    throw Object.assign(new Error('Nowhere to keep console roles yet: the console columns have not been added.'), { code: 'no_table' });
   }
   const at = stamp();
+
+  if (staffBackend() === 'columns') {
+    const extra = await ensureExtra(memberRowId);
+    await io.update(T.membersExtra, {
+      ROWID: String(extra.ROWID),
+      consoleRole: role, consoleTitle: title || '', consoleStatus: 'Active', consoleGrantedBy: by || '', consoleGrantedAt: at,
+    });
+    clearCache();
+    return String(extra.ROWID);
+  }
+
   const rows = await io.getRows(T.consoleStaff);
   const mine = rows.find((r) => same(r.memberRowId, memberRowId));
   const row = { role, title: title || '', status: 'Active', grantedBy: by || '', grantedAt: at };
@@ -1088,19 +1155,26 @@ export async function grantConsoleAccess({ memberRowId, role, title, by }) {
 
 /** Change a staff row: role, title or status. */
 export async function updateConsoleStaff(rowId, patch) {
+  await ensureStaffBackend();
   if (!consoleStaffEnabled()) {
-    throw Object.assign(new Error('No console-staff table is configured.'), { code: 'no_table' });
+    throw Object.assign(new Error('Nowhere to keep console roles yet: the console columns have not been added.'), { code: 'no_table' });
   }
   const out = { ROWID: String(rowId) };
-  for (const k of ['role', 'title', 'status']) if (k in patch) out[k] = patch[k];
-  await io.update(T.consoleStaff, out);
+  const columns = staffBackend() === 'columns';
+  const name = { role: 'consoleRole', title: 'consoleTitle', status: 'consoleStatus' };
+  for (const k of ['role', 'title', 'status']) if (k in patch) out[columns ? name[k] : k] = patch[k];
+  await io.update(columns ? T.membersExtra : T.consoleStaff, out);
   clearCache();
 }
 
 /** Stamp a sign-in on the row. Never worth failing a sign-in over. */
 export async function touchStaffSignIn(rowId) {
   if (!consoleStaffEnabled() || !rowId) return;
-  await io.update(T.consoleStaff, { ROWID: String(rowId), lastSignedInAt: stamp() });
+  if (staffBackend() === 'columns') {
+    await io.update(T.membersExtra, { ROWID: String(rowId), consoleLastSignedInAt: stamp() });
+  } else {
+    await io.update(T.consoleStaff, { ROWID: String(rowId), lastSignedInAt: stamp() });
+  }
 }
 
 /* ---------- one person, everything about them ----------

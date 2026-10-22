@@ -108,9 +108,10 @@ function GiveAccess({ open, onClose, roles, onDone }: {
       )}
       {!needsCatalyst && !tableReady && (
         <Note tone="warn" icon="alert">
-          <b>Not set up in Catalyst yet.</b> Roles are stored in a small table that the Catalyst
-          developer needs to create, and the console has not been given its id. You can look at
-          who would be offered, but not save. docs/CONSOLE-ACCESS.md has what to ask for.
+          <b>Not set up in Catalyst yet.</b> Roles are kept in six columns on the member's
+          extra record, and they have not been added. You can look at who would be offered, but
+          not save. Running <code>npm run catalyst:columns -- --apply</code> adds them
+          (docs/CONSOLE-ACCESS.md).
         </Note>
       )}
 

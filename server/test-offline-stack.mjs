@@ -391,32 +391,37 @@ check('an unknown kind is a 404', (await call('GET', '/content/nonsense', null, 
 const empty = await call('GET', '/content/manna', null, ET);
 check('a table with no columns yet lists as empty', empty.status === 200 && empty.body.rows.length === 0 && empty.body.source === 'catalyst', empty.text.slice(0, 120));
 
-const MANNA = { title: 'Walking by faith', publishDate: '2026-10-20', text: 'A verse (John 3:16)', content: 'The message of the day.', prayer: 'A short prayer.' };
+const MANNA = { title: 'Walking by faith', publishDate: '2026-10-20', content: 'The message of the day (John 3:16).', prayer: 'A short prayer.' };
 const notYet = await call('POST', '/content/manna', MANNA, ET);
 check('saving into it is refused, in plain words', notYet.status === 502 && /Catalyst refused it/.test(notYet.body?.error || ''), `${notYet.status} ${notYet.text.slice(0, 140)}`);
 check('...pointing at the document that lists the columns', /CONTENT-TABLES/.test(notYet.body?.hint || ''));
 
+const fakeTable = (table, present) =>
+  fetch(CONTROL + '/_fake/table', { method: 'POST', body: JSON.stringify({ table, present }) }).then((r) => r.json());
+await fakeTable('videos', false);
 const tube = await call('GET', '/content/tubeVideos', null, ET);
-check('Noah Tube says its table does not exist', tube.body?.notReady?.code === 'no_table', tube.text.slice(0, 160));
+check('a table that is not in the project says so', tube.body?.notReady?.code === 'no_table', tube.text.slice(0, 160));
 const tubeSave = await call('POST', '/content/tubeVideos', { title: 'X', videoUrl: 'https://example.com/v' }, ET);
 check('...and saving to it is refused as not ready (409)', tubeSave.status === 409 && tubeSave.body?.notReady === true, tubeSave.text.slice(0, 120));
+await fakeTable('videos', true);
+check('...and when the table is there, Noah Tube lists', (await call('GET', '/content/tubeVideos', null, ET)).body?.notReady === null);
 
 /* ---------- checking what is sent ---------- */
 const invalid = await call('POST', '/content/manna', {}, ET);
-check('a blank form names every field that is missing (400)', invalid.status === 400 && ['title', 'publishDate', 'text', 'content', 'prayer'].every((k) => invalid.body?.errors?.[k]), invalid.text.slice(0, 140));
-const badLink = await call('POST', '/content/manna', { ...MANNA, imageUrl: 'javascript:alert(1)' }, ET);
-check('a link that is not http(s) is refused', badLink.status === 400 && !!badLink.body?.errors?.imageUrl);
+check('a blank form names every field that is missing (400)', invalid.status === 400 && ['title', 'publishDate', 'content', 'prayer'].every((k) => invalid.body?.errors?.[k]), invalid.text.slice(0, 140));
+const badLink = await call('POST', '/content/manna', { ...MANNA, image: 'javascript:alert(1)' }, ET);
+check('a link that is not http(s) is refused', badLink.status === 400 && !!badLink.body?.errors?.image);
 
 /* ---------- once the Catalyst developer has added the columns ---------- */
 await fakeReady('dailyMana');
-const made = await call('POST', '/content/manna', { ...MANNA, language: 'en', published: false }, ET);
+const made = await call('POST', '/content/manna', { ...MANNA, contentLanguage: '1', published: false }, ET);
 check('the devotional is saved', made.status === 201 && made.body?.ok === true, `${made.status} ${made.text.slice(0, 140)}`);
 
 const mannaList = await call('GET', '/content/manna', null, ET);
 const entry = mannaList.body?.rows?.[0];
 check('...and listed, as a draft', mannaList.body?.rows?.length === 1 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
 check('...with a string id', typeof entry?.id === 'string' && entry.id.length >= 15);
-check('...and the language and date came back as sent', entry?.language === 'en' && entry?.publishDate === '2026-10-20');
+check('...and the language and date came back as sent', entry?.contentLanguage === '1' && entry?.publishDate === '2026-10-20');
 
 const pub = await call('POST', `/content/manna/${entry.id}/publish`, { on: true }, ET);
 check('publishing it works', pub.status === 200 && pub.body?.on === true, pub.text.slice(0, 100));
@@ -430,7 +435,7 @@ check('a change that empties a required field is refused', (await call('PATCH', 
 const down = await call('POST', `/content/manna/${entry.id}/publish`, { on: false }, ET);
 check('taking it down works', down.status === 200 && (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 0);
 
-check('a kind with no publish step says so (400)', (await call('POST', '/content/mannaCategories/1/publish', { on: true }, ET)).status === 400);
+check('a kind with no publish step says so (400)', (await call('POST', '/content/dictionaryCategories/1/publish', { on: true }, ET)).status === 400);
 
 const del = await call('DELETE', `/content/manna/${entry.id}`, null, ET);
 check('deleting works', del.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows.length === 0);

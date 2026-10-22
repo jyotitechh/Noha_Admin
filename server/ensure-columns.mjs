@@ -3,7 +3,7 @@
      npm run catalyst:columns             shows what is missing (changes nothing)
      npm run catalyst:columns -- --apply  creates it
 
-   Only ever adds: a column, or the console-staff table. It never alters or
+   Only ever adds columns. It never creates a table (the project is at its cap), alters or
    removes anything that is there, and it leaves the Noah tables themselves to the
    Catalyst developer. What it wants is in schema-spec.js.
 
@@ -79,8 +79,15 @@ for (const r of results) {
 
 /* Read it back rather than trust the replies. */
 console.log('\n  Checking what Catalyst now has…\n');
-const after = await plan(buildSpec(), api);
-const still = after.filter((p) => results.some((r) => r.table === p.table) && p.missing.length);
+/* Catalyst's column list can lag a moment behind a create call, so look again a few
+   times before calling anything missing. */
+let still = [];
+for (let attempt = 0; attempt < 5; attempt++) {
+  if (attempt) await new Promise((r) => setTimeout(r, 2000));
+  const after = await plan(buildSpec(), api);
+  still = after.filter((p) => results.some((r) => r.table === p.table) && p.missing.length);
+  if (!still.length) break;
+}
 for (const p of still) console.log(`  ${red('STILL MISSING')} ${p.table}: ${p.missing.map((c) => c.column_name).join(', ')}`);
 if (!still.length) console.log(`  ${green('Everything that was asked for is there.')}`);
 

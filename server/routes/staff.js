@@ -23,15 +23,14 @@ import { db, find, roleById, audit } from '../db.js';
 import { live, isNoah, listMembers, writeAudit } from '../store.js';
 import { refreshSessions } from '../auth.js';
 import {
-  loadStaffDirectory, staffCandidates, grantConsoleAccess, updateConsoleStaff, consoleStaffEnabled,
+  loadStaffDirectory, staffCandidates, grantConsoleAccess, updateConsoleStaff, consoleStaffEnabled, ensureStaffBackend,
 } from '../noah-schema.js';
 
 const roleIds = () => db.ROLES.map((r) => r.id);
 
 const NEEDS_TABLE =
-  'Giving console roles needs a small table in Catalyst, and it has not been set up yet. ' +
-  'Ask the Catalyst developer to create it (docs/CONSOLE-ACCESS.md has the columns), ' +
-  'then set CATALYST_TABLE_CONSOLE_STAFF to its id.';
+  'Giving console roles needs six columns added to Catalyst (consoleRole and five more on membersExtra), and they are not there yet. ' +
+  'Run `npm run catalyst:columns -- --apply` on the server (docs/CONSOLE-ACCESS.md), or ask whoever runs it.';
 
 export default function mountStaff(app, { requireSession, requirePerm }) {
   const guard = [requireSession, requirePerm('staff.manage')];
@@ -68,6 +67,7 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
     if (role === 'super' && req.session.role !== 'super') {
       return res.status(403).json({ error: 'Only a super administrator can give that role.' });
     }
+    await ensureStaffBackend();
     if (!consoleStaffEnabled()) return res.status(409).json({ error: NEEDS_TABLE, needsTable: true });
 
     const member = (await listMembers({})).find((m) => String(m.rowId) === String(memberRowId));

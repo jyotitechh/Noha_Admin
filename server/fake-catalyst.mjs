@@ -134,25 +134,34 @@ export const seed = () => ({
 
 /* ---------- the content tables ----------
 
-   In the real project most content tables are EMPTY SHELLS: they exist with
-   Catalyst's four system columns and nothing else, so a save is refused. The
-   fake behaves the same, so the console's handling of that is tested, and a
-   test can "give the table its columns" with makeReady(). Noah Tube's `videos`
-   and `videoCategories` are not in the project at all. */
+   In the real project the content tables exist, built from the office's own
+   schema. The fake starts each one as a table that REFUSES a write (as a table
+   without the right columns does), so the console's handling of that is tested,
+   and a test gives it its columns with makeReady(). removeTable() takes a table
+   out of the project altogether, for the "no such table" case. */
 
 import { TYPES } from './content-types.js';
 
 const contentIds = new Map();   /* table name -> fake id */
 const shells = new Set();       /* ids that refuse a write */
-const MISSING = new Set(['videos', 'videoCategories']);
+const removed = new Set();      /* table names taken out of the project */
 
-TYPES.forEach((t, i) => {
-  if (MISSING.has(t.table)) return;
-  contentIds.set(t.table, String(27145000000300001n + BigInt(i)));
-});
+const fill = () => {
+  contentIds.clear();
+  TYPES.forEach((t, i) => {
+    if (!removed.has(t.table)) contentIds.set(t.table, String(27145000000300001n + BigInt(i)));
+  });
+};
+fill();
 
-/** Reset every content table to an empty shell. Called by reset(). */
+/** Take a table out of the project. Put back by restoreTable() or reset(). */
+export function removeTable(name) { removed.add(name); fill(); }
+export function restoreTable(name) { removed.delete(name); fill(); }
+
+/** Reset every content table to one that refuses writes. Called by reset(). */
 export function resetContent() {
+  removed.clear();
+  fill();
   shells.clear();
   for (const id of contentIds.values()) { shells.add(id); tables[id] = []; }
 }

@@ -1,46 +1,34 @@
-# What the Catalyst content tables need
+# What the console writes to each content table
 
-The console can author the Daily Manna, daily prayers, confessions, the dream
-dictionary, Noahgram, Noah Tube, the Bible school and the courses. It saves each
-to a Catalyst table. **Most of those tables are empty shells**: they exist, with
-Catalyst's four system columns (`ROWID`, `CREATORID`, `CREATEDTIME`,
-`MODIFIEDTIME`) and nothing else, so a save is refused until the columns are
-added. Noah Tube's two tables do not exist at all.
+Generated from `server/content-types.js` by `node server/gen-content-doc.mjs`. Do not edit by hand.
 
-This is the list for the Catalyst developer. It is generated from the console's
-own definitions (`server/content-types.js`), so it is exactly what the console
-sends. Column names are the ones the client's Laravel backend uses
-(`noah-estone-dev`), because the Noah app reads them by those names.
+The console can author the Daily Manna, prayers, confessions, the dream dictionary,
+Noahgram, Noah Tube, the Bible school and the courses. Each kind is saved to a table
+in the Catalyst project, found **by name**. **Every field below is a real column of
+that table**: they were matched to the project's own tables, which the Catalyst
+developer built from the office's SQL schema (the same one the client's Laravel
+backend, `noah-estone-dev`, uses). Nothing needs adding; `npm run catalyst:columns`
+checks that, and only ever adds.
 
-## Before you start
+Things to know:
 
-- **Catalyst allows 191 tables a project, and this project has 191.** The two
-  Noah Tube tables below need creating, which means removing or repurposing a
-  table that nothing uses (an empty shell for something not yet built).
-- **Every column is optional in Catalyst**, so "required" below is enforced by
-  the console, not by the table.
-- **Text length.** `varchar` is 255 characters; `text` is up to 10,000. The
-  console refuses anything longer before it is sent.
-- **Dates** are `YYYY-MM-DD`; `boolean` columns take true / false.
-- **`ref` columns** hold the `ROWID` of a row in another table, as a bigint.
-  ROWIDs are larger than JavaScript's safe integer, so the console sends and
-  reads them as strings.
-- **Which columns are *new*.** The Laravel backend stored a picture as an uploaded
-  file. The console cannot upload to Catalyst File Store (its token has no
-  file-write scope), so it stores a **link** instead, in an `imageUrl` column
-  that the original does not have. They are marked below. If the Noah app should
-  show these pictures, it needs to read that column.
-
-## How it is wired
-
-The console finds each table **by name**, from the project's table list, so
-renaming or rebuilding one is fine as long as the name is the one below. When a
-save is refused the console shows Catalyst's message and, for the editor, points
-here.
-
-`npm run check:schema` checks the member tables. It does not yet check these;
-after adding the columns, open each screen in the console and save a test entry.
-
+- **Languages** are stored as a number, from the Laravel config
+  (`config/options.php`): 1 English, 2 Hindi, 3 Marathi, 4 Telugu, 5 Malayalam,
+  6 Tamil, 7 Kannada.
+- **Toggles** are a boolean in some tables and an int (1 or 0) in others; the console
+  writes whichever the column is.
+- **`ministryId`** is left empty. Every member row in the project has it empty, so
+  this project does not use it. If the Noah API ever filters on it, content written
+  here would not appear, and it would need setting.
+- **Created and updated times** are written to the table's own columns
+  (`created`/`updated` or `createdOn`/`updatedOn`) in UTC, as the Laravel
+  backend did. `createdBy` and `writerId` are not set.
+- **Pictures** are a link to the picture, in the table's picture column. Uploading a
+  file from the console is not available yet.
+- The Laravel admin had a few fields these tables do not: a scripture line on the
+  Daily Manna, start and end dates on prayers, a writer's name on confessions,
+  comment and like limits on Noahgram. They are not in the console, because there is
+  nowhere to put them.
 
 ---
 
@@ -48,90 +36,101 @@ after adding the columns, open each screen in the console and save a test entry.
 
 ### Daily Manna: table `dailyMana`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+The devotional the app opens on each day: the message and a prayer.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `publishDate` | date | required |
-| `categoryId` | bigint | the `ROWID` of a row in `dailyMannaCategories` |
-| `text` | text | required |
-| `content` | text | required |
-| `prayer` | text | required |
-| `language` | varchar(255) | one of en, hi, mr, ml, ta, te, kn |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `showOnObituary` | boolean |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Show on | `publishDate` | date | required |
+| Category | `categoryIds` | text | the id of a row in `dailyMannaCategories` |
+| Message | `content` | text | required |
+| Prayer | `prayer` | text | required |
+| Language | `contentLanguage` | int | stored as its code number |
+| Picture | `image` | text |  |
+| Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
+| Published | `published` | boolean |  |
+
+written on create: `created`; on change: `updated`. "live" means `published`.
 
 ### Manna categories: table `dailyMannaCategories`
 
-Exists. Not checked; expected to be an empty shell too.
+The themes the Daily Manna is grouped under.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `description` | text |  |
-| `color` | varchar(255) |  |
-| `photo` | text |  |
-| `publishStart` | date |  |
-| `publishEnd` | date |  |
-| `isArchived` | boolean |  |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `title` | varchar | required |
+| Description | `description` | text |  |
+| Colour | `color` | varchar |  |
+| Picture | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Shown from | `publishStart` | datetime | a date, stored as a datetime |
+| Shown until | `publishEnd` | datetime | a date, stored as a datetime |
+| Active | `status` | boolean | on by default |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `status`.
 
 ### Daily Prayers: table `dailyPrayers`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+The prayer members are invited to pray with.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `content` | text | required |
-| `language` | varchar(255) | one of en, hi, mr, ml, ta, te, kn |
-| `startDate` | date |  |
-| `endDate` | date |  |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `showOnObituary` | boolean |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Prayer | `content` | text | required |
+| Language | `contentLanguage` | int | stored as its code number |
+| Publish on | `publishedDate` | datetime | a date, stored as a datetime |
+| Picture | `image` | text |  |
+| Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
+| Published | `published` | boolean |  |
+
+written on create: `created`; on change: `updated`. "live" means `published`.
 
 ### Confessions: table `dailyConfessions`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+The daily confession of faith.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `content` | text | required |
-| `writerName` | varchar(255) |  |
-| `language` | varchar(255) | one of en, hi, mr, ml, ta, te, kn |
-| `publishDate` | date |  |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Confession | `content` | text | required |
+| Prayer | `prayer` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Show on | `publishDate` | date |  |
+| Picture | `image` | text |  |
+| Published | `published` | boolean |  |
+
+written on create: `created`; on change: `updated`. always written: `isConfession = true`. "live" means `published`.
 
 ### Dream dictionary: table `dreamDictionary`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+What a dream may mean, entry by entry.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `content` | text | required |
-| `categoryId` | bigint | the `ROWID` of a row in `dreamDictionaryCategory` |
-| `contentLanguage` | varchar(255) | one of en, hi, mr, ml, ta, te, kn |
-| `isFeatured` | boolean |  |
-| `startDate` | date |  |
-| `endDate` | date |  |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Word or symbol | `title` | varchar | required |
+| Meaning | `content` | text | required |
+| Category | `categoryId` | bigint | the id of a row in `dreamDictionaryCategory` |
+| Language | `contentLanguage` | int | stored as its code number |
+| Feature it | `isFeatured` | boolean |  |
+| Publish on | `publishedDate` | datetime | a date, stored as a datetime |
+| Picture | `image` | text |  |
+| Published | `published` | boolean |  |
+
+written on create: `created`; on change: `updated`. "live" means `published`.
 
 ### Dictionary categories: table `dreamDictionaryCategory`
 
-Exists. Not checked; expected to be an empty shell too.
+How the dream dictionary is grouped.
 
-| Column | Type | Notes |
-|---|---|---|
-| `name` | varchar(255) | required |
-| `description` | text |  |
-| `photo` | text |  |
-| `isArchived` | boolean |  |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `name` | varchar | required |
+| Description | `description` | text |  |
+| Picture | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Hidden (archived) | `isArchived` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
 
 ---
 
@@ -139,55 +138,71 @@ Exists. Not checked; expected to be an empty shell too.
 
 ### Noahgram posts: table `noahGram`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+Posts on the Noahgram feed. A post is live once it is approved.
 
-| Column | Type | Notes |
-|---|---|---|
-| `caption` | text | required |
-| `categoryId` | bigint | the `ROWID` of a row in `noahGramCategory` |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `date` | date | required |
-| `commentLimit` | double |  |
-| `likeLimit` | double |  |
-| `enableTags` | boolean |  |
-| `isApprove` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Caption | `caption` | text | required |
+| Category | `category` | text | the id of a row in `noahGramCategory` |
+| Picture | `photo` | text |  |
+| Link | `link` | text |  |
+| Show on | `scheduleDate` | datetime | a date, stored as a datetime |
+| Pinned to the top | `isPinned` | boolean |  |
+| Approved | `isApproved` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `isApproved`.
 
 ### Noahgram categories: table `noahGramCategory`
 
-Exists. Not checked; expected to be an empty shell too.
+The topics a Noahgram post is filed under.
 
-| Column | Type | Notes |
-|---|---|---|
-| `name` | varchar(255) | required |
-| `backgroundColor` | varchar(255) | required |
-| `isPublished` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `name` | varchar | required |
+| Background colour | `backgroundColor` | varchar | required |
+| Background picture | `backgroundImage` | text |  |
+| Icon | `icon` | text |  |
+| Order | `orderCol` | int | whole number |
+| Published | `isPublished` | int | stored as 1 or 0 |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `isPublished`.
 
 ### Noah Tube videos: table `videos`
 
-**The table does not exist** in the project. It has to be created.
+The video library. Add a link to the video; uploading a file from here is not available yet.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `description` | text |  |
-| `categoryId` | bigint | the `ROWID` of a row in `videoCategories` |
-| `videoUrl` | text | required |
-| `thumb` | text |  |
-| `videoLength` | double |  |
-| `featured` | boolean |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Description | `description` | text |  |
+| Category | `categoryId` | bigint | the id of a row in `videoCategories` |
+| Video link | `videoUrl` | text | required |
+| Where it is hosted | `videoSourceType` | int | stored as its code number |
+| Thumbnail link | `thumb` | text |  |
+| Length (seconds) | `videoLength` | double |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Order | `orderCol` | int | whole number |
+| Featured | `featured` | boolean |  |
+| Hidden (archived) | `isArchived` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
 
 ### Noah Tube categories: table `videoCategories`
 
-**The table does not exist** in the project. It has to be created.
+The shelves the videos sit on. A category can sit inside another.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `description` | text |  |
-| `parentId` | bigint | the `ROWID` of a row in `videoCategories` |
-| `publishStart` | date |  |
-| `publishEnd` | date |  |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `title` | varchar | required |
+| Description | `description` | text |  |
+| Inside | `parentId` | bigint | the id of a row in `videoCategories` |
+| Picture | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Shown from | `publishStart` | datetime | a date, stored as a datetime |
+| Shown until | `publishEnd` | datetime | a date, stored as a datetime |
+| Active | `status` | boolean | on by default |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `status`.
 
 ---
 
@@ -195,87 +210,82 @@ Exists. Not checked; expected to be an empty shell too.
 
 ### Bible schools: table `bibleSchool`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+The Bible school levels members can enrol in.
 
-| Column | Type | Notes |
-|---|---|---|
-| `name` | varchar(255) | required |
-| `description` | text |  |
-| `startDate` | date |  |
-| `endDate` | date |  |
-| `donationAmount` | double |  |
-| `order` | double |  |
-| `youtubeId` | varchar(255) |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `name` | varchar | required |
+| Description | `description` | text |  |
+| Picture | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Fee (₹) | `donationAmount` | double |  |
+| Most steps a day | `maxStepsPerDay` | int | whole number |
+| Publish on | `publishDate` | date |  |
+| Published | `status` | int | stored as 1 or 0 |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `status`.
 
 ### Courses: table `rowilCourseManagement`
 
-Exists. **Checked: an empty shell**, with only the four system columns.
+Courses, taught in lessons. A course is built from sections, and each section from lessons.
 
-| Column | Type | Notes |
-|---|---|---|
-| `name` | varchar(255) | required |
-| `category` | bigint | the `ROWID` of a row in `rowilCourseCategoryManagement` |
-| `description` | text |  |
-| `aboutCourse` | text |  |
-| `author` | varchar(255) |  |
-| `aboutAuthor` | text |  |
-| `language` | varchar(255) | one of en, hi, mr, ml, ta, te, kn |
-| `tags` | varchar(255) |  |
-| `donationAmount` | double |  |
-| `imageUrl` | text | **new**: not in the Laravel backend |
-| `featured` | boolean |  |
-| `publishedDate` | date |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `title` | varchar | required |
+| Category | `category` | bigint | the id of a row in `rowilCourseCategoryManagement` |
+| Short description | `description` | text |  |
+| About the course | `aboutCourse` | text |  |
+| Taught by | `author` | varchar |  |
+| About the teacher | `aboutAuthor` | text |  |
+| Language | `language` | int | stored as its code number |
+| Tags | `tags` | varchar |  |
+| Fee (₹) | `donationAmount` | double |  |
+| Picture | `image` | text |  |
+| Featured | `featured` | int | stored as 1 or 0 |
+| Publish on | `publishedDate` | datetime | a date, stored as a datetime |
+| Published | `published` | int | stored as 1 or 0 |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `published`.
 
 ### Course categories: table `rowilCourseCategoryManagement`
 
-Exists. Not checked; expected to be an empty shell too.
+How the courses are grouped.
 
-| Column | Type | Notes |
-|---|---|---|
-| `name` | varchar(255) | required |
-| `description` | text |  |
-| `parentId` | bigint | the `ROWID` of a row in `rowilCourseCategoryManagement` |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `name` | varchar | required |
+| Description | `description` | text |  |
+| Inside | `parentId` | bigint | the id of a row in `rowilCourseCategoryManagement` |
+
+written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
 
 ### Course sections: table `rowilCourseLessonGroupManagement`
 
-Exists. Not checked; expected to be an empty shell too.
+A course is split into sections, and each section holds its lessons.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `courseId` | bigint | required; the `ROWID` of a row in `rowilCourseManagement` |
-| `order` | double |  |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `name` | varchar | required |
+| Description | `description` | text |  |
+| Course | `courseId` | bigint | the id of a row in `rowilCourseManagement`; required |
+| Order | `orderCol` | int | whole number |
+
+written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
 
 ### Lessons: table `rowilCourseLessonManagement`
 
-Exists. Not checked; expected to be an empty shell too.
+The lessons a member watches or reads.
 
-| Column | Type | Notes |
-|---|---|---|
-| `title` | varchar(255) | required |
-| `groupId` | bigint | required; the `ROWID` of a row in `rowilCourseLessonGroupManagement` |
-| `description` | text |  |
-| `link` | text |  |
-| `thumbnail` | text |  |
-| `durationTime` | varchar(255) |  |
-| `publishedDate` | date |  |
-| `published` | boolean | the "live" switch: members see the entry only while this is true |
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Section | `groupId` | bigint | the id of a row in `rowilCourseLessonGroupManagement`; required |
+| Description | `description` | text |  |
+| Video or reading link | `link` | text |  |
+| Thumbnail link | `thumbnail` | text |  |
+| Length (seconds) | `durationTime` | int | whole number |
+| Order | `orderCol` | int | whole number |
+| Publish on | `publishedDate` | datetime | a date, stored as a datetime |
+| Published | `published` | int | stored as 1 or 0 |
 
----
-
-## Not covered yet
-
-These exist in the Laravel backend and have Catalyst tables, but the console has
-no screen for them yet: Noahgram polls and competitions, saved posts, Bible
-school step content and quizzes, course lesson quizzes and tags, live videos,
-Bible commentary and books. They need their columns too, and a screen each; say
-which matter first.
-
-## If it would help
-
-The console could add these columns itself through the Catalyst connection it
-already has, in the Development environment. That has not been done, because
-these are the Catalyst developer's tables and the app's reads depend on exactly
-what is in them. Say the word and it can be done from this list.
+written on create: `createdOn`; on change: `updatedOn`. "live" means `published`.

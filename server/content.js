@@ -8,15 +8,11 @@
                is found again.
      Sample    in memory, when there is no Catalyst connection at all.
 
-   AGAINST CATALYST, TWO THINGS MAY NOT BE READY, and both are reported plainly
-   rather than failing mysteriously:
-
-     - The table does not exist (Noah Tube's `videos` and `videoCategories` are
-       among the tables the office's schema left out, because Catalyst caps a
-       project at 191).
-     - The table exists but has no columns. Most content tables are empty shells
-       until the Catalyst developer adds them; a save is then refused by
-       Catalyst. docs/CONTENT-TABLES.md lists the columns to add.
+   AGAINST CATALYST, A TABLE MAY NOT BE READY, and it is reported plainly rather
+   than failing mysteriously: the table is missing from the project, or it lacks a
+   column this kind writes (Catalyst then refuses the save and says which).
+   The fields are the project's real columns, so on the current project both
+   are expected not to happen; docs/CONTENT-TABLES.md lists them.
 
    What this never does is pretend. A save that did not reach Catalyst is an
    error, not a draft kept somewhere that members cannot see. */
@@ -81,7 +77,8 @@ export function validate(def, body, { partial = false } = {}) {
     if (partial && !present) continue;
     let v = body[f.key];
 
-    if (f.kind === 'toggle') { value[f.key] = v === true || v === 'true' || v === 1; continue; }
+    /* A toggle left out is off, unless the field says it starts on (an active category). */
+    if (f.kind === 'toggle') { value[f.key] = present ? (v === true || v === 'true' || v === 1) : !!f.default; continue; }
 
     v = v === null || v === undefined ? '' : (typeof v === 'string' ? v.trim() : v);
     const empty = v === '';
@@ -154,7 +151,7 @@ async function tableIdFor(def) {
   if (!id) {
     throw new ContentError(409, `The Catalyst project has no table called ${def.table}.`, {
       notReady: true, code: 'no_table',
-      hint: 'It needs creating by the Catalyst developer. See docs/CONTENT-TABLES.md.',
+      hint: 'It is not in the Catalyst project. See docs/CONTENT-TABLES.md.',
     });
   }
   return id;
@@ -163,12 +160,36 @@ async function tableIdFor(def) {
 export const forgetTables = () => { tableIds = null; };
 
 const REFUSED_HINT =
-  'If it says a column does not exist, the table has not been given its columns yet. docs/CONTENT-TABLES.md lists them.';
+  'If it says a column does not exist, the table in the project differs from what the console expects. docs/CONTENT-TABLES.md lists the columns each kind writes, and `npm run catalyst:columns` compares them.';
 
-/** Catalyst wants dates as YYYY-MM-DD and nulls as null. */
-const toCatalyst = (def, value) => {
+/** Now, the way Catalyst wants a datetime: UTC, 'YYYY-MM-DD HH:mm:ss'. */
+const stampNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+/**
+ * A checked value, as the row Catalyst stores. Some columns hold a value another
+ * way than the form shows it: a toggle as 1 or 0, a language as its code number,
+ * a date as a datetime (content-types.js says which). Also the row's own created
+ * and updated times, which the Laravel backend filled in and the app may sort by,
+ * and the constants a kind always carries.
+ */
+const toCatalyst = (def, value, { creating = false } = {}) => {
   const row = {};
-  for (const [k, v] of Object.entries(value)) row[columnFor(k)] = v;
+  for (const f of def.fields) {
+    if (!(f.key in value)) continue;
+    let v = value[f.key];
+    if (v !== null && v !== undefined) {
+      if (f.store === 'int') v = f.kind === 'toggle' ? (v ? 1 : 0) : Number(v);
+      else if (f.store === 'datetime' && f.kind === 'date') v = `${v} 00:00:00`;
+    }
+    row[columnFor(f.key)] = v;
+  }
+  const at = stampNow();
+  if (creating) {
+    Object.assign(row, def.constants || {});
+    if (def.stamps?.created) row[def.stamps.created] = at;
+  } else if (def.stamps?.updated) {
+    row[def.stamps.updated] = at;
+  }
   return row;
 };
 
@@ -237,7 +258,7 @@ export async function createContent(typeId, body, { canPublish }) {
   if (onCatalyst()) {
     const id = await tableIdFor(def);
     try {
-      await io.insert(id, toCatalyst(def, value));
+      await io.insert(id, toCatalyst(def, value, { creating: true }));
     } catch (e) {
       throw new ContentError(502, `Catalyst refused it: ${e.message}`, { hint: REFUSED_HINT });
     }

@@ -4,18 +4,18 @@
    --apply, creates what is missing. Nothing here is ever changed or removed in
    Catalyst: only added.
 
-   Three groups:
+   Two groups, and no table is ever created (the project is at Catalyst's
+   200-table cap):
 
      the Noah tables       users, members, membersExtra, files, appRegistrations,
                            appChangeRequests. The Catalyst developer owns these and
-                           says they are complete, so a gap is reported and, on
-                           --apply, filled; the tables themselves are never created.
-     consoleStaff          the console's own table: which member holds which console
-                           role. Created if the project has room (Catalyst caps a
-                           project's tables).
+                           says they are complete. The one thing the console adds
+                           is six columns on membersExtra (consoleRole...) that
+                           hold which member has which console role.
      content tables        what the office authors (content-types.js): daily manna,
-                           prayers, Noahgram, courses. Most exist as empty shells.
-                           Noah Tube's two do not exist and are created.
+                           prayers, Noahgram, courses. These exist, with the
+                           office's own columns; the console's fields are matched
+                           to them, so there is normally nothing to add.
 
    Types are Catalyst's: varchar, text, int, bigint, double, boolean, date,
    datetime. Where the developer's own column already exists with another type it
@@ -33,14 +33,12 @@ export const MAX_COLUMNS = 104;
 const BOOLEAN = /^(is[A-Z_]|allow[A-Z]|archived$|declarationAccepted$|profileVerified$|smoking$|drink$|form_submit$)/;
 const DATETIME = /(At|On)$/;
 const DATE = new Set(['dateOfBirth', 'anniversaryDate']);
-const BIGINT = new Set([
-  'memberRowId', 'reviewedByRowId', 'uid', 'userId', 'connectedPastor', 'connectedLeader',
-  'idProofFileId', 'videoFileId', 'videoBytes', 'size', 'annualIncome',
-]);
-const INT = new Set(['gender', 'fileType', 'videoSeconds', 'video_consent_submit']);
+const BIGINT = new Set(['uid', 'userId', 'connectedPastor', 'connectedLeader', 'videoBytes', 'size', 'annualIncome']);
+const INT = new Set(['gender', 'fileType', 'videoSeconds', 'video_consent_submit', 'videoConsentState', 'language', 'isTranslator']);
 const LONG = new Set(['reviewNote', 'signatureText', 'remoteSource', 'note', 'alertListComment', 'oldValue', 'newValue']);
 
 export function guessType(column) {
+  if (INT.has(column)) return { data_type: 'int' };
   if (BOOLEAN.test(column)) return { data_type: 'boolean' };
   if (DATE.has(column)) return { data_type: 'date' };
   if (DATETIME.test(column) || column === 'dateOfJoining') return { data_type: 'datetime' };
@@ -48,6 +46,14 @@ export function guessType(column) {
   if (INT.has(column)) return { data_type: 'int' };
   if (LONG.has(column)) return { data_type: 'text' };
   return { data_type: 'varchar', max_length: 255 };
+}
+
+/** The Catalyst type a content field is stored as: how it is stored first, then what it is. */
+function typeOf(f) {
+  if (f.catalyst) return { data_type: f.catalyst };
+  if (f.store === 'int') return { data_type: 'int' };
+  if (f.store === 'datetime') return { data_type: 'datetime' };
+  return KIND_TYPE[f.kind] || KIND_TYPE.text;
 }
 
 const KIND_TYPE = {
@@ -62,17 +68,6 @@ const KIND_TYPE = {
   ref: { data_type: 'bigint' },
 };
 
-/** The console's own table. */
-export const CONSOLE_STAFF = [
-  { column_name: 'memberRowId', data_type: 'bigint' },
-  { column_name: 'role', data_type: 'varchar', max_length: 255 },
-  { column_name: 'status', data_type: 'varchar', max_length: 255 },
-  { column_name: 'title', data_type: 'varchar', max_length: 255 },
-  { column_name: 'grantedBy', data_type: 'varchar', max_length: 255 },
-  { column_name: 'grantedAt', data_type: 'datetime' },
-  { column_name: 'lastSignedInAt', data_type: 'datetime' },
-];
-
 /** Every table the console needs, with the columns it needs on each. */
 export function buildSpec() {
   const spec = [];
@@ -85,14 +80,12 @@ export function buildSpec() {
     });
   }
 
-  spec.push({ table: 'consoleStaff', group: 'Console', create: true, columns: CONSOLE_STAFF });
-
+  /* No table is ever created: the project is at Catalyst's 200-table cap. The
+     console's roles are six columns on membersExtra, in the Noah tables above. */
   for (const t of TYPES) {
     spec.push({
-      table: t.table, group: `Content: ${t.label}`,
-      /* Noah Tube's two tables are not in the project. */
-      create: ['videos', 'videoCategories'].includes(t.table),
-      columns: t.fields.map((f) => ({ column_name: columnFor(f.key), ...(KIND_TYPE[f.kind] || KIND_TYPE.text) })),
+      table: t.table, group: `Content: ${t.label}`, create: false,
+      columns: t.fields.map((f) => ({ column_name: columnFor(f.key), ...typeOf(f) })),
     });
   }
   return spec;
@@ -100,8 +93,13 @@ export function buildSpec() {
 
 /* ---------- comparing with the project ---------- */
 
-/** Catalyst reports a type with its own spelling; compare on the family. */
-const family = (t) => String(t || '').toLowerCase().replace(/\(.*$/, '').trim();
+/** Catalyst reports a type with its own spelling, and a string may be a varchar or a
+    text, a whole number an int or a bigint: compare on the family. */
+const FAMILY = { varchar: 'text', text: 'text', int: 'int', bigint: 'int', double: 'double', boolean: 'boolean', date: 'date', datetime: 'datetime' };
+const family = (t) => {
+  const k = String(t || '').toLowerCase().replace(/\(.*$/, '').trim();
+  return FAMILY[k] || k;
+};
 
 /**
  * Work out what is missing. `api` is { listTables, listColumns }, so a test can

@@ -74,12 +74,14 @@ npm run catalyst:columns               shows what is missing; changes nothing
 npm run catalyst:columns -- --apply    creates it
 ```
 
-It only ever **adds**: a column, or the console's own `consoleStaff` table (which
-holds who has which console role) and Noah Tube's two tables. It never alters or
-removes anything that is there, and it does not create the Noah app's own tables.
-What it wants is in `server/schema-spec.js`. Catalyst allows 104 columns in a
-table and 191 tables in a project; a table that would go over is reported, not
-forced.
+It only ever **adds columns**. It never creates a table (the project is at Catalyst's
+200-table cap), and never alters or removes anything that is there. What it wants is
+in `server/schema-spec.js`. On the project as found, that is **six columns on
+`membersExtra`** (`consoleRole`, `consoleStatus`, `consoleTitle`, `consoleGrantedBy`,
+`consoleGrantedAt`, `consoleLastSignedInAt`), which hold which member has which console
+role; every content table already has the columns the console writes (see
+CONTENT-TABLES.md). A table that would go over Catalyst's 104 columns is reported,
+not forced.
 
 Catalyst refuses a few column names (`date`, `order`, `time`, `key`, `rows`, `in`,
 `out`, `priority`, `timestamp`), so the project spells them `dateCol`, `orderCol`

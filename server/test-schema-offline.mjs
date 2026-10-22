@@ -417,6 +417,80 @@ await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
 });
 
 /* ================================================================== */
+section('Console roles kept on membersExtra, because the project cannot hold another table');
+
+{
+  const FCs = await import('./fake-catalyst.mjs');
+  const extraOf = (id) => tables[T.membersExtra].find((x) => x.id === id);
+  await withEnv({ NODE_ENV: 'test', CATALYST_TABLE_CONSOLE_STAFF: undefined, ENABLE_TEST_LOGIN: undefined }, async () => {
+    reset(seed());
+    S.forgetTables();
+
+    /* The columns have not been added yet. */
+    FCs.fakeColumns(T.membersExtra, []);
+    check('without the columns there is nowhere to keep roles, and it says which', (await S.ensureStaffBackend(true)) === null && !S.consoleStaffEnabled());
+    let none = null;
+    try { await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', by: 'x' }); } catch (e) { none = e; }
+    check('...granting is refused, plainly, and nothing is written', none?.code === 'no_table' && /columns have not been added/.test(none.message) && writes.length === 0, none?.message);
+    check('...the schema check names the six columns as missing from membersExtra',
+      (await S.verifySchema()).find((r) => r.table === 'membersExtra').missing.filter((c) => c.startsWith('console')).join() === S.CONSOLE_COLUMNS.join());
+
+    /* npm run catalyst:columns -- --apply has been run. */
+    FCs.fakeColumns(T.membersExtra, S.CONSOLE_COLUMNS);
+    check('with the columns present, roles are kept on membersExtra', (await S.ensureStaffBackend(true)) === 'columns' && S.consoleStaffEnabled() && S.staffBackend() === 'columns');
+    check('...and the schema check no longer names them', (await S.verifySchema()).find((r) => r.table === 'membersExtra').missing.filter((c) => c.startsWith('console')).length === 0);
+
+    const before = writes.length;
+    const id = await S.grantConsoleAccess({ memberRowId: M.approved, role: 'finance', title: 'Accounts', by: 'Anitha Varghese' });
+    const row = extraOf(M.approved);
+    check('granting writes the member\'s own extra row', row.consoleRole === 'finance' && row.consoleStatus === 'Active' && row.consoleTitle === 'Accounts' && row.consoleGrantedBy === 'Anitha Varghese' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(row.consoleGrantedAt), JSON.stringify(row));
+    check('...the id handed back is that row\'s, as a string, intact', id === row.ROWID && typeof id === 'string');
+    check('...and nothing is written to a table of its own', writes.slice(before).every((w) => w.table === T.membersExtra));
+
+    const dir = await S.loadStaffDirectory(['super', 'finance', 'membership']);
+    const mine = dir.find((s) => s.memberRowId === M.approved);
+    check('the staff directory lists them, from the same rows already read', mine?.role === 'finance' && mine.source === 'catalyst' && mine.id === row.ROWID && mine.title === 'Accounts' && mine.grantedBy === 'Anitha Varghese', JSON.stringify(mine));
+    check('...and a member with no role is not staff', !dir.some((s) => s.memberRowId === M.draft));
+    check('...they sign in by number as that role', (await ST.resolveStaff({ mobile: '+91 90000 00779' })).staff?.role === 'finance');
+    check('...and by email', (await ST.resolveStaff({ email: 'anand@example.com' })).staff?.role === 'finance');
+    check('...and are no longer offered as someone to give access to', !(await S.staffCandidates(['finance'])).some((c) => c.rowId === M.approved));
+
+    /* a member with no membersExtra row at all */
+    check('Old Member has no extra row to begin with', !extraOf(M.office));
+    await S.grantConsoleAccess({ memberRowId: M.office, role: 'events', by: 'x' });
+    check('granting someone with no extra row creates it, joined to the member by id', extraOf(M.office)?.consoleRole === 'events' && extraOf(M.office).form_submit === false);
+
+    await S.updateConsoleStaff(row.ROWID, { role: 'membership', title: 'Registrar' });
+    check('changing a role updates the columns', extraOf(M.approved).consoleRole === 'membership' && extraOf(M.approved).consoleTitle === 'Registrar');
+    await S.updateConsoleStaff(row.ROWID, { status: 'Suspended' });
+    check('suspending is a column too, and it is honoured at sign-in', extraOf(M.approved).consoleStatus === 'Suspended' && /suspended/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+    await S.updateConsoleStaff(row.ROWID, { status: 'Revoked' });
+    check('...so is revoking', /revoked/.test((await ST.resolveStaff({ mobile: '9000000779' })).error || ''));
+    check('...a revoked member can be given access again', (await S.staffCandidates(['finance'])).some((c) => c.rowId === M.approved));
+    await S.updateConsoleStaff(row.ROWID, { status: 'Active' });
+
+    await S.touchStaffSignIn(row.ROWID);
+    check('a sign-in is stamped on the row', /^\d{4}-\d{2}-\d{2}/.test(extraOf(M.approved).consoleLastSignedInAt || ''));
+    check('...and shows as when they were last in', (await S.loadStaffDirectory(['membership'])).find((s) => s.memberRowId === M.approved).lastIn instanceof Date);
+
+    /* a role the console does not define is ignored */
+    extraOf(M.approved).consoleRole = 'wizard'; S.clearCache();
+    check('a role the console does not define does not become access', !(await S.loadStaffDirectory(['membership'])).some((s) => s.memberRowId === M.approved));
+    extraOf(M.approved).consoleRole = 'membership'; S.clearCache();
+
+    /* a separate table, if a project has room for one, still works and wins */
+    process.env.CATALYST_TABLE_CONSOLE_STAFF = '27145000000299001';
+    check('a table named in the environment takes precedence', S.staffBackend() === 'table');
+    delete process.env.CATALYST_TABLE_CONSOLE_STAFF;
+    S.forgetTables();
+  });
+  /* leave the fake as the other suites expect it */
+  process.env.CATALYST_TABLE_CONSOLE_STAFF = '27145000000299001';
+  FCs.fakeColumns(T.membersExtra, []);
+  reset(seed());
+}
+
+/* ================================================================== */
 section('Signing in by email as well as by number');
 
 await withEnv({ NODE_ENV: 'test', ENABLE_TEST_LOGIN: undefined }, async () => {
@@ -937,36 +1011,42 @@ const SS = await import('./schema-spec.js');
   const spec = SS.buildSpec();
   const of = (t) => spec.find((s) => s.table === t);
   const cols = (t) => of(t).columns.map((c) => c.column_name);
+  const col = (t, c) => of(t).columns.find((x) => x.column_name === c);
 
-  check('the spec covers the Noah tables, the console\'s own, and every content table',
-    ['members', 'membersExtra', 'users', 'files', 'appRegistrations', 'appChangeRequests', 'consoleStaff', 'dailyMana', 'rowilCourseManagement', 'videos'].every((t) => of(t)));
-  check('only the console\'s own table and Noah Tube\'s two are ever created; the developer\'s tables never',
-    spec.filter((s) => s.create).map((s) => s.table).sort().join() === 'consoleStaff,videoCategories,videos', spec.filter((s) => s.create).map((s) => s.table).join());
-  check('Catalyst\'s refused names are written the way the project spells them', cols('rowilCourseLessonGroupManagement').includes('orderCol') && !cols('rowilCourseLessonGroupManagement').includes('order') && cols('noahGram').includes('dateCol') && !cols('noahGram').includes('date'));
+  check('the spec covers the Noah tables and every content table',
+    ['members', 'membersExtra', 'users', 'files', 'appRegistrations', 'appChangeRequests', 'dailyMana', 'rowilCourseManagement', 'videos'].every((t) => of(t)));
+  check('no table is ever created: the project is at Catalyst\'s 200-table cap', spec.every((s) => !s.create) && !of('consoleStaff'));
+  check('the only thing the console adds to the developer\'s tables is six columns for console roles',
+    SS.buildSpec().find((s) => s.table === 'membersExtra').columns.filter((c) => c.column_name.startsWith('console')).map((c) => c.column_name).sort().join()
+      === 'consoleGrantedAt,consoleGrantedBy,consoleLastSignedInAt,consoleRole,consoleStatus,consoleTitle');
+  check('...with sensible types', col('membersExtra', 'consoleRole').data_type === 'varchar' && col('membersExtra', 'consoleGrantedAt').data_type === 'datetime' && col('membersExtra', 'consoleLastSignedInAt').data_type === 'datetime');
   const { columnFor } = await import('./content-types.js');
-  check('...the same spelling the console writes with', columnFor('order') === 'orderCol' && columnFor('title') === 'title');
+  check('Catalyst\'s refused names are written the way the project spells them', cols('noahGramCategory').includes('orderCol') && cols('rowilCourseLessonGroupManagement').includes('orderCol') && !cols('noahGramCategory').includes('order'));
+  check('...and columnFor agrees', columnFor('order') === 'orderCol' && columnFor('title') === 'title');
   check('no column in the spec has a name Catalyst refuses', spec.every((s) => s.columns.every((c) => !['date', 'order', 'time', 'key', 'rows', 'in', 'out', 'priority', 'timestamp'].includes(c.column_name))));
-  check('a field\'s kind picks its type', of('dailyMana').columns.find((c) => c.column_name === 'publishDate').data_type === 'date'
-    && of('dailyMana').columns.find((c) => c.column_name === 'content').data_type === 'text'
-    && of('dailyMana').columns.find((c) => c.column_name === 'published').data_type === 'boolean'
-    && of('dailyMana').columns.find((c) => c.column_name === 'categoryId').data_type === 'bigint'
-    && of('rowilCourseManagement').columns.find((c) => c.column_name === 'donationAmount').data_type === 'double');
-  check('a short text is a 255-character varchar', of('dailyMana').columns.find((c) => c.column_name === 'title').max_length === 255);
-  check('the console-staff table has what the console writes', ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'].every((c) => cols('consoleStaff').includes(c)));
+  check('a content field\'s storage picks its type', col('dailyMana', 'publishDate').data_type === 'date'
+    && col('dailyMana', 'content').data_type === 'text'
+    && col('dailyMana', 'published').data_type === 'boolean'
+    && col('dailyMana', 'categoryIds').data_type === 'text'
+    && col('dailyMana', 'contentLanguage').data_type === 'int'
+    && col('dailyMana', 'showOnObituary').data_type === 'int'
+    && col('rowilCourseManagement', 'published').data_type === 'int'
+    && col('rowilCourseManagement', 'donationAmount').data_type === 'double'
+    && col('rowilCourseManagement', 'publishedDate').data_type === 'datetime');
+  check('every content field is a column the spec asks for, with nothing invented', cols('rowilCourseManagement').includes('title') && !cols('rowilCourseManagement').includes('name') && !cols('dailyMana').includes('text') && !cols('dailyMana').includes('imageUrl'));
   check('guessed types for a missing developer column are sensible', SS.guessType('isPrayerWarrior').data_type === 'boolean'
     && SS.guessType('reviewedAt').data_type === 'datetime' && SS.guessType('dateOfBirth').data_type === 'date'
-    && SS.guessType('memberRowId').data_type === 'bigint' && SS.guessType('reviewNote').data_type === 'text'
-    && SS.guessType('city').data_type === 'varchar');
+    && SS.guessType('reviewNote').data_type === 'text' && SS.guessType('city').data_type === 'varchar'
+    && SS.guessType('language').data_type === 'int' && SS.guessType('memberRowId').data_type === 'varchar');
 
-  /* A fake project: the Noah tables are there, dailyMana is an empty shell,
-     consoleStaff and the Noah Tube tables are absent, members is full. */
+  /* A fake project: the Noah tables are there, membersExtra lacks the console
+     columns, dailyMana is an empty shell, members is full. */
   const project = {
     members: { id: '1001', cols: [...Array(104)].map((_, i) => ({ name: i === 0 ? 'ROWID' : `c${i}`, type: 'varchar' })) },
-    membersExtra: { id: '1002', cols: spec.find((s) => s.table === 'membersExtra').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
-    users: { id: '1003', cols: spec.find((s) => s.table === 'users').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
-    files: { id: '1004', cols: spec.find((s) => s.table === 'files').columns.map((c) => ({ name: c.column_name, type: 'varchar' })) },
-    appRegistrations: { id: '1005', cols: spec.find((s) => s.table === 'appRegistrations').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
-    appChangeRequests: { id: '1006', cols: [{ name: 'ROWID', type: 'bigint' }, { name: 'memberRowId', type: 'bigint' }] },
+    membersExtra: { id: '1002', cols: of('membersExtra').columns.filter((c) => !c.column_name.startsWith('console')).map((c) => ({ name: c.column_name, type: c.data_type })) },
+    users: { id: '1003', cols: of('users').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
+    files: { id: '1004', cols: of('files').columns.map((c) => ({ name: c.column_name, type: c.data_type === 'varchar' ? 'text' : c.data_type })) },
+    appChangeRequests: { id: '1006', cols: [{ name: 'ROWID', type: 'bigint' }, { name: 'memberRowId', type: 'varchar' }] },
     dailyMana: { id: '2001', cols: [{ name: 'ROWID', type: 'bigint' }, { name: 'CREATEDTIME', type: 'datetime' }] },
   };
   const calls = [];
@@ -976,7 +1056,6 @@ const SS = await import('./schema-spec.js');
     createTable: async (name) => { calls.push(['table', name]); project[name] = { id: String(9000 + calls.length), cols: [{ name: 'ROWID', type: 'bigint' }] }; return project[name].id; },
     createColumns: async (id, columns) => {
       calls.push(['columns', id, columns.length]);
-      if (id === '2001' && process.env.__BREAK) throw new Error('Catalyst: no');
       Object.values(project).find((t) => t.id === id).cols.push(...columns.map((c) => ({ name: c.column_name, type: c.data_type })));
     },
   };
@@ -984,22 +1063,30 @@ const SS = await import('./schema-spec.js');
   const planned = await SS.plan(spec, api);
   const state = (t) => planned.find((p) => p.table === t);
   check('nothing is changed while planning', calls.length === 0);
-  check('a table the project has complete is "ok"', state('membersExtra').state === 'ok' && state('users').state === 'ok');
+  check('a table the project has complete is "ok"', state('users').state === 'ok');
+  check('membersExtra needs the six console columns, and only those', state('membersExtra').state === 'add-columns' && state('membersExtra').missing.length === 6 && state('membersExtra').missing.every((c) => c.column_name.startsWith('console')), JSON.stringify(state('membersExtra').missing.map((c) => c.column_name)));
   check('an empty shell needs its columns', state('dailyMana').state === 'add-columns' && state('dailyMana').missing.length > 5);
-  check('the console-staff table does not exist yet, and would be created', state('consoleStaff').state === 'create-table' && state('consoleStaff').missing.length === 7);
-  check('Noah Tube\'s tables would be created', state('videos').state === 'create-table' && state('videoCategories').state === 'create-table');
-  check('a table the developer should own, if it were gone, is reported not created', (await SS.plan([{ table: 'threads', create: false, columns: [{ column_name: 'a', data_type: 'int' }] }], api))[0].state === 'absent');
+  check('a table that is not in the project is reported, not created', state('videos').state === 'absent' && calls.length === 0);
   check('a table already at 104 columns that needs more is refused, with why', state('members').state === 'too-wide' && /104/.test(state('members').problem), state('members').problem);
-  check('a column that exists as a different type is noted and left alone', state('files').notes.length > 0 || state('files').state === 'ok');
-  check('a developer\'s table missing columns is found (and its gap named)', state('appChangeRequests').state === 'add-columns' && state('appChangeRequests').missing.some((c) => c.column_name === 'fieldId'));
+  check('a string kept as text where the console expected varchar is NOT a difference', !state('files').notes.some((n) => /path|extension/.test(n)), state('files').notes.join(' | '));
+  check('...but a real difference (a flag kept as an int) is noted and left alone', (await SS.plan([{ table: 'files', create: false, columns: [{ column_name: 'size', data_type: 'boolean' }] }], { ...api, listColumns: async () => [{ name: 'size', type: 'int' }] }))[0].notes.length === 1);
 
-  const results = await SS.apply(planned.filter((p) => ['add-columns', 'create-table'].includes(p.state)), api);
-  check('applying creates the tables, then their columns', calls.some((c) => c[0] === 'table' && c[1] === 'consoleStaff') && results.find((r) => r.table === 'consoleStaff').done.length === 7);
-  check('...one request per table for its columns', calls.filter((c) => c[0] === 'columns' && c[1] === '2001').length === 1);
-  check('...nothing is ever deleted or altered: only table and column creation are in the api', Object.keys(api).sort().join() === 'createColumns,createTable,listColumns,listTables');
+  const results = await SS.apply(planned.filter((p) => p.state === 'add-columns'), api);
+  check('applying adds the columns, one request per table', calls.filter((c) => c[0] === 'columns').length === results.length && calls.filter((c) => c[0] === 'table').length === 0);
+  check('...membersExtra gets exactly the six', calls.find((c) => c[0] === 'columns' && c[1] === '1002')[2] === 6);
+  check('...nothing is ever deleted or altered: only creation is in the api', Object.keys(api).sort().join() === 'createColumns,createTable,listColumns,listTables');
   const after = await SS.plan(spec, api);
-  check('read back, everything asked for is there (apart from the table that cannot widen)',
-    after.filter((p) => !['ok', 'too-wide', 'absent'].includes(p.state)).length === 0 && ['dailyMana', 'consoleStaff', 'videos', 'videoCategories'].every((t) => after.find((p) => p.table === t).state === 'ok'), after.filter((p) => !['ok', 'too-wide', 'absent'].includes(p.state)).map((p) => p.table).join());
+  check('read back, everything asked for is there (apart from what cannot be added)',
+    after.filter((p) => !['ok', 'too-wide', 'absent'].includes(p.state)).length === 0 && after.find((p) => p.table === 'membersExtra').state === 'ok'
+      && after.find((p) => p.table === 'dailyMana').state === 'ok');
+
+  /* A spec that does ask for a table gets one (nothing in the real spec does). */
+  const made = [];
+  const apiNew = { ...api, listTables: async () => [], createTable: async (n) => { made.push(n); return '7001'; }, createColumns: async (id, c) => made.push([id, c.length]) };
+  const one = [{ table: 'x', group: 't', create: true, columns: [{ column_name: 'a', data_type: 'int' }] }];
+  const newPlan = await SS.plan(one, apiNew);
+  await SS.apply(newPlan, apiNew);
+  check('a table the spec asks to create is created, then given its columns', newPlan[0].state === 'create-table' && made[0] === 'x' && made[1][0] === '7001' && made[1][1] === 1);
 
   /* one table failing must not stop the others */
   const project2 = { dailyMana: { id: '2001', cols: [{ name: 'ROWID', type: 'bigint' }] }, dailyPrayers: { id: '2002', cols: [{ name: 'ROWID', type: 'bigint' }] } };
@@ -1030,70 +1117,88 @@ check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) =>
 check('every field a kind names as its title exists', CT.TYPES.every((t) => t.fields.some((f) => f.key === t.title)));
 check('every publish flag is a real toggle field', CT.TYPES.every((t) => !t.publish || t.fields.some((f) => f.key === t.publish && f.kind === 'toggle')));
 check('every ref points at a kind that exists', CT.TYPES.every((t) => t.fields.every((f) => f.kind !== 'ref' || CT.typeById(f.ref))));
-check('the Daily Manna asks for what the Laravel backend requires',
-  ['title', 'text', 'content', 'prayer', 'publishDate'].every((k) => manna.fields.find((f) => f.key === k)?.required));
+check('the Daily Manna asks for the columns its table really has',
+  ['title', 'publishDate', 'content', 'prayer'].every((k) => manna.fields.find((f) => f.key === k)?.required)
+  && !manna.fields.some((f) => ['text', 'imageUrl', 'language', 'categoryId'].includes(f.key)));
+check('a language is stored as its code number, from the Laravel config (1 English ... 7 Kannada)',
+  CT.LANGUAGES.map((l) => `${l.v}${l.l}`).join() === '1English,2Hindi,3Marathi,4Telugu,5Malayalam,6Tamil,7Kannada'
+  && manna.fields.find((f) => f.key === 'contentLanguage').store === 'int');
+check('every field that is stored another way says how', CT.TYPES.every((t) => t.fields.every((f) => !f.store || ['int', 'datetime'].includes(f.store))));
 
 /* ---------- checking what is sent ---------- */
-const good = { title: 'Walking by faith', publishDate: '2026-10-20', text: 'A verse', content: 'The message', prayer: 'A prayer' };
+const good = { title: 'Walking by faith', publishDate: '2026-10-20', content: 'The message', prayer: 'A prayer' };
 check('a complete devotional passes', Object.keys(C.validate(manna, good).errors).length === 0);
 const bad = C.validate(manna, {});
 check('missing required fields are each named',
-  ['title', 'publishDate', 'text', 'content', 'prayer'].every((k) => bad.errors[k]), Object.keys(bad.errors).join());
+  ['title', 'publishDate', 'content', 'prayer'].every((k) => bad.errors[k]), Object.keys(bad.errors).join());
 check('a bad date is refused', !!C.validate(manna, { ...good, publishDate: '20/10/2026' }).errors.publishDate);
 check('an impossible date is refused', !!C.validate(manna, { ...good, publishDate: '2026-13-45' }).errors.publishDate);
-check('a language off the list is refused', !!C.validate(manna, { ...good, language: 'xx' }).errors.language);
-check('a language on it passes', !C.validate(manna, { ...good, language: 'ml' }).errors.language);
-check('a link must be http(s)', !!C.validate(manna, { ...good, imageUrl: 'javascript:alert(1)' }).errors.imageUrl);
-check('...data: links too', !!C.validate(manna, { ...good, imageUrl: 'data:text/html,x' }).errors.imageUrl);
-check('...but a real one passes', !C.validate(manna, { ...good, imageUrl: 'https://example.com/a.jpg' }).errors.imageUrl);
+check('a language off the list is refused', !!C.validate(manna, { ...good, contentLanguage: '99' }).errors.contentLanguage);
+check('a language on it passes', !C.validate(manna, { ...good, contentLanguage: '5' }).errors.contentLanguage);
+check('a link must be http(s)', !!C.validate(manna, { ...good, image: 'javascript:alert(1)' }).errors.image);
+check('...data: links too', !!C.validate(manna, { ...good, image: 'data:text/html,x' }).errors.image);
+check('...but a real one passes', !C.validate(manna, { ...good, image: 'https://example.com/a.jpg' }).errors.image);
 check('a colour must be a hex colour', !!C.validate(CT.typeById('noahgramCategories'), { name: 'X', backgroundColor: 'blue' }).errors.backgroundColor);
-check('a number must be a number', !!C.validate(CT.typeById('courses'), { name: 'X', donationAmount: 'lots' }).errors.donationAmount);
-check('...and not negative', !!C.validate(CT.typeById('courses'), { name: 'X', donationAmount: -5 }).errors.donationAmount);
+check('a number must be a number', !!C.validate(CT.typeById('courses'), { title: 'X', donationAmount: 'lots' }).errors.donationAmount);
+check('...and not negative', !!C.validate(CT.typeById('courses'), { title: 'X', donationAmount: -5 }).errors.donationAmount);
 check('a very long title is refused', !!C.validate(manna, { ...good, title: 'x'.repeat(256) }).errors.title);
 check('long text has Catalyst\'s own limit', !!C.validate(manna, { ...good, content: 'x'.repeat(10001) }).errors.content);
 check('empty optional fields become null, not empty strings',
-  C.validate(manna, good).value.categoryId === null && C.validate(manna, good).value.language === null);
+  C.validate(manna, good).value.categoryIds === null && C.validate(manna, good).value.contentLanguage === null);
 check('a toggle left out is false', C.validate(manna, good).value.published === false);
+check('...unless the field starts on (an active category)', C.validate(CT.typeById('mannaCategories'), { title: 'X' }).value.status === true
+  && C.validate(CT.typeById('mannaCategories'), { title: 'X', status: false }).value.status === false);
 check('an update checks only what it sends', Object.keys(C.validate(manna, { title: 'New' }, { partial: true }).errors).length === 0
   && Object.keys(C.validate(manna, { title: 'New' }, { partial: true }).value).join() === 'title');
 check('...but still refuses an emptied required field', !!C.validate(manna, { title: '' }, { partial: true }).errors.title);
 
 /* ---------- against Catalyst: not ready ---------- */
 reset(seed());
-check('the fake knows the content tables', !!FC.contentTableId('dailyMana') && !FC.contentTableId('videos'));
+check('the fake knows the content tables', !!FC.contentTableId('dailyMana') && !!FC.contentTableId('videos'));
 const shellList = await C.listContent('manna');
 check('an empty-shell table lists as empty, not as an error', shellList.rows.length === 0 && shellList.source === 'catalyst' && !shellList.notReady);
 
 let refused = null;
 try { await C.createContent('manna', good, { canPublish: true }); } catch (e) { refused = e; }
-check('saving into an empty shell is refused, plainly', refused?.status === 502 && /Catalyst refused it/.test(refused.message), refused?.message);
+check('saving into a table without the columns is refused, plainly', refused?.status === 502 && /Catalyst refused it/.test(refused.message), refused?.message);
 check('...with a pointer to what is missing', /CONTENT-TABLES/.test(refused?.extra?.hint || ''));
 
+FC.removeTable('videos');
+C.forgetTables();
 const noVideos = await C.listContent('tubeVideos');
 check('a table that is not in the project says so', noVideos.notReady?.code === 'no_table' && /videos/.test(noVideos.notReady.why), JSON.stringify(noVideos.notReady));
 let missing = null;
 try { await C.createContent('tubeVideos', { title: 'X', videoUrl: 'https://example.com/v' }, { canPublish: true }); } catch (e) { missing = e; }
 check('...and saving to it is refused as not ready', missing?.status === 409 && missing.extra.notReady === true, missing?.message);
+reset(seed());
+C.forgetTables();
 
 /* ---------- against Catalyst: once the columns exist ---------- */
 FC.makeReady('dailyMana');
 FC.makeReady('dailyMannaCategories');
 const tid = FC.contentTableId('dailyMana');
 
-const made = await C.createContent('manna', { ...good, language: 'en', showOnObituary: true, published: false }, { canPublish: true });
+const made = await C.createContent('manna', { ...good, contentLanguage: '1', showOnObituary: true, published: false }, { canPublish: true });
 check('a devotional is saved to its table', FC.tables[tid].length === 1 && made.title === 'Walking by faith');
 const stored = FC.tables[tid][0];
-check('...with the right columns and types',
-  stored.title === 'Walking by faith' && stored.publishDate === '2026-10-20' && stored.showOnObituary === true
-  && stored.published === false && stored.categoryId === null && stored.language === 'en', JSON.stringify(stored).slice(0, 220));
+check('...in the columns the table has, kept the way Catalyst keeps them',
+  stored.title === 'Walking by faith' && stored.publishDate === '2026-10-20' && stored.published === false
+  && stored.categoryIds === null && stored.contentLanguage === 1 && stored.showOnObituary === 1, JSON.stringify(stored).slice(0, 260));
+check('...the language is the number 1, not "en" or "1"', stored.contentLanguage === 1 && typeof stored.contentLanguage === 'number');
+check('...a toggle kept as an int is 1, not true', stored.showOnObituary === 1);
+check('...stamped as created, in UTC, in the form Catalyst wants', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stored.created || ''), String(stored.created));
+check('...and not yet as updated', stored.updated === undefined);
+check('...no column the table does not have is sent', !('text' in stored) && !('imageUrl' in stored) && !('language' in stored) && !('ministryId' in stored));
 
 let list = await C.listContent('manna');
 check('...and listed with a string id', list.rows.length === 1 && typeof list.rows[0].id === 'string' && /^\d{17}$/.test(list.rows[0].id), list.rows[0]?.id);
+check('...the language and the obituary toggle read back as the form shows them', list.rows[0].contentLanguage === '1' && list.rows[0].showOnObituary === true);
 check('...as a draft', list.rows[0].live === false);
 
 const rid = list.rows[0].id;
 await C.publishContent('manna', rid, true, { canPublish: true });
 check('publishing sets the publish column', FC.tables[tid][0].published === true);
+check('...stamps it as updated', /^\d{4}-\d{2}-\d{2} /.test(FC.tables[tid][0].updated || ''));
 check('...and it lists as live', (await C.listContent('manna')).rows[0].live === true);
 check('...and can be filtered to live and to draft',
   (await C.listContent('manna', { state: 'live' })).rows.length === 1 && (await C.listContent('manna', { state: 'draft' })).rows.length === 0);
@@ -1111,6 +1216,31 @@ check('the newest date is listed first', (await C.listContent('manna')).rows.map
 await C.deleteContent('manna', rid);
 check('deleting removes the row', FC.tables[tid].length === 2 && !FC.tables[tid].some((r) => r.ROWID === rid));
 
+/* ---------- the other ways a table stores a value ---------- */
+{
+  FC.makeReady('rowilCourseManagement');
+  FC.makeReady('dailyConfessions');
+  FC.makeReady('dailyMannaCategories');
+  FC.makeReady('dailyPrayers');
+  await C.createContent('courses', { title: 'Knowing God', language: '5', published: true, featured: false, donationAmount: '250', publishedDate: '2026-10-25' }, { canPublish: true });
+  const course = FC.tables[FC.contentTableId('rowilCourseManagement')][0];
+  check('a course keeps published and featured as 1 and 0, its language as a number, its fee as a number',
+    course.published === 1 && course.featured === 0 && course.language === 5 && course.donationAmount === 250, JSON.stringify(course).slice(0, 220));
+  check('...its title is in `title` (the table has no `name`)', course.title === 'Knowing God' && !('name' in course));
+  check('...a date kept as a datetime is written as one', course.publishedDate === '2026-10-25 00:00:00', String(course.publishedDate));
+  check('...and read back as a plain date', (await C.listContent('courses')).rows[0].publishedDate === '2026-10-25');
+  check('...stamped with the columns this table uses (createdOn, not created)', !!course.createdOn && course.created === undefined);
+
+  await C.createContent('confessions', { title: 'I am loved', content: 'I am.' }, { canPublish: true });
+  check('a confession is always marked as one', FC.tables[FC.contentTableId('dailyConfessions')][0].isConfession === true);
+
+  await C.createContent('mannaCategories', { title: 'Hope' }, { canPublish: true });
+  const cat = FC.tables[FC.contentTableId('dailyMannaCategories')][0];
+  check('a new category is active unless said otherwise', cat.status === true, JSON.stringify(cat).slice(0, 160));
+  await C.createContent('prayers', { title: 'Evening', content: 'Lord.', publishedDate: '2026-11-02' }, { canPublish: true });
+  check('a prayer\'s publish date is a datetime', FC.tables[FC.contentTableId('dailyPrayers')][0].publishedDate === '2026-11-02 00:00:00');
+}
+
 /* ---------- a role that may write but not publish ---------- */
 let denied = null;
 try { await C.createContent('manna', { ...good, published: true }, { canPublish: false }); } catch (e) { denied = e; }
@@ -1121,7 +1251,7 @@ try { await C.updateContent('manna', FC.tables[tid][0].ROWID, { published: true 
 check('...and neither can an edit switch it on', denied2?.status === 403);
 
 let nopub = null;
-try { await C.publishContent('mannaCategories', '1', true, { canPublish: true }); } catch (e) { nopub = e; }
+try { await C.publishContent('dictionaryCategories', '1', true, { canPublish: true }); } catch (e) { nopub = e; }
 check('a kind with no publish step says so', nopub?.status === 400 && /no publish step/.test(nopub.message), nopub?.message);
 
 /* ---------- the sample set, with no Catalyst connection ---------- */
@@ -1131,7 +1261,8 @@ check('without the noah schema the content is the sample set', !C.onCatalyst());
 const sample = await C.listContent('manna');
 check('...there are sample devotionals to look at', sample.rows.length === 3 && sample.source === 'sample');
 check('...every kind has some sample entries', (await Promise.all(CT.TYPES.map((t) => C.listContent(t.id)))).every((r) => r.rows.length >= 2));
-check('...a sample devotional is linked to its sample category', sample.rows.some((r) => r.categoryId === 'mannaCategories-1'));
+check('...a sample devotional is linked to its sample category', sample.rows.some((r) => r.categoryIds === 'mannaCategories-1'));
+check('...the sample uses the real field names (a course has a title)', (await C.listContent('courses')).rows.every((r) => r.title));
 await C.createContent('manna', good, { canPublish: true });
 check('...saving adds to it', (await C.listContent('manna')).rows.length === 4);
 const sid = (await C.listContent('manna')).rows.find((r) => r.title === 'Walking by faith' && r.prayer === 'A prayer').id;
