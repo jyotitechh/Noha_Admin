@@ -114,7 +114,10 @@ const work = mkdtempSync(join(tmpdir(), 'appsail-'));
 try {
   const api = join(work, 'api');
   mkdirSync(api);
-  execSync('git archive HEAD server package.json package-lock.json | tar -x -C "' + api + '"', { cwd: root, shell: true });
+  /* An archive file, unpacked from inside the folder: `tar -C <drive path>` misreads "C:" as a host. */
+  const tarball = join(work, 'source.tar');
+  execSync(`git archive --format=tar -o "${tarball}" HEAD server package.json package-lock.json`, { cwd: root });
+  run('tar -xf ../source.tar', api);
   say('Installing the production dependencies…');
   run('npm ci --omit=dev --no-audit --no-fund', api);
 
