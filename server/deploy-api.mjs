@@ -127,14 +127,14 @@ try {
 
   say(`Project ${PROJECT}, organisation ${ORG}`);
   run(`catalyst init --project ${PROJECT} --org ${ORG} --dc ${DC} -ni`, work);
-  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api.replace(/\\/g, '/')}" --command "node server/index.js" -ni`, work);
+  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api.replace(/\\/g, '/')}" --command "node server/index.js 9000" -ni`, work);
 
   /* AppSail takes its settings from app-config.json. Written AFTER appsail:add, which makes it. */
   writeFileSync(join(api, 'app-config.json'), JSON.stringify({
-    command: 'node server/index.js', build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
+    command: 'node server/index.js 9000', build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
   }, null, 2));
 
-  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "node server/index.js" -ni`, work);
+  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "node server/index.js 9000" -ni`, work);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
