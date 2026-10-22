@@ -130,7 +130,7 @@ try {
     command: 'node server/index.js', build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
   }, null, 2));
 
-  run(`catalyst deploy appsail --name ${NAME} -ni`, work);
+  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "node server/index.js" -ni`, work);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
