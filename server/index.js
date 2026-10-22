@@ -29,7 +29,8 @@ import mountPeople from './routes/people.js';
 import mountChanges from './routes/changes.js';
 import mountContent from './routes/content.js';
 
-const PORT = Number(process.env.PORT) || 4000;
+/* Render sets PORT; Catalyst AppSail sets X_ZOHO_CATALYST_LISTEN_PORT. Locally, 4000. */
+const PORT = Number(process.env.X_ZOHO_CATALYST_LISTEN_PORT || process.env.PORT) || 4000;
 const app = express();
 
 /* Who may call this API from a browser.

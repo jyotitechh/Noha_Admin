@@ -25,6 +25,7 @@
     "catalyst:columns": "node server/ensure-columns.mjs",
     "catalyst:connect": "node server/connect.mjs",
     "deploy:slate": "node server/deploy-slate.mjs",
+    "deploy:api": "node server/deploy-api.mjs",
     "test:connect": "node server/test-connect.mjs",
     "test:schema": "node server/test-schema-offline.mjs",
     "dev:offline": "node server/dev-offline.mjs",
