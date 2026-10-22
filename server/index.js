@@ -204,7 +204,7 @@ app.post('/api/auth/request-code', async (req, res) => {
        this passphrase is the only thing between the internet and a signed-in
        super administrator. Locally it is not set and this is a no-op. */
     const gate = checkPassphrase(req.body?.passphrase, req.ip);
-    if (!gate.ok) return res.status(401).json({ ok: false, error: gate.error, needsPassphrase: true });
+    if (!gate.ok) return res.status(gate.status || 401).json({ ok: false, error: gate.error, needsPassphrase: true });
 
     const r = await requestCode({ mobile: req.body?.mobile, email: req.body?.email });
     const { status, ...body } = r;

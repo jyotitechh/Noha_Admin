@@ -105,8 +105,27 @@ function same(a, b) {
   return timingSafeEqual(x, y);
 }
 
+/* A passphrase that is really a pasted COMMAND.
+
+   The docs give a command that makes a passphrase. Pasted into the host's settings instead of
+   being run, it becomes the passphrase: a long line, public in the repository and in chat, that
+   anyone could type. So a value that looks like shell or code is refused outright, and the
+   server says why, rather than carrying on protected by text everyone can read. */
+export function passphraseLooksCopied(value = PASSPHRASE()) {
+  const v = String(value || '');
+  return v.length > 60 || /node\s+-e|require\(|\|\s*(clip|tee|tr)\b|console\.log|randomInt|[\r\n"'`$;{}()]/i.test(v);
+}
+
 export function checkPassphrase(given, who = 'unknown') {
   if (!passphraseRequired()) return { ok: true };
+  if (passphraseLooksCopied()) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'The office passphrase set on this server is a copied command, not a passphrase, so sign-in is switched off until it is fixed. '
+        + 'Run the command in a terminal, and paste what it prints (four words and a number) into ADMIN_PASSPHRASE.',
+    };
+  }
 
   const now = Date.now();
   const a = attempts.get(who) || { n: 0, until: 0 };

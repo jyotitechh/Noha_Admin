@@ -1203,6 +1203,16 @@ await withEnv({ ADMIN_PASSPHRASE: 'amber-river-cedar-4821' }, async () => {
   check('...and even the right one waits while locked', !stillLocked.ok && /Too many attempts/.test(stillLocked.error), stillLocked.error);
   check('...but one caller\'s lockout is not another\'s', A.checkPassphrase('amber-river-cedar-4821', 'someone-else').ok);
 });
+const RECIPE = `node -e "const w=['amber','harbor'];console.log(w.join('-'))" | tr -d '\\r\\n' | tee ~/ksm-passphrase.txt | clip`;
+await withEnv({ ADMIN_PASSPHRASE: RECIPE }, async () => {
+  const got = A.checkPassphrase(RECIPE, 'c1');
+  check('a passphrase that is really a pasted command is refused, even when typed exactly', !got.ok && got.status === 503 && /copied command/.test(got.error), JSON.stringify(got));
+  check('...and so is anything else, so sign-in is simply off until it is fixed', A.checkPassphrase('amber-river-cedar-4821', 'c2').status === 503);
+});
+check('what counts as a copied command: code, pipes, quotes and very long lines',
+  ['node -e "x"', 'a | clip', 'console.log(1)', 'x'.repeat(61), 'has "quotes"', 'two\nlines'].every((v) => A.passphraseLooksCopied(v)));
+check('...and what does not: the generated passphrases and ordinary phrases',
+  ['amber-river-cedar-falcon-4821', 'lantern granite saffron harbor 9034', 'Correct-Horse-Battery-Staple-7'].every((v) => !A.passphraseLooksCopied(v)));
 await withEnv({ ADMIN_PASSPHRASE: '  amber-river-cedar-4821\r\n' }, async () => {
   check('a value pasted into a host\'s dashboard with a trailing line break still works', A.checkPassphrase('amber-river-cedar-4821', 'q1').ok && A.passphraseRequired());
 });
