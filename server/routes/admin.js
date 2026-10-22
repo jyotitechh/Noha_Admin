@@ -421,14 +421,18 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
     /* Streamed through this server rather than handed out as a public URL, so
        the permission check and the audit entry cannot be bypassed. */
+    const slot = { id: 'idProof', photo: 'photo', video: 'video' }[kind];
     const stream = (buffer, contentType) => {
-      res.setHeader('content-type', contentType);
+      /* File Store answers every download as a generic byte stream. A browser will
+         not reliably play a video or show an image sent that way, so say what it
+         is, from the upload's own record. */
+      const generic = !contentType || /octet-stream/i.test(contentType);
+      res.setHeader('content-type', generic ? (r.fileMimes?.[slot] || 'application/octet-stream') : contentType);
       res.setHeader('cache-control', 'private, max-age=300');
       res.setHeader('content-disposition', `inline; filename="${kind}-${r.id}"`);
       return res.send(buffer);
     };
 
-    const slot = { id: 'idProof', photo: 'photo', video: 'video' }[kind];
     /* `files` ROWID: what GET /admin/files/:id takes. */
     const filesRowId = r.fileIds?.[slot];
     /* `files.path`: the File Store id, for a direct download. */

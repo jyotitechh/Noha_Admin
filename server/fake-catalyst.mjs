@@ -58,6 +58,8 @@ export { tables, writes, reset };
 export const U = { otp: '27145000000117981', draft: '27145000000126927', office: '27145000000141595', pastor: '27145000000138578', bare: '27145000000141592', boss: '27145000000151001' };
 /* Requests the app has filed for a change to a member's details. */
 export const CR = { name: '27145000000160001', email: '27145000000160002', unknown: '27145000000160003', done: '27145000000160004', badDate: '27145000000160005' };
+/* Family and groups. */
+export const HH = { rel: '27145000000170001', relOld: '27145000000170002', kid: '27145000000171001', kidLink: '27145000000172001', g1: '27145000000173001', g2: '27145000000173002', gOld: '27145000000173003' };
 export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028', boss: '27145000000151002' };
 
 export const seed = () => ({
@@ -121,6 +123,29 @@ export const seed = () => ({
     { ROWID: '27145000000138579', memberRowId: M.pastor, status: 'draft', CREATEDTIME: '2026-10-01 10:00:01:000' },
     /* approved, but never submitted: test data in the live project. */
     { ROWID: '27145000000141593', memberRowId: M.blank, status: 'approved', CREATEDTIME: '2026-10-19 16:00:01:000' },
+  ],
+  /* Anand and Old Member are spouses (an older, archived link is history). */
+  membersRelations: [
+    { ROWID: HH.rel, id: HH.rel, memberIdA: M.approved, memberIdB: M.office, relationshipA2B: 10, relationshipB2A: 10, isArchived: false },
+    { ROWID: HH.relOld, id: HH.relOld, memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 7, relationshipB2A: 7, isArchived: true },
+  ],
+  kids: [
+    { ROWID: HH.kid, id: HH.kid, firstName: 'Asha', lastName: 'Rao', gender: 2, dateOfBirth: '2018-04-02 00:00:00', archived: false },
+  ],
+  kidsConnect: [
+    { ROWID: HH.kidLink, id: HH.kidLink, kidId: HH.kid, memberId: M.approved, relationship: 1, isArchived: false },
+  ],
+  groups: [
+    { ROWID: HH.g1, id: HH.g1, name: 'Cell Mumbai 1', archived: false },
+    { ROWID: HH.g2, id: HH.g2, name: 'Worship team', parentId: HH.g1, archived: false },
+    { ROWID: HH.gOld, id: HH.gOld, name: 'Retired group', archived: true },
+  ],
+  groupsConnect: [
+    { ROWID: '27145000000174001', groupId: HH.g2, memberId: M.approved, isArchived: false },
+    { ROWID: '27145000000174002', groupId: HH.g1, memberId: M.approved, isArchived: false },
+    { ROWID: '27145000000174003', groupId: HH.g1, memberId: M.approved, isArchived: true },
+    { ROWID: '27145000000174004', groupId: HH.gOld, memberId: M.approved, isArchived: false },
+    { ROWID: '27145000000174005', groupId: HH.g1, memberId: M.office, isArchived: false },
   ],
   appChangeRequests: [
     { ROWID: CR.name, memberRowId: M.approved, fieldId: 'firstName', oldValue: 'Anand', newValue: 'Anandan', status: 'pending', CREATEDTIME: '2026-10-20 09:00:00:000' },

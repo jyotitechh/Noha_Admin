@@ -57,6 +57,8 @@ import { MEMBER_FIELDS, fieldByName, checkValue } from './member-fields.js';
 const TABLE_NAMES = [
   'users', 'members', 'membersExtra', 'userTokens', 'files', 'deviceTokens', 'notifications',
   'threads', 'threadUserConnect', 'threadMessages', 'appRegistrations', 'appChangeRequests',
+  /* Read on the person page only: who is family, and which groups they are in. */
+  'membersRelations', 'kids', 'kidsConnect', 'groups', 'groupsConnect',
 ];
 
 /** The six columns on membersExtra that hold a member's console role. */
@@ -263,7 +265,7 @@ let generation = 0;
    registrations an app sends in are seen after at most this long. */
 const CACHE_MS = (Number(process.env.CONSOLE_CACHE_SECONDS) || 60) * 1000;
 
-export const clearCache = () => { snap = null; crSnap = null; generation += 1; };
+export const clearCache = () => { snap = null; crSnap = null; household = null; generation += 1; };
 
 async function snapshot() {
   if (snap && Date.now() - snapAt < CACHE_MS) return snap;
@@ -295,6 +297,11 @@ function latestRegByMember(regs) {
   return out;
 }
 
+const MIME = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic',
+  pdf: 'application/pdf', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp',
+};
+
 const fileMeta = (f) => {
   if (!f) return null;
   let meta = {};
@@ -303,7 +310,8 @@ const fileMeta = (f) => {
     rowId: String(f.ROWID),
     storeId: f.path ? String(f.path) : null,
     name: meta.name || '',
-    mimeType: meta.mimeType || '',
+    /* The upload's own record of what it is, or what its extension says. */
+    mimeType: meta.mimeType || MIME[String(f.extension || String(meta.name || '').split('.').pop() || '').toLowerCase()] || '',
     bytes: Number(f.size || 0),
   };
 };
@@ -427,6 +435,12 @@ export async function loadRegistrations() {
         idProof: idFile?.storeId || null,
         photo: photo?.storeId || null,
         video: video?.storeId || null,
+      },
+      /* What each upload is, so the browser is told when it is sent. */
+      fileMimes: {
+        idProof: idFile?.mimeType || null,
+        photo: photo?.mimeType || null,
+        video: video?.mimeType || null,
       },
     };
   });
@@ -1218,8 +1232,98 @@ export async function loadPerson(memberRowId) {
       isPartner: asBool(x.isPartner),
       expiresOn: utc(x.partnershipExpireOn),
     },
-    family: { recorded: false, rows: [], why: 'Families are not stored in Catalyst yet: their tables exist but have no columns.' },
-    groups: { recorded: false, rows: [], why: 'Groups are not stored in Catalyst yet: their tables exist but have no columns.' },
+    ...(await familyAndGroups(member.rowId, byRow)),
+  };
+}
+
+/* ---------- family and groups ----------
+
+   Who a person is related to, their children, and the groups they belong to. Read
+   when a person's page opens, not for the lists, so it costs nothing until then.
+
+     membersRelations  two members and how each relates to the other
+     kids + kidsConnect  children who have no login of their own, and whose they are
+     groupsConnect + groups  which groups a member is in
+
+   The relationship codes are the client's own (Laravel config/options.php,
+   'memberRelations'). A row is read as the Laravel app read it: on a relation of
+   members A and B, A2B is what B is to A, and B2A is what A is to B. Archived rows
+   are history and are skipped. */
+
+const RELATION = {
+  1: 'Parent', 2: 'Child', 3: 'Uncle or aunt', 4: 'Nephew or niece', 5: 'Grandparent', 6: 'Grandchild',
+  7: 'Brother', 8: 'Sister', 9: 'Cousin', 10: 'Spouse', 11: 'In-law',
+};
+/** The other side of a relation: if I am your Parent, you are my Child. */
+const RELATION_BACK = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 7: 8, 8: 7, 9: 9, 10: 10, 11: 11 };
+
+let household = null;
+let householdAt = 0;
+async function householdRows() {
+  if (household && Date.now() - householdAt < CACHE_MS) return household;
+  const [relations, kids, kidLinks, groups, groupLinks] = await Promise.all([
+    io.getRows(T.membersRelations), io.getRows(T.kids), io.getRows(T.kidsConnect),
+    io.getRows(T.groups), io.getRows(T.groupsConnect),
+  ]);
+  household = { relations, kids, kidLinks, groups, groupLinks };
+  householdAt = Date.now();
+  return household;
+}
+
+const isLiveRow = (r) => !asBool(r.isArchived) && !asBool(r.archived);
+const ageOf = (dob) => (dob ? Math.max(0, Math.floor((Date.now() - +dob) / 31557600000)) : undefined);
+
+async function familyAndGroups(memberRowId, memberByRow) {
+  let h;
+  try { h = await householdRows(); } catch (err) {
+    /* Say it could not be read, rather than show an empty family. */
+    const why = `Could not be read from Catalyst just now: ${err.message}`;
+    return { family: { recorded: false, rows: [], why }, groups: { recorded: false, rows: [], why } };
+  }
+  const me = String(memberRowId);
+
+  const rows = [];
+  for (const r of h.relations.filter(isLiveRow)) {
+    const a = String(r.memberIdA ?? ''), b = String(r.memberIdB ?? '');
+    if (a !== me && b !== me) continue;
+    const other = a === me ? b : a;
+    /* A2B is what B is to A; B2A is what A is to B. */
+    const code = Number(a === me ? r.relationshipA2B : r.relationshipB2A);
+    const o = memberByRow.get(other);
+    const dob = utc(o?.dateOfBirth);
+    rows.push({
+      rowId: other, name: o ? memberFullName(o) : '(a member who is no longer in the register)',
+      rel: RELATION[code] || (code ? `Relation ${code}` : ''), age: ageOf(dob), kid: false, member: !!o,
+    });
+  }
+
+  const kidById = new Map(h.kids.filter(isLiveRow).map((k) => [String(k.ROWID ?? k.id), k]));
+  const kidByAnyId = (id) => kidById.get(String(id)) || h.kids.filter(isLiveRow).find((k) => String(k.id) === String(id));
+  for (const l of h.kidLinks.filter(isLiveRow)) {
+    if (String(l.memberId ?? '') !== me) continue;
+    const k = kidByAnyId(l.kidId);
+    if (!k) continue;
+    const code = Number(l.relationship);
+    rows.push({
+      rowId: String(k.ROWID), name: [k.firstName, k.middleName, k.lastName].filter(Boolean).join(' ') || '(child, no name)',
+      /* kidsConnect says what the member is to the child; the child is the other side of it. */
+      rel: RELATION[RELATION_BACK[code]] || RELATION[code] || 'Child', age: ageOf(utc(k.dateOfBirth)), kid: true,
+    });
+  }
+
+  const groupById = new Map(h.groups.filter(isLiveRow).map((g) => [String(g.id ?? g.ROWID), g]));
+  const groupRows = [];
+  for (const l of h.groupLinks.filter(isLiveRow)) {
+    if (String(l.memberId ?? '') !== me) continue;
+    const g = groupById.get(String(l.groupId)) || h.groups.find((x) => String(x.ROWID) === String(l.groupId));
+    if (!g || !isLiveRow(g)) continue;
+    const parent = g.parentId ? groupById.get(String(g.parentId)) : null;
+    groupRows.push({ rowId: String(g.ROWID), name: g.name || '(unnamed group)', ...(parent?.name ? { parent: parent.name } : {}) });
+  }
+
+  return {
+    family: { recorded: true, rows },
+    groups: { recorded: true, rows: groupRows.sort((x, y) => x.name.localeCompare(y.name)) },
   };
 }
 

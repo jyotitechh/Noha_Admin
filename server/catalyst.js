@@ -94,6 +94,17 @@ export const configured = () =>
   !!(PROJECT_ID && ORG_ID && process.env.CATALYST_REFRESH_TOKEN &&
      process.env.CATALYST_CLIENT_ID && process.env.CATALYST_CLIENT_SECRET);
 
+/* Parse a Catalyst reply without losing a big id.
+
+   Catalyst sends many ids as bare JSON numbers (a folder's `id`, a table's
+   `table_id`, an insert's `ROWID`), and an id is 17 digits, past
+   Number.MAX_SAFE_INTEGER (about 9 x 10^15). JSON.parse rounds it to the nearest
+   number it can hold, which is a DIFFERENT id: a folder of ...112048 was read as
+   ...112050, so every upload was "not found in any folder" although it was there.
+   Any bare number of 16 digits or more is quoted first, so it stays what it was. */
+const quoteBigInts = (text) => text.replace(/("[A-Za-z_]+"\s*:\s*)(\d{16,})(?=\s*[,}\]])/g, '$1"$2"');
+export const parseCatalyst = (text) => JSON.parse(quoteBigInts(text));
+
 /* ---------- access token ----------
    Refresh tokens do not expire; access tokens last an hour. Cache one and
    renew a minute early rather than asking on every call. */
@@ -146,7 +157,7 @@ async function callRaw(path, init = {}) {
   const res = await fetch(API + path, { ...init, headers: headersFor(at, init) });
   const text = await res.text();
   let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text.slice(0, 300) }; }
+  try { body = text ? parseCatalyst(text) : null; } catch { body = { raw: text.slice(0, 300) }; }
   if (!res.ok || body?.status === 'failure') {
     throw new Error(`Catalyst: ${body?.data?.message || body?.message || `HTTP ${res.status}`}`);
   }
@@ -158,7 +169,7 @@ async function call(path, init = {}) {
   const res = await fetch(API + path, { ...init, headers: headersFor(at, init) });
   const text = await res.text();
   let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text.slice(0, 300) }; }
+  try { body = text ? parseCatalyst(text) : null; } catch { body = { raw: text.slice(0, 300) }; }
 
   if (!res.ok || body?.status === 'failure') {
     const message = body?.data?.message || body?.message || `HTTP ${res.status}`;
@@ -231,7 +242,7 @@ export async function listTables() {
   const res = await fetch(`${API}/baas/v1/project/${PROJECT_ID}/table`, { headers: headersFor(at) });
   const text = await res.text();
   if (!res.ok) throw new Error(`Catalyst: could not list tables (HTTP ${res.status}).`);
-  const body = JSON.parse(text.replace(/("table_id"\s*:\s*)(\d{15,})/g, '$1"$2"'));
+  const body = parseCatalyst(text);
   return (body.data || []).map((t) => ({ name: t.table_name, id: String(t.table_id) }));
 }
 
@@ -242,7 +253,7 @@ export async function listColumns(tableId) {
   const res = await fetch(`${API}/baas/v1/project/${PROJECT_ID}/table/${tableId}/column`, { headers: headersFor(at) });
   const text = await res.text();
   if (!res.ok) throw new Error(`Catalyst: could not list the columns (HTTP ${res.status}).`);
-  const body = JSON.parse(text);
+  const body = parseCatalyst(text);
   return (body.data || []).map((c) => ({
     name: c.column_name,
     type: c.data_type,
@@ -276,7 +287,7 @@ export async function createTable(name, scope = 'GLOBAL') {
   });
   const text = await res.text();
   let body = null;
-  try { body = JSON.parse(text.replace(/("table_id"\s*:\s*)(\d{15,})/g, '$1"$2"')); } catch { /* reported below */ }
+  try { body = parseCatalyst(text); } catch { /* reported below */ }
   if (!res.ok || body?.status === 'failure') {
     throw new Error(`Catalyst: ${body?.data?.message || body?.message || `could not create the table (HTTP ${res.status})`}`);
   }

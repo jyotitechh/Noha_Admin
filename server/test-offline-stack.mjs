@@ -467,8 +467,9 @@ check('...with the registration they made', person.body?.registration?.id === AP
 check('...and the ids of their photo, ID and video', !!person.body?.registration?.fileIds?.video && !!person.body.registration.fileIds.photo && !!person.body.registration.fileIds.idProof);
 check('...who their pastor is', person.body?.pastoral?.pastor?.name === 'Fr Thomas', JSON.stringify(person.body?.pastoral));
 check('...whether they are a partner', person.body?.partnership?.isPartner === true);
-check('...and says family and groups are not recorded yet, rather than empty',
-  person.body?.family?.recorded === false && /no columns/.test(person.body.family.why) && person.body?.groups?.recorded === false);
+check('...and their family and groups, read from Catalyst',
+  person.body?.family?.recorded === true && person.body.family.rows.some((r) => r.rel === 'Spouse') && person.body.family.rows.some((r) => r.kid)
+  && person.body?.groups?.recorded === true && person.body.groups.rows.length === 2, JSON.stringify([person.body?.family, person.body?.groups]).slice(0, 260));
 
 check('their phone, email and address are masked until revealed',
   /•/.test(person.body?.member?.mobile) && /•/.test(person.body.member.email) && person.body.member.masked === true && !/9000000779/.test(person.body.member.mobile),

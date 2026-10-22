@@ -17,7 +17,7 @@
 
 import { rolesFromRow, patchForRole, appRoleSummary } from './roles.js';
 
-import { S, T, tables, writes, reset, seed, U, M, CR } from './fake-catalyst.mjs';
+import { S, T, tables, writes, reset, seed, U, M, CR, HH } from './fake-catalyst.mjs';
 
 /* ---------- the harness ---------- */
 
@@ -835,6 +835,10 @@ const CAT = await import('./catalyst.js');
       return json({ status: 'success', data: [{ column_name: 'ROWID', data_type: 'bigint' }, { column_name: 'firstName', data_type: 'varchar', max_length: '255' }] });
     }
     if (/\/column$/.test(u) && init.method === 'POST') return json({ status: 'success', data: [] });
+    /* File Store: a folder whose id is past the safe integer, sent as a bare number. */
+    if (/\/folder$/.test(u)) return json('{"status":"success","data":[{"folder_name":"noah_uploads","id":73626000000112048}]}');
+    const dl = u.match(/\/folder\/(\d+)\/file\/(\d+)\/download$/);
+    if (dl) return dl[1] === '73626000000112048' ? new Response('BYTES', { status: 200, headers: { 'content-type': 'application/octet-stream' } }) : json({ status: 'failure', data: { message: 'Folder not found' } }, 404);
     if (u.endsWith('/query')) return json({ status: 'success', data: [{ members: { ROWID: '9', firstName: 'A' } }, { members: { ROWID: '10', firstName: 'B' } }] });
     if (/\/row/.test(u)) return json({ status: 'success', data: [{ ROWID: '1' }, { ROWID: '2' }], more_records: false });
     return json({ status: 'failure', message: 'unexpected ' + u }, 404);
@@ -878,6 +882,14 @@ const CAT = await import('./catalyst.js');
     check('a column is created with the flags Catalyst wants, as strings',
       Array.isArray(sent) && sent[0].column_name === 'corrCity' && sent[0].is_mandatory === 'false' && sent[0].audit_consent === 'false' && sent[0].search_index_enabled === 'false' && sent[0].is_unique === 'false', made.body);
 
+    /* the bug that hid every upload: a folder id rounded to a different folder */
+    check('a big id Catalyst sends as a bare number is kept exactly', CAT.parseCatalyst('{"data":[{"id":73626000000112048,"n":5}]}').data[0].id === '73626000000112048' && CAT.parseCatalyst('{"data":[{"id":73626000000112048,"n":5}]}').data[0].n === 5);
+    check('...whereas JSON.parse alone would have changed it (the reason for the fix)', String(JSON.parse('{"id":73626000000112048}').id) !== '73626000000112048');
+    check('a small number is left a number', CAT.parseCatalyst('{"size":178764,"zuid":60025055576}').size === 178764);
+    const folders = await CAT.listFolders();
+    check('the id of a File Store folder is read exactly', folders[0].id === '73626000000112048', JSON.stringify(folders));
+    const file = await CAT.downloadFile('73626000000110613');
+    check('an upload is found in its folder, and its bytes come back', file.buffer.toString() === 'BYTES');
     check('a table is created and its id comes back as a string, intact', (await CAT.createTable('consoleStaff')) === '73626000000099001');
     const q = await CAT.query('SELECT * FROM members LIMIT 2');
     check('a ZCQL result is flattened out of its table name', q.length === 2 && q[0].ROWID === '9' && q[1].firstName === 'B', JSON.stringify(q));
@@ -957,6 +969,56 @@ reset(seed());
 
   const person = await S.loadPerson(M.approved);
   check('the person carries the stored values the edit form starts from', person.editable.firstName === 'Anandan' && person.editable.gender === 'female' && person.editable.pincode === '400070' && person.editable.dateOfBirth === '1991-02-03', JSON.stringify(person.editable).slice(0, 200));
+}
+
+/* ================================================================== */
+section('Family and groups on the person page');
+
+reset(seed());
+{
+  const reg = (await S.loadRegistrations()).find((r) => r.memberRowId === M.approved);
+  check('each upload is described by what it is, so the browser can show it', reg.fileMimes.photo === 'image/jpeg' && reg.fileMimes.video === 'video/mp4' && reg.fileMimes.idProof === 'image/png', JSON.stringify(reg.fileMimes));
+  tables[T.files].find((f) => f.ROWID === '27145000000126953').remoteSource = null;
+  S.clearCache();
+  check('...from the extension when the upload has no record of its type', (await S.loadRegistrations()).find((r) => r.memberRowId === M.approved).fileMimes.video === 'video/mp4');
+}
+
+reset(seed());
+{
+  const p = await S.loadPerson(M.approved);
+  const fam = p.family;
+  check('family and groups are really read now, not "not recorded"', fam.recorded === true && p.groups.recorded === true);
+  const spouse = fam.rows.find((r) => r.rowId === M.office);
+  check('a spouse is listed, by name, with the relationship in words', spouse?.name === 'Old Member' && spouse.rel === 'Spouse' && spouse.kid === false, JSON.stringify(fam.rows));
+  check('an archived relation is history and is skipped', !fam.rows.some((r) => r.rowId === M.pastor));
+  const child = fam.rows.find((r) => r.kid);
+  check('a child is listed, with their age, and as the other side of the link (the member is a Parent, so the child is a Child)',
+    child?.name === 'Asha Rao' && child.rel === 'Child' && child.age >= 7 && child.age <= 9, JSON.stringify(child));
+  check('...a child belongs to the member it is linked to, not to others', (await S.loadPerson(M.office)).family.rows.every((r) => !r.kid));
+
+  check('groups are listed by name', p.groups.rows.map((g) => g.name).join() === 'Cell Mumbai 1,Worship team', JSON.stringify(p.groups.rows));
+  check('...a group inside another says which', p.groups.rows.find((g) => g.name === 'Worship team').parent === 'Cell Mumbai 1');
+  check('...an archived membership is skipped, and so is an archived group', p.groups.rows.filter((g) => g.name === 'Cell Mumbai 1').length === 1 && !p.groups.rows.some((g) => g.name === 'Retired group'));
+  check('...a membership belongs to the member it names, not to others', (await S.loadPerson(M.office)).groups.rows.map((g) => g.name).join() === 'Cell Mumbai 1');
+
+  /* the other direction of a relation: Old Member is B of the row, so what Anand is to them */
+  const back = (await S.loadPerson(M.office)).family.rows.find((r) => r.rowId === M.approved);
+  check('seen from the other member, the same link names the first one', back?.name === 'Anand Rao' && back.rel === 'Spouse');
+
+  /* directional codes: A2B is what B is to A */
+  tables[T.membersRelations].push({ ROWID: '27145000000170009', memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 1, relationshipB2A: 2, isArchived: false });
+  S.clearCache();
+  check('a directional relation reads the right way round: B is a Parent of A, so A sees "Parent"', (await S.loadPerson(M.approved)).family.rows.find((r) => r.rowId === M.pastor)?.rel === 'Parent');
+  check('...and B sees "Child"', (await S.loadPerson(M.pastor)).family.rows.find((r) => r.rowId === M.approved)?.rel === 'Child');
+
+  /* Catalyst cannot be read: say so, do not show an empty family */
+  const realGet = S.io.getRows;
+  S.clearCache();
+  S.io.getRows = async (id, o) => { if (id === T.kids) throw new Error('Catalyst: boom'); return realGet(id, o); };
+  const down = await S.loadPerson(M.approved);
+  S.io.getRows = realGet;
+  check('if the family cannot be read it says so, rather than showing none', down.family.recorded === false && /boom/.test(down.family.why) && down.groups.recorded === false);
+  check('...and the rest of the person still loads', down.member.name === 'Anand Rao' && !!down.registration);
 }
 
 /* ================================================================== */
