@@ -18,6 +18,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, roleById } from './db.js';
 import { allStaff, live } from './store.js';
+import { demoMode } from './demo.js';
 import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
 import { channels, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
 
@@ -87,7 +88,7 @@ const sixDigits = () => String(Math.floor(100000 + Math.random() * 900000));
 /* Trimmed on both sides. A value pasted into a host's dashboard often carries a trailing
    space or line break nobody can see, and a person typing it on the sign-in screen may add
    one too. Neither should make the right passphrase look wrong. */
-const PASSPHRASE = () => String(process.env.ADMIN_PASSPHRASE || '').trim();
+const PASSPHRASE = () => (demoMode() ? '' : String(process.env.ADMIN_PASSPHRASE || '').trim());
 export const passphraseRequired = () => !!PASSPHRASE();
 
 /* Slow down guessing. One instance, in memory: enough for a shared
@@ -207,7 +208,8 @@ export async function requestCode({ mobile, email } = {}) {
   if (!found.staff) return { ok: false, error: found.error };
   const staff = found.staff;
 
-  const isTest = staff.source === 'test';
+  /* In demo mode the sample staff sign in with the fixed code too: there is nothing real behind them. */
+  const isTest = staff.source === 'test' || demoMode();
   const via = mobile ? 'sms' : 'email';
   const key = keyOf({ mobile, email });
   const delivering = !isTest && channels()[via];

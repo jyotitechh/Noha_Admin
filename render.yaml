@@ -79,6 +79,11 @@ services:
       #     TEST_LOGIN_OTP    = <a code you choose>
       # There is no default code, because this repository is public. Remove them
       # again before real use: a test super administrator sees real members' data.
+      # TO SHOW THE CONSOLE TO A CLIENT, set ONE variable in the dashboard:
+      #     DEMO_MODE = true
+      # The sign-in then takes +91 90000 00001 with the code 123456, asks for no
+      # passphrase, and shows SAMPLE data only (Catalyst is not touched, even with
+      # its settings present). Delete it, and the sign-in is locked again.
       # Console roles are kept in six columns on membersExtra, added once with
       # `npm run catalyst:columns -- --apply` (docs/CONSOLE-ACCESS.md); until they
       # exist only the office's own super administrators can sign in.

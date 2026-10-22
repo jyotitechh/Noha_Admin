@@ -39,14 +39,16 @@ export default function SignIn() {
      and this is the only thing guarding it. Unset locally. */
   const [passphrase, setPassphrase] = useState('');
   const [needsPassphrase, setNeedsPassphrase] = useState(false);
+  /* Set only by a demo server (sample data, fixed code): the code is shown so a visitor can get in. */
+  const [demo, setDemo] = useState<{ mobile: string; code: string } | null>(null);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
 
   /* A 403 here is the deployed API declining to publish the staff list. That
      is the intended answer, not a failure, so it is simply left empty. */
   useEffect(() => { api.get<Account[]>('/auth/accounts').then(setAccounts).catch(() => {}); }, []);
   useEffect(() => {
-    api.get<{ passphraseRequired?: boolean }>('/meta')
-      .then((m) => setNeedsPassphrase(!!m.passphraseRequired))
+    api.get<{ passphraseRequired?: boolean; demo?: { mobile: string; code: string } }>('/meta')
+      .then((m) => { setNeedsPassphrase(!!m.passphraseRequired); setDemo(m.demo ?? null); })
       .catch(() => {});
   }, []);
   useEffect(() => { if (step === 'otp') boxes.current[0]?.focus(); }, [step]);
@@ -132,6 +134,15 @@ export default function SignIn() {
               Noah app. If a super administrator has given you access, we will send
               a six-digit code: texted to a number, emailed to an address.
             </p>
+
+            {demo && (
+              <div className="mt12">
+                <Note tone="warn" icon="key">
+                  Demo with sample data. Sign in with <b className="mono">{demo.mobile}</b> and
+                  the code <b className="mono" style={{ letterSpacing: '.08em' }}>{demo.code}</b>.
+                </Note>
+              </div>
+            )}
 
             <div className="tabs mt16" role="tablist" aria-label="Sign in with">
               {(['mobile', 'email'] as const).map((m) => (
@@ -292,7 +303,9 @@ export default function SignIn() {
                   : 'Nothing there? Check the spam folder.'}
               </p>
             ) : (
-              <p className="xs muted mt16">Enter the test code you were given.</p>
+              <p className="xs muted mt16">
+                {demo ? <>Demo code: <b className="mono">{demo.code}</b></> : 'Enter the test code you were given.'}
+              </p>
             )}
 
             <button

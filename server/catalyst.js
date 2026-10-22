@@ -29,6 +29,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { demoMode } from './demo.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -118,7 +119,7 @@ export const FILE_FOLDER_ID = process.env.CATALYST_FILE_FOLDER_ID || '';
 
 /** True when there is enough configuration to try. */
 export const configured = () =>
-  !!(PROJECT_ID && ORG_ID && setting('CATALYST_REFRESH_TOKEN') &&
+  !demoMode() && !!(PROJECT_ID && ORG_ID && setting('CATALYST_REFRESH_TOKEN') &&
      setting('CATALYST_CLIENT_ID') && setting('CATALYST_CLIENT_SECRET'));
 
 /* Parse a Catalyst reply without losing a big id.

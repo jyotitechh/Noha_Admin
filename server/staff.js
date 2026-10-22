@@ -16,6 +16,7 @@
    are not staff any more. */
 
 import { db, roleById } from './db.js';
+import { demoMode, DEMO_CODE } from './demo.js';
 import { live, isNoah, staffByEmail, allStaff } from './store.js';
 import {
   mobileKey, findStaffByMobile, findStaffByEmail, loadStaffDirectory, consoleStaffEnabled, touchStaffSignIn,
@@ -38,10 +39,11 @@ const production = () => process.env.NODE_ENV === 'production';
 const flag = () => String(process.env.ENABLE_TEST_LOGIN ?? '').toLowerCase();
 
 export const testOtp = () =>
-  process.env.TEST_LOGIN_OTP || (production() ? '' : '123456');
+  process.env.TEST_LOGIN_OTP || (demoMode() ? DEMO_CODE : production() ? '' : '123456');
 
 export const testLoginEnabled = () => {
   if (flag() === 'false') return false;
+  if (demoMode()) return true;
   if (production()) return flag() === 'true' && !!testOtp();
   return true;
 };

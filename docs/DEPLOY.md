@@ -120,6 +120,24 @@ again before real use.
 
 ---
 
+## Showing it to a client (demo mode)
+
+Add one variable to the API (Render → Environment): **`DEMO_MODE` = `true`**, and save.
+
+- The sign-in page says what to use: mobile **+91 90000 00001**, code **123456**. Any of
+  the ten test numbers (`…00001` to `…00010`, one per role) works with the same code.
+- No office passphrase is asked for.
+- Only the **sample data** is shown. Catalyst is not used even if its settings are in
+  Render, so nothing real can be seen or changed. Changes made during the demo are kept
+  in memory and are gone when the server restarts.
+
+The code is public on purpose (it is on the sign-in page and in this repository), so
+turn the demo off by **deleting `DEMO_MODE`** as soon as the client has seen it. With it
+gone the sign-in is locked again: real staff, a code sent by email or SMS, and the
+passphrase. `npm run test:demo` checks both states.
+
+---
+
 ## Leaving Vercel
 
 Nothing in the code uses Vercel any more (its addresses are no longer allowed by the

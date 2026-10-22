@@ -29,7 +29,8 @@
     "test:connect": "node server/test-connect.mjs",
     "test:schema": "node server/test-schema-offline.mjs",
     "dev:offline": "node server/dev-offline.mjs",
-    "test:stack": "node server/test-offline-stack.mjs"
+    "test:stack": "node server/test-offline-stack.mjs",
+    "test:demo": "node server/test-demo.mjs"
   },
   "dependencies": {
     "cors": "2.8.5",

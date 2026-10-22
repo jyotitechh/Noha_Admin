@@ -17,6 +17,7 @@ import { db, audit, can, roleById, page, matches, find } from './db.js';
 import { channels } from './deliver.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
+import { demoMode, DEMO_MOBILE } from './demo.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
 import { check, explainCatalyst, usage, ENVIRONMENT, PROJECT_ID } from './catalyst.js';
 import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from './noah-schema.js';
@@ -194,6 +195,8 @@ app.get('/api/meta', (_req, res) => {
        offering the staff account menu. Saying it is required gives nothing
        away; the passphrase itself never leaves the server. */
     passphraseRequired: passphraseRequired(),
+    /* Demo mode publishes its sign-in on purpose (see demo.js): sample data only. */
+    demo: demoMode() ? { mobile: DEMO_MOBILE, code: testOtp() } : undefined,
     /* Which ways of getting a code are really set up: the sign-in screen says
        "we will text you" or "we will email you" only when that is true. */
     codeChannels: channels(),
