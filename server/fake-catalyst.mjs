@@ -56,6 +56,8 @@ export { tables, writes, reset };
 /* ---------- fixtures ---------- */
 
 export const U = { otp: '27145000000117981', draft: '27145000000126927', office: '27145000000141595', pastor: '27145000000138578', bare: '27145000000141592', boss: '27145000000151001' };
+/* Requests the app has filed for a change to a member's details. */
+export const CR = { name: '27145000000160001', email: '27145000000160002', unknown: '27145000000160003', done: '27145000000160004', badDate: '27145000000160005' };
 export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028', boss: '27145000000151002' };
 
 export const seed = () => ({
@@ -120,6 +122,14 @@ export const seed = () => ({
     /* approved, but never submitted: test data in the live project. */
     { ROWID: '27145000000141593', memberRowId: M.blank, status: 'approved', CREATEDTIME: '2026-10-19 16:00:01:000' },
   ],
+  appChangeRequests: [
+    { ROWID: CR.name, memberRowId: M.approved, fieldId: 'firstName', oldValue: 'Anand', newValue: 'Anandan', status: 'pending', CREATEDTIME: '2026-10-20 09:00:00:000' },
+    { ROWID: CR.email, memberRowId: M.approved, fieldId: 'emailId1', oldValue: 'anand@example.com', newValue: 'anand.rao@example.com', status: 'pending', CREATEDTIME: '2026-10-20 10:00:00:000' },
+    /* A field the console cannot place. */
+    { ROWID: CR.unknown, memberRowId: M.approved, fieldId: 'favouriteColour', oldValue: 'red', newValue: 'blue', status: 'pending', CREATEDTIME: '2026-10-20 11:00:00:000' },
+    { ROWID: CR.done, memberRowId: M.approved, fieldId: 'city', oldValue: 'Pune', newValue: 'Mumbai', status: 'approved', reviewedAt: '2026-10-19 20:00:00', CREATEDTIME: '2026-10-19 19:00:00:000' },
+    { ROWID: CR.badDate, memberRowId: M.approved, fieldId: 'dateOfBirth', oldValue: '1990-05-14', newValue: 'last tuesday', status: 'pending', CREATEDTIME: '2026-10-20 12:00:00:000' },
+  ],
 });
 
 /* ---------- the content tables ----------
@@ -172,6 +182,15 @@ S.io.remove = async (id, rowIds) => {
   }
   writes.push({ op: 'remove', table: id, rowIds });
   return { ok: true };
+};
+/* The columns a table has: whatever its rows carry, plus the four system ones.
+   (A test can add more with the second argument to fakeColumns.) */
+const extraColumns = {};
+export const fakeColumns = (ref, cols) => { extraColumns[ref] = cols; };
+S.io.listColumns = async (ref) => {
+  const names = new Set(['ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', ...(extraColumns[ref] || [])]);
+  for (const r of tables[ref] || []) for (const k of Object.keys(r)) names.add(k);
+  return [...names].map((name) => ({ name, type: 'varchar', maxLength: null, system: ['ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME'].includes(name) }));
 };
 S.io.listTables = async () => [
   ...Object.entries(T).filter(([, id]) => id).map(([name, id]) => ({ name, id })),

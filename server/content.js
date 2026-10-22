@@ -3,7 +3,7 @@
    One implementation for every content type in content-types.js. Two places it
    can live:
 
-     Catalyst  the type's table in noah-backend, by NAME. Table ids are looked
+     Catalyst  the type's table in the Catalyst project, by NAME. Table ids are looked
                up from the project rather than written down, so a rebuilt table
                is found again.
      Sample    in memory, when there is no Catalyst connection at all.
@@ -23,7 +23,7 @@
 
 import { io } from './noah-schema.js';
 import { live, isNoah } from './store.js';
-import { TYPES, typeById } from './content-types.js';
+import { TYPES, typeById, columnFor } from './content-types.js';
 import { sampleRows } from './content-seed.js';
 
 export class ContentError extends Error {
@@ -56,7 +56,7 @@ function readValue(field, v) {
 
 function shape(def, row, id) {
   const out = { id };
-  for (const f of def.fields) out[f.key] = readValue(f, row[f.key]);
+  for (const f of def.fields) out[f.key] = readValue(f, row[columnFor(f.key)] ?? row[f.key]);
   out.live = def.publish ? !!out[def.publish] : true;
   out.createdAt = row.CREATEDTIME ? stampIst(row.CREATEDTIME) : row.createdAt ?? null;
   out.updatedAt = row.MODIFIEDTIME ? stampIst(row.MODIFIEDTIME) : row.updatedAt ?? null;
@@ -168,7 +168,7 @@ const REFUSED_HINT =
 /** Catalyst wants dates as YYYY-MM-DD and nulls as null. */
 const toCatalyst = (def, value) => {
   const row = {};
-  for (const [k, v] of Object.entries(value)) row[k] = v;
+  for (const [k, v] of Object.entries(value)) row[columnFor(k)] = v;
   return row;
 };
 

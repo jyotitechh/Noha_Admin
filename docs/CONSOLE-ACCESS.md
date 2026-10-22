@@ -71,11 +71,13 @@ The office's schema has nowhere to say *which* console role someone has.
 `users.is_admin` / `is_super_admin` are two flags; the console has ten roles.
 So it needs one small table.
 
-**Catalyst is at its 191-table cap**, and the console's token cannot create
-tables, so this has to be done by someone with Catalyst access. Either create
-one table, or repurpose an empty shell (one of the tables with no columns yet).
+The console creates it for you: `npm run catalyst:columns -- --apply` makes a
+table called `consoleStaff` with the columns below (it needs the Self Client's
+`tables.ALL` and `tables.columns.ALL` scopes; see CATALYST-SETUP.md). If the
+project is already at Catalyst's table cap, it says so and the table has to be
+made by hand or an empty shell repurposed.
 
-Suggested name `consoleStaff`. Columns, all optional as Catalyst makes them:
+Columns, all optional as Catalyst makes them:
 
 | Column | Type | Holds |
 |---|---|---|
@@ -87,14 +89,11 @@ Suggested name `consoleStaff`. Columns, all optional as Catalyst makes them:
 | `grantedAt` | datetime | when (UTC, `YYYY-MM-DD HH:mm:ss`) |
 | `lastSignedInAt` | datetime | stamped on each sign-in |
 
-Then give the console its id:
-
-```
-CATALYST_TABLE_CONSOLE_STAFF=<the table id>
-```
-
-in `.env.local` locally and in Render's environment, and run
-`npm run check:schema`. It confirms the table is there and has every column.
+The console finds a table called `consoleStaff` by name, so nothing needs
+configuring. (If the table was made under another name, set
+`CATALYST_TABLE_CONSOLE_STAFF=<the table id>`, in `.env.local` and in Render's
+environment.) Run `npm run check:schema`: it confirms the table is there and has
+every column.
 A row with a role the console does not define, or pointing at a member that does
 not exist, is ignored rather than becoming access.
 

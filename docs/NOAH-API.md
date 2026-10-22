@@ -24,7 +24,7 @@ The key is in `ADMIN_API_KEY.txt`, alongside their note. It goes in
 `.env.local`:
 
 ```
-NOAH_API_BASE=https://noah-backend-60063007256.development.catalystserverless.in/server/noah_api
+NOAH_API_BASE=https://noah-60088815946.development.catalystserverless.in/server/noah_api
 NOAH_ADMIN_API_KEY=<the key>
 ```
 

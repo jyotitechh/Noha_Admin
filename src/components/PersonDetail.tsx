@@ -23,6 +23,7 @@ import { useToast } from '@/components/layers';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
 import { fd, fdt } from '@/lib/format';
 import { Steps } from '@/modules/members/Registrations';
+import { EditPerson, type EditSpec } from '@/components/EditPerson';
 import type { Registration } from '@/lib/types';
 
 interface Link { rowId: string; name: string; mobile?: string }
@@ -33,6 +34,8 @@ interface Profile {
     g?: string; age?: number; kid?: boolean; lang?: string; mobile?: string; email?: string;
     address?: string; loc?: string; joined?: Date | null; partner?: boolean; masked?: boolean;
   };
+  /* Present only for someone who may edit members. */
+  edit?: EditSpec;
   registration: Registration | null;
   registrationHidden?: boolean;
   earlier: { id: string; state: string; at: Date | null; remark: string }[];
@@ -56,12 +59,15 @@ const Missing = ({ why }: { why?: string }) => (
   </Note>
 );
 
-export function PersonDetail({ memberRowId }: { memberRowId: string }) {
+/* `onChanged` is called after the office edits the person, so the list this is
+   open from can read again and not show the old name behind the drawer. */
+export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; onChanged?: () => void }) {
   const q = useQuery(() => api.get<Profile>(`/people/${memberRowId}`), [memberRowId]);
   const { can } = useAuth();
   const { toast } = useToast();
   const [contact, setContact] = useState<{ mobile: string; email: string; address: string } | null>(null);
   const [revealing, setRevealing] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
   if (!q.data) return <Loading what="this person" />;
@@ -93,7 +99,10 @@ export function PersonDetail({ memberRowId }: { memberRowId: string }) {
 
       {/* ---------- who they are ---------- */}
       <section>
-        <div className="sect-title">Who they are</div>
+        <div className="row">
+          <div className="sect-title grow">Who they are</div>
+          {q.data.edit && <Btn sm icon="edit" onClick={() => setEditing(true)}>Edit details</Btn>}
+        </div>
         <Kv rows={[
           ['Name', <b key="n">{member.name}</b>],
           ['Member number', <span key="i" className="mono">{member.id}</span>],
@@ -117,6 +126,17 @@ export function PersonDetail({ memberRowId }: { memberRowId: string }) {
           <p className="xs muted mt8">Revealed just now. This was recorded in the audit log.</p>
         )}
       </section>
+
+      {editing && q.data.edit && (
+        <EditPerson
+          memberRowId={memberRowId}
+          name={member.name}
+          edit={q.data.edit}
+          open
+          onClose={() => setEditing(false)}
+          onSaved={() => { q.reload(); onChanged?.(); }}
+        />
+      )}
 
       {/* ---------- the registration, with photo, ID and video open ---------- */}
       <section>

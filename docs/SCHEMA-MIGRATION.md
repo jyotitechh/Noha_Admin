@@ -1,6 +1,6 @@
 # Moving the console to the new Catalyst tables
 
-The Catalyst developer rebuilt `noah-backend` on the office's own schema
+The Catalyst developer rebuilt the database on the office's own schema (first in `noah-backend`, now in the project `noah`, id `73626000000028001`)
 (`nodi_schema.sql`). The old tables — `Members`, `MemberAddresses`,
 `MemberIdentity`, `Registrations`, `Files`, `MemberRoles`, `AdminUsers` and the
 rest — are gone, and their ids in `noah-schema.js` were dead.
@@ -115,7 +115,7 @@ The live suites (`test:contract`, `test:journey`, `test:roles`) each spend
 hundreds of fetches. Run them sparingly, and prefer the offline ones.
 
 The allowance itself is the Catalyst account owner's to restore — the usage
-meter and billing are in the Catalyst console for org `60063007256`.
+meter and billing are in the Catalyst console for the organisation that owns the project (now `60088815946`).
 
 ## Not done
 

@@ -7,7 +7,7 @@
 
 import { accessToken } from './catalyst.js';
 
-const FOLDER = process.argv[2] || '27145000000071527';
+const FOLDER = process.argv[2] || process.env.CATALYST_FILE_FOLDER_ID || '';
 const PROJECT = process.env.CATALYST_PROJECT_ID;
 const ORG = process.env.CATALYST_ORG_ID;
 const API = 'https://api.catalyst.zoho.in';
@@ -38,9 +38,9 @@ await probe('files in it', `/baas/v1/project/${PROJECT}/folder/${FOLDER}/file`);
 /* A file id straight from the files table, so the download is tried against
    something that really exists. `files.path` is the File Store id; the row's
    own ROWID is what the Noah API's /admin/files/:id takes. */
-const { getRows } = await import('./catalyst.js');
-const { NOAH_TABLES } = await import('./noah-schema.js');
-const files = await getRows(NOAH_TABLES.files).catch(() => []);
+
+const { NOAH_TABLES, io } = await import('./noah-schema.js');
+const files = await io.getRows(NOAH_TABLES.files).catch(() => []);
 const withId = files.filter((f) => f.path);
 console.log(`  files table: ${files.length} rows, ${withId.length} with a path (the File Store id)`);
 if (withId.length) {

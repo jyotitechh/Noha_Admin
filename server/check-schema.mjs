@@ -2,15 +2,15 @@
 
      npm run check:schema
 
-   The Catalyst developer rebuilt the tables once already, and the first
-   symptom of a dead table id is an error that does not say so. This asks
-   Catalyst rather than waiting for a screen to break:
+   The Catalyst developer has rebuilt the tables twice already, and the first
+   symptom of a missing table or column is an error that does not say so. This
+   asks Catalyst rather than waiting for a screen to break:
 
-     1. does each table id in NOAH_TABLES still point at the table it names?
+     1. is each table the console uses in the project, by name?
      2. does every column the code reads or writes exist on that table?
 
-   Column names are only visible on a row, so an empty table cannot be checked.
-   It says so, rather than passing it.
+   Columns are asked of Catalyst directly, so an empty table is checked as well
+   as a full one, and it costs no Data Store fetches.
 
    Read-only. Exits 1 if anything is wrong, so it can gate a deploy. */
 
@@ -33,9 +33,13 @@ try {
 let failed = 0;
 for (const t of report) {
   const name = t.table.padEnd(20);
-  if (!t.idOk) {
+  if (t.optional && !t.exists) {
+    console.log(`  ${dim('--')}    ${name} ${dim('not created yet (optional): npm run catalyst:columns -- --apply creates it')}`);
+    continue;
+  }
+  if (!t.exists) {
     failed++;
-    console.log(`  ${bad}  ${name} id ${t.id} ${t.liveId ? `now belongs to a different table (${t.liveId})` : 'is not in the project'}`);
+    console.log(`  ${bad}  ${name} is not in the Catalyst project`);
     continue;
   }
   if (t.error) {
@@ -48,10 +52,11 @@ for (const t of report) {
     console.log(`  ${bad}  ${name} missing column${t.missing.length > 1 ? 's' : ''}: ${t.missing.join(', ')}`);
     continue;
   }
-  const note = t.checked ? `columns checked, ${t.rows}+ rows` : (t.rows === 0 ? 'empty, so its columns could not be checked' : 'id only');
-  console.log(`  ${ok}    ${name} ${dim(note)}`);
+  console.log(`  ${ok}    ${name} ${dim(t.checked ? `${t.columns} columns, all the console uses are there` : 'exists')}`);
 }
 
 console.log('\n' + '─'.repeat(64));
-console.log(failed ? `  ${failed} problem${failed > 1 ? 's' : ''}. Fix noah-schema.js, or ask the Catalyst developer what changed.\n` : '  The code matches the schema.\n');
+console.log(failed
+  ? `  ${failed} problem${failed > 1 ? 's' : ''}. Run npm run catalyst:columns to see what is missing, or ask the Catalyst developer.\n`
+  : '  The code matches the schema.\n');
 process.exit(failed ? 1 : 0);

@@ -18,14 +18,15 @@ import { channels } from './deliver.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
-import { check, explainCatalyst } from './catalyst.js';
-import { NOAH_TABLES } from './noah-schema.js';
+import { check, explainCatalyst, usage, ENVIRONMENT, PROJECT_ID } from './catalyst.js';
+import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from './noah-schema.js';
 import { queuesFor } from './queues.js';
 import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
 import mountStaff from './routes/staff.js';
 import mountPeople from './routes/people.js';
+import mountChanges from './routes/changes.js';
 import mountContent from './routes/content.js';
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -100,8 +101,8 @@ async function catalystState(force = false) {
   if (!force && probeCache && Date.now() - probeAt < PROBE_TTL_MS) return probeCache;
   try {
     /* A table that exists in whichever schema is configured. */
-    const probe = await check(schema() === 'noah' ? NOAH_TABLES.members : TABLES.Staff);
-    probeCache = { projectId: probe.projectId, reachable: true };
+    const probe = await check(schema() === 'noah' ? await tableId(NOAH_TABLES.members) : TABLES.Staff);
+    probeCache = { projectId: probe.projectId, environment: ENVIRONMENT, reachable: true };
   } catch (err) {
     probeCache = { reachable: false, error: err.message };
   }
@@ -118,6 +119,8 @@ async function catalystState(force = false) {
    That is roughly three thousand fetches a day spent to learn nothing. */
 app.get('/api/health', async (req, res) => {
   const base = { ok: true, at: now(), dataSource: source() };
+  /* What this process has spent of Catalyst's free allowance since it started. Free to ask. */
+  if (live()) base.catalystSpent = usage();
   if (!live()) {
     return res.json({ ...base, seedPinnedTo: '2026-10-09T10:30 IST', note: 'In-memory sample data. Set CATALYST_* in .env.local to use Catalyst.' });
   }
@@ -438,11 +441,26 @@ for (const method of ['get', 'post', 'patch', 'put', 'delete']) {
 
 mountStaff(app, { requireSession, requirePerm });
 mountPeople(app, { requireSession, requirePerm });
+mountChanges(app, { requireSession, requirePerm });
 mountContent(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
 /* ---------- errors ---------- */
+/* Refresh: forget what was read from Catalyst, so the next screen asks again.
+   Reads are kept for a minute to spare the free allowance, so a registration
+   the app has just sent in can take that long to appear; this is the button for
+   "now". At most once every ten seconds, so it cannot be used to run the
+   allowance down. */
+let lastRefresh = 0;
+app.post('/api/refresh', requireSession, (_req, res) => {
+  const wait = 10_000 - (Date.now() - lastRefresh);
+  if (wait > 0) return res.status(429).json({ error: `Refreshed a moment ago. Try again in ${Math.ceil(wait / 1000)} seconds.` });
+  lastRefresh = Date.now();
+  clearReads();
+  res.json({ ok: true });
+});
+
 app.use('/api', (_req, res) => res.status(404).json({ error: 'No such endpoint.' }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
@@ -477,6 +495,18 @@ app.use((err, _req, res, _next) => {
 
 /* A Catalyst hiccup should surface as a 503, not kill the API. */
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err?.message || err));
+
+/* Find the Catalyst tables by name before the first request, so the first
+   person in does not pay for the lookup. A failure is not fatal: the lookup is
+   made again, lazily, by whatever needs a table. */
+if (live() && schema() === 'noah') {
+  try {
+    const tables = await resolveTables();
+    console.log(`  Catalyst project ${PROJECT_ID} (${ENVIRONMENT}): ${tables.size} tables found.`);
+  } catch (err) {
+    console.log(`  Could not list the Catalyst tables yet: ${err.message}`);
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`\n  Karuna Sadan admin — mock API on http://localhost:${PORT}`);

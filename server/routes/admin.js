@@ -11,7 +11,7 @@ import { downloadFile, fileScopeMissing, explainCatalyst } from '../catalyst.js'
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
-import { patchMemberRoles, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
+import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -537,20 +537,53 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     }
 
     try {
-      const row = await patchMemberRoles(memberRowId, patch);
+      /* Pastor goes through the Noah API when it can: it also sets the flags the
+         office's own tools read. Every other role is a plain column, written
+         directly. If the API is not set up, or does not know the member, the
+         column is written straight away and the reply says so. */
+      let via = 'table';
+      let warning;
+      if (roleId === 'pastor' && noahConfigured()) {
+        try {
+          await noah.setMemberRoles(memberRowId, { pastor: on }, { actor: req.user.name });
+          via = 'noah-api';
+          clearCache();
+        } catch (err) {
+          if (!(err instanceof noah.NoahApiError) || err.code !== 'member_not_found') {
+            const m = err instanceof noah.NoahApiError ? err.message : `The Noah API could not be reached: ${err.message}`;
+            return res.status(502).json({ error: m });
+          }
+          warning = 'The Noah API did not know that member, so the role was written to the table directly. The app picks it up within about 20 seconds.';
+        }
+      }
+      if (roleId === 'pastor' && !noahConfigured()) {
+        warning = 'The Noah API key is not set, so the role was written to the table directly. The app picks it up within about 20 seconds.';
+      }
+
+      const row = via === 'noah-api' ? await memberRolesRow(memberRowId) : await patchMemberRoles(memberRowId, patch);
       const summary = appRoleSummary(row);
       const label = memberRole(roleId)?.label ?? restrictionById(roleId)?.label ?? roleId;
+
+      /* Said ok, but the table disagrees: do not report success for something
+         that is not there. */
+      if (via === 'noah-api' && roleId === 'pastor' && summary.roles.includes('pastor') !== on) {
+        return res.status(502).json({ error: 'The Noah API said it was done, but the member table does not show it yet. Refresh in a moment and check.' });
+      }
 
       await writeAudit({
         actor: req.user.name, role: staffRole(req.session.role).name,
         action: on ? `Gave the role: ${label}` : `Removed the role: ${label}`,
         module: 'App roles', record: memberRowId,
-        before: null, after: { roles: summary.roles }, ip: '10.20.4.17',
+        before: null, after: { roles: summary.roles, via }, ip: '10.20.4.17',
       });
 
-      res.json({ ok: true, ...summary, changed: label, on });
+      res.json({ ok: true, ...summary, changed: label, on, via, ...(warning ? { warning } : {}) });
     } catch (err) {
-      res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
+      const explained = explainCatalyst(err);
+      res.status(explained?.status ?? 502).json({
+        error: explained?.message ?? `Catalyst refused the change: ${err.message}`,
+        ...(explained ? { code: explained.code } : {}),
+      });
     }
   });
 

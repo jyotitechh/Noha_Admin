@@ -259,3 +259,12 @@ export const TYPES = [
 ];
 
 export const typeById = (id) => TYPES.find((t) => t.id === id);
+
+/* Catalyst refuses some column names outright, so the project's tables have them
+   with `Col` added (`dateCol`, `orderCol`...). The console keeps the natural
+   field name and translates at the edge: when it writes a row and when it reads
+   one. The complete list is the Catalyst developer's schema/column-renames.json. */
+const RESERVED = ['date', 'order', 'time', 'key', 'rows', 'in', 'out', 'priority', 'timestamp'];
+
+/** The Catalyst column a field is stored in. */
+export const columnFor = (key) => (RESERVED.includes(key) ? key + 'Col' : key);

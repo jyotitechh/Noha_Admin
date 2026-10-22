@@ -11,7 +11,7 @@
    ── Setup ────────────────────────────────────────────────────────────────
    In .env.local:
 
-     NOAH_API_BASE=https://noah-backend-60063007256.development.catalystserverless.in/server/noah_api
+     NOAH_API_BASE=https://noah-60088815946.development.catalystserverless.in/server/noah_api
      NOAH_ADMIN_API_KEY=<from ADMIN_API_KEY.txt>
 
    The key lives on this server only. It never goes to the React app: anything
@@ -37,6 +37,7 @@ export const noahConfigured = () => !!(BASE() && KEY());
 const EXPLAIN = {
   invalid_admin_key: 'The admin key is wrong or missing. Check NOAH_ADMIN_API_KEY in .env.local.',
   registration_not_found: 'Noah has no registration with that id.',
+  member_not_found: 'Noah has no member with that id.',
   not_pending: 'That registration has already been decided. A decision can only be made once.',
   server_misconfigured: 'The Noah service is not fully configured. The Catalyst developer needs to look at it.',
   session_invalid: 'Noah refused the request without an admin key.',
@@ -126,6 +127,24 @@ export const reject = (id, { actor, note }) =>
 export const returnVideo = (id, { actor, note }) =>
   call(`/admin/registrations/${encodeURIComponent(id)}/return-video`, {
     method: 'POST', actor, body: { note },
+  });
+
+/* ---------- roles ----------
+
+   POST /admin/members/:id/roles  { pastor?: boolean, admin?: boolean }
+
+   Making someone a pastor (or office staff) goes through here, because the API
+   also sets the flags the office's own tools read. The other roles (prayer
+   warrior, cell leader, pass scanner...) are plain columns on membersExtra and
+   are written directly: there is no API call for them.
+
+   Send only what is changing. `:id` is the member's ROWID — the Catalyst
+   developer's ADMIN_SETUP.md does not say so in words, only that the call is
+   made on a member, so the first real call confirms it; a 404 comes back as
+   member_not_found and the caller falls back to writing the column itself. */
+export const setMemberRoles = (memberRowId, roles, { actor } = {}) =>
+  call(`/admin/members/${encodeURIComponent(memberRowId)}/roles`, {
+    method: 'POST', actor, body: roles,
   });
 
 /* ---------- files ----------

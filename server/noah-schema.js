@@ -34,41 +34,101 @@
    IDS. A ROWID is past Number.MAX_SAFE_INTEGER: keep it a string, and never
    take it from an insert response (Catalyst sends it unquoted there). */
 
-import { getRows, getRow, update, insert, remove, listTables } from './catalyst.js';
+import {
+  getRows, getRow, update, insert, remove, listTables, listColumns,
+} from './catalyst.js';
+import { MEMBER_FIELDS, fieldByName, checkValue } from './member-fields.js';
+
+/* ---------- finding the tables ----------
+
+   Table ids are different in every Catalyst project, and the project has been
+   rebuilt twice, so none is written down here. A table is named by what it is
+   called, and its id is looked up from the project's own table list the first
+   time it is needed.
+
+   `NOAH_TABLES.members` is therefore not an id but a reference, 'tbl:members'.
+   Every call goes through `io`, which turns a reference into the id. (The
+   offline fake never needs the id at all: it keys its tables by the reference.)
+
+   The list is fetched once and kept; it is fetched again only when a name is
+   missing (someone has just created that table), and not more than once in 30
+   seconds. Listing tables is not a Data Store fetch. */
+
+const TABLE_NAMES = [
+  'users', 'members', 'membersExtra', 'userTokens', 'files', 'deviceTokens', 'notifications',
+  'threads', 'threadUserConnect', 'threadMessages', 'appRegistrations', 'appChangeRequests',
+];
+
+const REF = 'tbl:';
+let tableIds = null;      /* Map name -> id, as of the last time it was listed */
+let tableIdsAt = 0;
+let listing = null;
+
+/** Look the project's tables up (again, when `force`). */
+export async function resolveTables(force = false) {
+  if (tableIds && !force) return tableIds;
+  if (!listing) {
+    listing = io.listTables()
+      .then((all) => {
+        tableIds = new Map(all.map((t) => [t.name, String(t.id)]));
+        tableIdsAt = Date.now();
+        return tableIds;
+      })
+      .finally(() => { listing = null; });
+  }
+  return listing;
+}
+
+/** Forget what was listed, so the next call asks again. For tests and `--refresh`. */
+export const forgetTables = () => { tableIds = null; tableIdsAt = 0; };
+
+/** Is a table by this name in the project? Only knows once the list was read. */
+export const tableExists = (name) => !!tableIds?.has(name);
+
+/** A reference (or an id) -> the id Catalyst wants. */
+export async function tableId(ref) {
+  const s = String(ref ?? '');
+  if (!s.startsWith(REF)) return s;
+  const name = s.slice(REF.length);
+  let map = await resolveTables();
+  if (!map.has(name) && Date.now() - tableIdsAt > 30_000) map = await resolveTables(true);
+  const id = map.get(name);
+  if (!id) throw new Error(`The Catalyst project has no table called "${name}". Check CATALYST_PROJECT_ID, or ask the Catalyst developer.`);
+  return id;
+}
 
 /* Every Catalyst call goes through this object, not straight to the imports.
    The schema logic — joins, the access gate, roles, the shape of a decision —
    is where the mistakes are, and testing it should not need the network or
    spend Catalyst's Data Store allowance. A test swaps these for an in-memory
    copy of the tables (see test-schema-offline.mjs). */
-export const io = { getRows, getRow, update, insert, remove, listTables };
-
-/* Table ids in noah-backend (27145000000040056), Development.
-   `npm run check:schema` confirms each still points at the table it names. */
-export const NOAH_TABLES = {
-  users: '27145000000126568',
-  members: '27145000000074174',
-  membersExtra: '27145000000070252',
-  userTokens: '27145000000129857',
-  files: '27145000000081969',
-  deviceTokens: '27145000000081251',
-  notifications: '27145000000113764',
-  threads: '27145000000127841',
-  threadUserConnect: '27145000000133628',
-  threadMessages: '27145000000135980',
-  appRegistrations: '27145000000134560',
-  appChangeRequests: '27145000000128317',
-
-  /* Who may sign in to THIS console, and as what. The office's schema has no
-     place for it: users.is_admin / is_super_admin are two flags, and the
-     console has ten roles. Catalyst is at its 191-table cap, so this is a
-     table the Catalyst developer sets up (or repurposes from an empty shell)
-     and we are given the id of. See docs/CONSOLE-ACCESS.md.
-
-     A getter, so it reads the environment when asked and is simply absent
-     until it is set. */
-  get consoleStaff() { return process.env.CATALYST_TABLE_CONSOLE_STAFF || ''; },
+export const io = {
+  getRows: async (ref, opts) => getRows(await tableId(ref), opts),
+  getRow: async (ref, rowId) => getRow(await tableId(ref), rowId),
+  update: async (ref, rows) => update(await tableId(ref), rows),
+  insert: async (ref, rows) => insert(await tableId(ref), rows),
+  remove: async (ref, rowIds) => remove(await tableId(ref), rowIds),
+  listColumns: async (ref) => listColumns(await tableId(ref)),
+  listTables,
 };
+
+/* The tables, as references. `npm run check:schema` confirms each exists and has
+   the columns this code uses. */
+export const NOAH_TABLES = Object.fromEntries(TABLE_NAMES.map((n) => [n, REF + n]));
+
+/* Who may sign in to THIS console, and as what. The office's schema has no
+   place for it: users.is_admin / is_super_admin are two flags, and the console
+   has ten roles. So it is one small table of its own, `consoleStaff`, which
+   `npm run catalyst:columns --apply` creates if the project has room for it
+   (see docs/CONSOLE-ACCESS.md).
+
+   A getter: CATALYST_TABLE_CONSOLE_STAFF (an id) wins when set, since the table
+   may have another name; otherwise it is there once a table called consoleStaff
+   exists in the project. Absent, the screens say so rather than failing. */
+Object.defineProperty(NOAH_TABLES, 'consoleStaff', {
+  enumerable: true,
+  get: () => process.env.CATALYST_TABLE_CONSOLE_STAFF || (tableExists('consoleStaff') ? REF + 'consoleStaff' : ''),
+});
 const T = NOAH_TABLES;
 
 /* ---------- small readers ---------- */
@@ -190,9 +250,15 @@ let snap = null;
 let snapAt = 0;
 let inflight = null;
 let generation = 0;
-const CACHE_MS = 15_000;
+/* How long what was read is kept. A refresh reads five tables, and Catalyst's
+   free tier is 10,000 fetches a month for the whole account (the app, the Noah
+   API and this console share it), so reading on every click is how the last
+   project ran out. A minute by default; a decision made here clears it at
+   once, and the Refresh button (POST /api/refresh) clears it on demand. The new
+   registrations an app sends in are seen after at most this long. */
+const CACHE_MS = (Number(process.env.CONSOLE_CACHE_SECONDS) || 60) * 1000;
 
-export const clearCache = () => { snap = null; generation += 1; };
+export const clearCache = () => { snap = null; crSnap = null; generation += 1; };
 
 async function snapshot() {
   if (snap && Date.now() - snapAt < CACHE_MS) return snap;
@@ -787,7 +853,9 @@ export const EXPECTED_COLUMNS = {
   members: [
     'id', 'userId', 'countryCode', 'mobileNumber1', 'isUnVerified', 'verifiedOn', 'memberId',
     'salutation', 'firstName', 'middleName', 'lastName', 'emailId1', 'gender', 'dateOfBirth',
-    'maritalStatus', 'referBy', 'address', 'area', 'city', 'state', 'country', 'pincode',
+    'emailId2', 'anniversaryDate', 'maritalStatus', 'referBy', 'address', 'area', 'city', 'state', 'country', 'pincode',
+    'corrAddress', 'corrArea', 'corrCity', 'corrState', 'corrCountry', 'corrPincode',
+    'religion', 'motherTongue', 'educationDetail', 'employedIn', 'commLanguage',
     'aadharNo', 'panNo', 'passportNumber', 'voterId', 'drivingLicense', 'emiratesID',
     'photo', 'archived', 'isKid', 'memberType', 'dateOfJoining', 'language',
   ],
@@ -798,6 +866,7 @@ export const EXPECTED_COLUMNS = {
     'connectedPastor', 'connectedLeader', 'form_submit', 'video_consent_submit',
   ],
   files: ['uid', 'path', 'extension', 'size', 'fileType', 'remoteSource', 'archived', 'uploadedAt', 'isPublic'],
+  appChangeRequests: ['memberRowId', 'fieldId', 'oldValue', 'newValue', 'status', 'note', 'reviewedByRowId', 'reviewedAt'],
   consoleStaff: ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'],
   appRegistrations: [
     'memberRowId', 'status', 'reviewNote', 'reviewedAt', 'submittedAt', 'nationality',
@@ -807,35 +876,39 @@ export const EXPECTED_COLUMNS = {
   ],
 };
 
-/** Do the ids still point at the tables they name, and do the columns exist? */
+/** Does each table exist, and does it have every column this code uses?
+
+    Asks Catalyst for the table's columns, not for a row, so an empty table is
+    checked as well as a full one. Costs no Data Store fetches. */
 export async function verifySchema() {
-  const live = await io.listTables();
-  const byName = new Map(live.map((t) => [t.name, t.id]));
+  const live = await io.listTables(); /* always fresh: this is the check */
+  const byName = new Map(live.map((t) => [t.name, String(t.id)]));
+  const liveIds = new Set(live.map((t) => String(t.id)));
   const report = [];
 
-  const liveIds = new Set(live.map((t) => t.id));
-  for (const [name, id] of Object.entries(NOAH_TABLES)) {
-    if (!id) continue; /* an optional table that is not set */
-    const liveId = byName.get(name);
-    /* consoleStaff may be a repurposed shell with another name, so it is
-       enough that the id exists; every other table must also be the one named. */
-    const idOk = name === 'consoleStaff' ? liveIds.has(id) : liveId === id;
-    const entry = { table: name, id, liveId: liveId || null, idOk, rows: null, missing: [], checked: false };
-    if (entry.idOk) {
+  for (const name of Object.keys(EXPECTED_COLUMNS)) {
+    const ref = NOAH_TABLES[name];
+    /* consoleStaff is optional until the table is created. */
+    if (!ref && name === 'consoleStaff') {
+      report.push({ table: name, id: null, exists: false, optional: true, missing: [], checked: false });
+      continue;
+    }
+    const id = byName.get(name) ?? (name === 'consoleStaff' ? process.env.CATALYST_TABLE_CONSOLE_STAFF : null);
+    const exists = !!id && (byName.has(name) || liveIds.has(String(id)));
+    const entry = { table: name, id: id || null, exists, missing: [], checked: false };
+    if (exists) {
       try {
-        const rows = await io.getRows(id, { max: 5 });
-        entry.rows = rows.length;
-        const want = EXPECTED_COLUMNS[name];
-        /* Column names are only visible on a row, so an empty table cannot be
-           checked — say so rather than passing it. */
-        if (want && rows.length) {
-          entry.checked = true;
-          const have = new Set(rows.flatMap((r) => Object.keys(r)));
-          entry.missing = want.filter((c) => !have.has(c));
-        }
+        const have = new Set((await io.listColumns(ref || id)).map((c) => c.name));
+        entry.columns = have.size;
+        entry.missing = EXPECTED_COLUMNS[name].filter((c) => !have.has(c));
+        entry.checked = true;
       } catch (err) { entry.error = err.message; }
     }
     report.push(entry);
+  }
+  /* Tables the code uses that have no list of expected columns still must exist. */
+  for (const name of TABLE_NAMES) {
+    if (!(name in EXPECTED_COLUMNS)) report.push({ table: name, id: byName.get(name) || null, exists: byName.has(name), missing: [], checked: false });
   }
   return report;
 }
@@ -1062,6 +1135,8 @@ export async function loadPerson(memberRowId) {
 
   return {
     member,
+    /* What the edit form starts from: the stored values, as the form holds them. */
+    editable: editableFrom(raw.members.find((m) => same(m.ROWID, member.rowId))),
     registration: mine[0] ?? null,
     earlier: mine.slice(1).map((r) => ({ id: r.id, state: r.state, at: r.at, remark: r.remark })),
     pastoral: { pastor: who(x.connectedPastor), cellLeader: who(x.connectedLeader), cell: null },
@@ -1072,4 +1147,152 @@ export async function loadPerson(memberRowId) {
     family: { recorded: false, rows: [], why: 'Families are not stored in Catalyst yet: their tables exist but have no columns.' },
     groups: { recorded: false, rows: [], why: 'Groups are not stored in Catalyst yet: their tables exist but have no columns.' },
   };
+}
+
+/* ---------- editing a member from the console ----------
+
+   The reverse of registering: the office corrects a name or a pincode here and
+   it is written to the same `members` column the app reads, so the member sees
+   it. Which fields, and how they are checked, is member-fields.js. */
+
+const dayOf = (v) => (v ? String(v).slice(0, 10) : '');
+
+/** The editable fields' current values for one member, as the form shows them. */
+function editableFrom(row) {
+  const out = {};
+  for (const f of MEMBER_FIELDS) {
+    const v = row?.[f.column];
+    out[f.key] = f.kind === 'gender' ? genderOf(v)
+      : f.kind === 'date' ? dayOf(v)
+      : (v ?? '') === '' ? '' : String(v);
+  }
+  return out;
+}
+
+/**
+ * Write the changed fields of one member. `values` is { column: value }, already
+ * checked (member-fields.checkPatch). Reads the row fresh first, so "nothing
+ * changed" means nothing changed in Catalyst, not in a cache a minute old, and
+ * only columns whose value actually differs are written: an unchanged column is
+ * never re-sent over whatever the app may have just saved there.
+ *
+ * Returns { changed: [{ key, label, contact, before, after }] }.
+ */
+export async function updateMemberFields(memberRowId, values) {
+  clearCache();
+  const { members } = await snapshot();
+  const row = members.find((m) => same(m.ROWID, memberRowId));
+  if (!row) throw Object.assign(new Error('No such member.'), { code: 'not_found' });
+
+  const was = editableFrom(row);
+  const changed = [];
+  const write = {};
+  for (const f of MEMBER_FIELDS) {
+    if (!(f.column in values)) continue;
+    const next = values[f.column];
+    const after = f.kind === 'gender' ? genderOf(next) : (next ?? '');
+    if (String(after) === String(was[f.key])) continue;
+    write[f.column] = next;
+    changed.push({ key: f.key, label: f.label, contact: !!f.contact, before: was[f.key], after: String(after) });
+  }
+  if (!changed.length) return { changed: [] };
+
+  await io.update(T.members, { ROWID: String(row.ROWID), ...write });
+  clearCache();
+  return { changed };
+}
+
+/* ---------- changes the app asks for ----------
+
+   A member who wants a detail changed after approval files an
+   `appChangeRequests` row: which member, which field, the old and new value,
+   `status` pending / approved / rejected. The Noah API has no call to decide
+   them yet, so the office applies one by writing `newValue` to the member's
+   column and marking the request. That is what approving does here.
+
+   `fieldId` is not documented beyond its name. It is matched to an editable
+   field by key or column name, ignoring case and punctuation. A request this
+   cannot match is shown, can be rejected, and cannot be approved: guessing
+   which column a stranger's request means is how the wrong thing gets edited. */
+
+let crSnap = null;
+let crAt = 0;
+const CR_FRESH = () => crSnap && Date.now() - crAt < CACHE_MS;
+
+async function changeRequestRows() {
+  if (CR_FRESH()) return crSnap;
+  const rows = await io.getRows(T.appChangeRequests);
+  crSnap = rows; crAt = Date.now();
+  return rows;
+}
+
+/** The requests, newest first, with who asked. `status` filters ('pending'...). */
+export async function loadChangeRequests({ status } = {}) {
+  const [rows, { members }] = await Promise.all([changeRequestRows(), snapshot()]);
+  const byRow = new Map(members.map((m) => [String(m.ROWID), m]));
+  return rows
+    .filter((r) => !status || String(r.status || 'pending').toLowerCase() === status)
+    .map((r) => {
+      const m = byRow.get(String(r.memberRowId));
+      const field = fieldByName(r.fieldId);
+      return {
+        id: String(r.ROWID),
+        memberRowId: r.memberRowId ? String(r.memberRowId) : null,
+        memberName: m ? memberFullName(m) : '(unknown member)',
+        fieldId: r.fieldId ?? '',
+        fieldLabel: field?.label || null,
+        /* Can the console apply it? Contact fields need members.pii on top. */
+        known: !!field,
+        contact: !!field?.contact,
+        oldValue: r.oldValue ?? '',
+        newValue: r.newValue ?? '',
+        status: String(r.status || 'pending').toLowerCase(),
+        note: r.note || '',
+        at: ist(r.CREATEDTIME),
+        decidedAt: utc(r.reviewedAt),
+      };
+    })
+    .sort((a, b) => +(b.at ?? 0) - +(a.at ?? 0));
+}
+
+/**
+ * Approve or reject one request. Approving writes the new value to the member
+ * (after the same checks as an edit) and then marks the request, in that order:
+ * a failure in between leaves a request still pending, which can be retried,
+ * never one marked approved whose value was not written.
+ */
+export async function decideChangeRequest({ id, approve, note, byMemberRowId, canContact }) {
+  crSnap = null;
+  const all = await changeRequestRows();
+  const row = all.find((r) => same(r.ROWID, id));
+  if (!row) throw Object.assign(new Error('No such request.'), { code: 'not_found' });
+  if (String(row.status || 'pending').toLowerCase() !== 'pending') {
+    throw Object.assign(new Error('That request has already been decided.'), { code: 'not_pending' });
+  }
+
+  let applied = null;
+  if (approve) {
+    const field = fieldByName(row.fieldId);
+    if (!field) {
+      throw Object.assign(new Error(`The console does not know which detail "${row.fieldId}" is, so it cannot apply this. Reject it, or change the member's detail by hand.`), { code: 'unknown_field' });
+    }
+    if (field.contact && !canContact) {
+      throw Object.assign(new Error('Applying a change to contact details needs permission to see them.'), { code: 'forbidden_field' });
+    }
+    const checked = checkValue(field, row.newValue);
+    if (checked.error) {
+      throw Object.assign(new Error(`The requested value cannot be applied: ${checked.error}`), { code: 'invalid_value' });
+    }
+    applied = await updateMemberFields(row.memberRowId, { [field.column]: checked.value });
+  }
+
+  await io.update(T.appChangeRequests, {
+    ROWID: String(row.ROWID),
+    status: approve ? 'approved' : 'rejected',
+    note: note || '',
+    reviewedAt: stamp(),
+    ...(byMemberRowId ? { reviewedByRowId: String(byMemberRowId) } : {}),
+  });
+  crSnap = null;
+  return { status: approve ? 'approved' : 'rejected', applied: applied?.changed ?? [] };
 }

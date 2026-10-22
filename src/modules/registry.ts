@@ -74,6 +74,8 @@ export const MODULES: ModuleDef[] = [
         desc: 'New members who finished the six-step registration in the Noah app. Nothing opens for them until you approve it here.' },
       { id: 'approved', label: 'Approved and history', perm: 'members.edit', status: 'built',
         desc: 'Everyone the office has decided on. Open a person to see everything about them, with their photograph, ID and video.' },
+      { id: 'changes', label: 'Changes asked for', perm: 'members.edit', status: 'built',
+        desc: 'Details members ask the app to change after they were approved. Approve one and it is written to their record.' },
       { id: 'register', label: 'Member register', status: 'built',
         desc: 'Everyone on the roll. Open a person for their full record: registration and video, pastor, partnership, family and groups.' },
       { id: 'quality', label: 'Duplicates and data', perm: 'members.edit', status: 'planned', from: 'Membership → Duplicates and data',

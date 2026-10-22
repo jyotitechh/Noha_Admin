@@ -18,13 +18,13 @@ services:
     envVars:
       # --- which Catalyst project, and how to read it -------------------
       - key: CATALYST_PROJECT_ID
-        value: "27145000000040056"
+        value: "73626000000028001"
       - key: CATALYST_ORG_ID
-        value: "60063007256"
+        value: "60088815946"
       - key: CATALYST_SCHEMA
         value: noah
-      - key: CATALYST_FILE_FOLDER_ID
-        value: "27145000000071527"
+      - key: CATALYST_ENV
+        value: Development
 
       # --- secrets: Render prompts for these, they are never in git -----
       - key: CATALYST_CLIENT_ID
@@ -36,7 +36,7 @@ services:
 
       # --- the Catalyst developer's API --------------------------------
       - key: NOAH_API_BASE
-        value: https://noah-backend-60063007256.development.catalystserverless.in/server/noah_api
+        value: https://noah-60088815946.development.catalystserverless.in/server/noah_api
       - key: NOAH_ADMIN_API_KEY
         sync: false
 
@@ -79,10 +79,10 @@ services:
       #     TEST_LOGIN_OTP    = <a code you choose>
       # There is no default code, because this repository is public. Remove them
       # again before real use: a test super administrator sees real members' data.
-      # The id of the table that holds console roles, once the Catalyst developer
-      # has created it. Add it in the dashboard; until then only the office's own
-      # super administrators can sign in by number.
-      # - key: CATALYST_TABLE_CONSOLE_STAFF
+      # Console roles live in a table called consoleStaff, found by name. Create it
+      # once with `npm run catalyst:columns -- --apply` (docs/CONSOLE-ACCESS.md);
+      # until it exists only the office's own super administrators can sign in.
+      # Set CATALYST_TABLE_CONSOLE_STAFF only if the table has another name.
 
       - key: NODE_ENV
         value: production

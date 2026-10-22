@@ -1,199 +1,105 @@
 # Connecting the admin server to Catalyst
 
-**Nothing is connected.** The server runs on in-memory sample data until the
-five values below are set.
-
-This was connected once, to `flutter-calculator`, and has been disconnected.
-See [What was cleared](#what-was-cleared) at the foot.
-
----
-
-## What you need from the new project
+The console reads and writes the Noah app's own database, in the Catalyst
+project **`noah`** (Development; Production does not exist yet):
 
 | | |
 |---|---|
-| Project id | from the Catalyst console URL, or `List All Projects` |
-| Org id | your Catalyst organisation |
-| Client id and secret | a **Self Client** at <https://api-console.zoho.in/> |
-| Refresh token | exchanged once, from a generated code |
-| Four table ids | after the tables are created |
+| Project id | `73626000000028001` |
+| Organisation id | `60088815946` |
+| Region | India (`.in`) |
+| Noah API | `https://noah-60088815946.development.catalystserverless.in/server/noah_api` |
 
-India data centre throughout — the app's terms promise members their record is
-held in India, and `catalystserverless.in` keeps that true. For another DC,
-change `CATALYST_ACCOUNTS_HOST` and `CATALYST_API_HOST`.
+These are in `.env.local` already. **What is missing is the console's permission
+to sign in**, which only you can create. The old project (`noah-backend`) is
+disconnected: no id, credential or folder of it is left in the code or config.
 
----
+## 1. A Self Client, once
 
-## 1. The tables
+1. The Zoho account that owns the `noah` project (or one Shashank has added to
+   it as a user) opens <https://api-console.zoho.in/> and makes a **Self Client**.
+2. Print the scopes to tick, and paste them as one comma-separated line:
 
-Four, with these columns. Create them in the new project and note each id.
+   ```
+   npm run catalyst:scopes
+   ```
 
-### `Staff` — console sign-in
+   They are `projects.READ`, `tables.ALL`, `tables.rows.ALL`, `tables.columns.ALL`,
+   `zcql.CREATE`, and the two File Store ones. `tables.ALL` and `columns.ALL`
+   are what let the console add a missing column; the running console itself only
+   ever reads and writes rows.
+3. Put the Client ID and Client Secret into `.env.local`
+   (`CATALYST_CLIENT_ID`, `CATALYST_CLIENT_SECRET`), generate a code with those
+   scopes (pick the longest duration), and exchange it:
 
-`email` varchar(255) unique mandatory · `name` varchar(120) mandatory ·
-`title` varchar(120) · `role` varchar(32) mandatory, default `membership` ·
-`status` varchar(16) mandatory, default `Active` · `lastSignedInAt` datetime
+   ```
+   node server/catalyst.js --exchange <the code>
+   ```
 
-`role` is one of: `super`, `membership`, `finance`, `events`, `moderator`,
-`content`, `comms`, `jverifier`, `jadmin`, `pastor`.
+   It writes `CATALYST_REFRESH_TOKEN` into `.env.local` for you, then **reads back
+   which scopes were really granted**. The API console accepts a scope it does not
+   recognise and silently drops it, so asking is not the same as having. Anything
+   it lists as NOT granted, tick by hand in the console's scope tree and try again.
+4. The same three values go into Render's Environment tab for the deployed API.
+   They are secrets: never in git, never in the React app, never in chat.
 
-### `Registrations` — the six steps and the office's decision
+Every call to Catalyst sends `Authorization: Zoho-oauthtoken …`, `CATALYST-ORG` and
+`Environment: Development`; `server/catalyst.js` does this.
 
-`regId` varchar(24) unique mandatory · `mobile` varchar(20) mandatory ·
-`salutation` varchar(8) · `firstName` varchar(100) mandatory ·
-`middleName` varchar(100) · `lastName` varchar(100) mandatory ·
-`email` varchar(255) · `gender` varchar(16) · `dob` date ·
-`marital` varchar(16) · `reference` varchar(255) ·
-`line1` varchar(255) · `line2` varchar(255) · `city` varchar(100) ·
-`region` varchar(100) · `country` varchar(64) · `pin` varchar(16) ·
-`idType` varchar(24) · **`idNumber` encrypted text, audit consent on** ·
-`idFile` varchar(255) · `photoFile` varchar(255) ·
-`agreed` boolean default false · `declarationLang` varchar(8) ·
-`declarationVersion` varchar(16) · `signature` varchar(255) ·
-`signedOn` datetime · `videoFile` varchar(255) · `videoSecs` int ·
-`videoAttempt` int default 1 ·
-`state` varchar(16) mandatory, default `pending` · `submittedAt` datetime ·
-`decidedAt` datetime · `decidedBy` varchar(120) · `remark` text ·
-`memberId` varchar(24)
-
-`state` is `pending`, `approved` or `videoReturned` — nothing else.
-
-**`idNumber` must be encrypted.** An Aadhaar or PAN number in the clear is a
-liability, and the console already audits every reveal.
-
-### `Members` — created when the office approves
-
-`memberId` varchar(24) unique mandatory · `mobile` varchar(20) unique
-mandatory · `name` varchar(255) mandatory · `email` varchar(255) ·
-`gender` varchar(16) · `dob` date · `loc` varchar(100) ·
-`address` varchar(255) · `lang` varchar(8) default `en` ·
-`status` varchar(16) mandatory, default `Active` · `joinedOn` datetime ·
-`fromRegistration` varchar(24)
-
-### `AuditLog` — append only
-
-`actor` varchar(120) mandatory · `role` varchar(64) ·
-`action` varchar(120) mandatory · `module` varchar(64) ·
-`record` varchar(255) · `beforeJson` text · `afterJson` text ·
-`remark` text · `at` datetime mandatory · `ip` varchar(45)
-
----
-
-## 2. The credentials
-
-### Create a Self Client
-
-<https://api-console.zoho.in/> → **Add Client** → **Self Client**.
-Copy the Client ID and Client Secret.
-
-### Generate a code
-
-**Generate Code** tab, with this scope list:
+## 2. Check what the project has
 
 ```
-ZohoCatalyst.tables.READ,ZohoCatalyst.tables.rows.CREATE,ZohoCatalyst.tables.rows.READ,ZohoCatalyst.tables.rows.UPDATE,ZohoCatalyst.tables.rows.DELETE
+npm run check:schema
 ```
 
-> **Do not add a ZCQL scope.** `ZohoCatalyst.zcql.EXECUTE` is not a valid self
-> client scope — the console drops it silently and the endpoint then answers
-> `OAUTH_SCOPE_MISMATCH`. ZCQL appears to work only from inside a Catalyst
-> function. `server/store.js` uses the rows API for this reason.
+Read-only. It finds each table the console uses **by name** (table ids are
+different in every project and are never written in the code), then asks Catalyst
+for each table's columns, so an empty table is checked as well as a full one. It
+costs no Data Store fetches.
 
-Duration 10 minutes. The code **works once and dies in minutes**, so do the
-next step straight away.
+## 3. Add what is missing
 
-### Exchange it
-
-```bash
-cd admin/code
-cp .env.example .env.local
+```
+npm run catalyst:columns               shows what is missing; changes nothing
+npm run catalyst:columns -- --apply    creates it
 ```
 
-Fill in `CATALYST_PROJECT_ID`, `CATALYST_ORG_ID`, `CATALYST_CLIENT_ID`,
-`CATALYST_CLIENT_SECRET` and the four table ids, then:
+It only ever **adds**: a column, or the console's own `consoleStaff` table (which
+holds who has which console role) and Noah Tube's two tables. It never alters or
+removes anything that is there, and it does not create the Noah app's own tables.
+What it wants is in `server/schema-spec.js`. Catalyst allows 104 columns in a
+table and 191 tables in a project; a table that would go over is reported, not
+forced.
 
-```bash
-node server/catalyst.js --exchange <the code>
-```
+Catalyst refuses a few column names (`date`, `order`, `time`, `key`, `rows`, `in`,
+`out`, `priority`, `timestamp`), so the project spells them `dateCol`, `orderCol`
+and so on; the console translates at the edge (`columnFor` in `content-types.js`).
 
-It writes `CATALYST_REFRESH_TOKEN` into `.env.local` itself. Refresh tokens do
-not expire, so this is once.
+## 4. The Noah admin key
 
----
+Approving, rejecting, returning a video and making someone a pastor go through the
+Noah API, because it also tells the member. It needs `NOAH_ADMIN_API_KEY`, which is
+in `ADMIN_API_KEY.txt` on Shashank's machine: ask him for it privately. Without it
+the console still works and says plainly that the member was **not** told. See
+[NOAH-API.md](NOAH-API.md).
 
-## 3. Check it
+## 5. The free allowance is shared
 
-```bash
-npm run dev
-curl -s http://localhost:4000/api/health
-```
+Catalyst's free tier is **10,000 Data Store fetches and 1,000 updates a month for
+the whole account**: the Noah app, the Noah API and this console draw on the same
+amount. The last project ran out. So:
 
-```json
-{ "ok": true, "dataSource": "catalyst", "catalyst": { "reachable": true } }
-```
-
-`"dataSource": "memory"` means one of the five values is missing.
-`reachable: false` carries the reason Zoho gave.
-
-Then seed one staff row so you can sign in, and:
-
-```bash
-npm run test:contract
-```
-
-78 checks, the whole registration journey against the live project.
-
----
-
-## What connects once configured
-
-| | Reads | Writes |
-|---|---|---|
-| Staff sign-in | `Staff` | `lastSignedInAt` |
-| Registration queue and detail | `Registrations` | — |
-| Approve | `Registrations` | `Members`, `Registrations`, `AuditLog` |
-| Return video | `Registrations` | `Registrations`, `AuditLog` |
-| Member register | `Members` | — |
-| Audit log | `AuditLog` | — |
-| App submit / status / re-record | `Registrations` | `Registrations` |
-
-Everything else in the console — giving, events, content, Jodie — stays on the
-in-memory seed. Those tables do not exist.
-
----
-
-## Two things to decide before real data
-
-**Approve writes three tables and Catalyst has no transaction across them.**
-`Members` is written first on purpose: a registration still `pending` with a
-member already carrying its id is recoverable, the reverse is not. It still
-needs a reconciling job.
-
-**Filtering happens in Node, not in the database**, because of the ZCQL scope
-problem above. Fine for hundreds of rows, wrong for tens of thousands. When
-this moves into Catalyst functions the filters move into ZCQL there, and the
-function signatures in `store.js` do not change.
-
----
-
-## What was cleared
-
-On 16 October 2026, after a first connection to `flutter-calculator`
-(`27145000000039371`) in org `60063007256`:
-
-- **All four tables emptied** — `Staff`, `Registrations`, `Members`,
-  `AuditLog`. The self client could not be granted `tables.DELETE`, so the
-  empty tables are still there; drop them from the Catalyst console.
-- **`.env.local` deleted** — refresh token and client secret gone.
-- **Hard-coded table ids removed** from `server/store.js`, so nothing can
-  quietly reconnect to the old project.
-- **The `catalyst` MCP server removed** from this project's config.
-
-`server/catalyst.js` and `server/store.js` are kept — they are the connection
-code, and they work. They are simply dormant until `.env.local` exists.
-
-> That client secret passed through a chat message. **Regenerate it** in the
-> API console rather than reusing it on the new project.
+- What the console reads is kept for a minute (`CONSOLE_CACHE_SECONDS`), a decision
+  made here clears it at once, and the **Refresh** button in the top bar clears it
+  on demand. A registration the app has just sent in can take up to a minute to
+  show; press Refresh for "now".
+- Nothing polls on a timer. `/api/health` costs nothing.
+- `GET /api/health` shows `catalystSpent`: what this process has used since it
+  started, so it is possible to tell whether it is the console.
+- A screen reads five tables (registrations, members, their extras, files, users).
+  That is fine for a few hundred members. Past a few thousand it should move to
+  ZCQL queries with `WHERE` and `LIMIT` (`query()` in `catalyst.js` is there and
+  tested, and the `zcql.CREATE` scope is asked for), and the register should page.
 
 ---
 
@@ -260,8 +166,8 @@ instead of pasting it.
 ## Why there are two folder paths
 
 Listing folders needs `folders.READ`; going straight to a known folder needs
-only `files.READ`. `CATALYST_FILE_FOLDER_ID` in `.env.local` holds the folder
-the uploads live in, so `downloadFile` tries it directly first and only falls
+only `files.READ`. `CATALYST_FILE_FOLDER_ID` in `.env.local` can hold the folder
+the uploads live in (find it in the Catalyst console, File Store), so `downloadFile` tries it directly first and only falls
 back to listing. One missing scope then need not stop the other working.
 
 ## The other way round

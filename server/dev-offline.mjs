@@ -150,6 +150,18 @@ http.createServer(async (req, res) => {
     S.clearCache();
     return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 0, emailed: true } });
   }
+  /* ADMIN_SETUP.md: POST /admin/members/:id/roles { pastor?, admin? }, only what changes. */
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/members\/(\d+)\/roles$/))) {
+    const mem = tables[T.members].find((x) => x.ROWID === m[1]);
+    if (!mem) return err(res, 404, 'member_not_found', 'No such member.');
+    if ('pastor' in body) mem.memberType = body.pastor ? 'pastor' : 'member';
+    if ('admin' in body) {
+      const u = tables[T.users].find((x) => x.ROWID === String(mem.userId));
+      if (u) u.is_admin = !!body.admin;
+    }
+    S.clearCache();
+    return send(res, 200, { id: mem.ROWID, pastor: mem.memberType === 'pastor' });
+  }
   err(res, 404, 'not_found', 'No such endpoint.');
 }).listen(Number(NOAH_PORT), '127.0.0.1');
 

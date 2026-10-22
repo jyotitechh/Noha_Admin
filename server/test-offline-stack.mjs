@@ -483,6 +483,113 @@ check('it needs a sign-in', (await call('GET', `/people/${ANAND_ID}`)).status ==
 check('an unknown member is a 404', (await call('GET', '/people/1', null, BT)).status === 404);
 
 /* ================================================================== */
+section('Correcting a person, and what the app asks to have changed');
+
+{
+  const asBoss = await call('GET', `/people/${ANAND_ID}`, null, BT);
+  const fields = asBoss.body?.edit?.fields || [];
+  check('the person page carries an edit form for someone who may edit', fields.length > 10 && fields.some((f) => f.key === 'firstName' && !f.contact && !f.locked), `${fields.length}`);
+  check('...whose starting values do NOT include contact details', asBoss.body.edit.values.firstName === 'Anand' && !('email' in asBoss.body.edit.values) && !('city' in asBoss.body.edit.values), JSON.stringify(asBoss.body.edit.values).slice(0, 160));
+  check('...and which marks the contact fields as such', fields.find((f) => f.key === 'email')?.contact === true && fields.find((f) => f.key === 'firstName')?.contact === false);
+  check('someone who may only view gets no edit form', (await call('GET', `/people/${ANAND_ID}`, null, FT)).body?.edit === undefined);
+  check('...the stored values are never sent loose', asBoss.body.editable === undefined);
+
+  check('editing needs a sign-in', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'X' } })).status === 401);
+  check('...and the permission to edit (finance gets 403)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'X' } }, FT)).status === 403);
+  check('nothing to save is refused', (await call('PATCH', `/people/${ANAND_ID}`, { changes: {} }, membership.token)).status === 400 && (await call('PATCH', `/people/${ANAND_ID}`, {}, membership.token)).status === 400);
+
+  const bad = await call('PATCH', `/people/${ANAND_ID}`, { changes: { email: 'nope', mobile: '9999999999', dateOfBirth: '31/12/1990' } }, membership.token);
+  check('invalid details are refused, each one named', bad.status === 400 && !!bad.body?.errors?.email && !!bad.body?.errors?.mobile && !!bad.body?.errors?.dateOfBirth, bad.text.slice(0, 200));
+  check('...and the login number cannot be edited at all', /not a field that can be edited/.test(bad.body?.errors?.mobile || ''));
+  check('...nothing was changed by a refused save', (await call('GET', `/people/${ANAND_ID}`, null, BT)).body?.member?.name === 'Anand Rao');
+
+  const saved = await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anandan', gender: 'female' } }, membership.token);
+  check('a correction is saved', saved.status === 200 && saved.body?.ok === true, saved.text.slice(0, 160));
+  check('...and says what changed', saved.body?.changed?.join() === 'First name,Gender', JSON.stringify(saved.body?.changed));
+  check('...and returns the person as now stored', saved.body?.person?.member?.name === 'Anandan Rao' && saved.body.person.edit.values.gender === 'female', saved.text.slice(0, 160));
+  check('...so the register shows it too (what the app reads)', (await call('GET', '/app-roles/people', null, BT)).body?.rows?.find((r) => r.memberRowId === ANAND_ID)?.name === 'Anandan Rao');
+  const same = await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anandan' } }, membership.token);
+  check('saving what is already there changes nothing', same.status === 200 && same.body?.changed?.length === 0);
+
+  const contact = await call('PATCH', `/people/${ANAND_ID}`, { changes: { email: 'new.anand@example.com', city: 'Nashik' } }, membership.token);
+  check('a contact detail can be changed by someone who may see contact details', contact.status === 200 && contact.body?.changed?.length === 2, contact.text.slice(0, 160));
+  const audit5 = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || [];
+  const edited = audit5.find((a) => /Edited member details/.test(a.action) && /Email/.test(JSON.stringify(a.after || a.aft || a)));
+  check('every edit is in the audit log, against the member', audit5.some((a) => /Edited member details/.test(a.action) && a.rec === ANAND_ID), audit5.slice(0, 3).map((a) => `${a.action}|${a.rec}`).join(' / '));
+  check('...with names shown, but contact details NOT written into the log',
+    !!edited && !/new\.anand|Nashik/.test(JSON.stringify(edited)) && /contact detail/.test(JSON.stringify(edited)), JSON.stringify(edited || audit5[0]).slice(0, 200));
+  const rev = await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token);
+  check('revealing contact details now also gives the stored values for the form', rev.body?.values?.email === 'new.anand@example.com' && rev.body.values.city === 'Nashik' && 'corrAddress' in rev.body.values, JSON.stringify(rev.body?.values || {}).slice(0, 160));
+  check('an unknown member is a 404', (await call('PATCH', '/people/27145000000999999', { changes: { city: 'X' } }, membership.token)).status === 404);
+
+  /* ---------- the requests the app files ---------- */
+  check('change requests need a sign-in and the permission', (await call('GET', '/change-requests')).status === 401 && (await call('GET', '/change-requests', null, FT)).status === 403);
+  const pending = await call('GET', '/change-requests?status=pending', null, BT);
+  check('the pending requests are listed, with who asked and what changes', pending.status === 200 && pending.body?.rows?.length === 4 && pending.body.rows.some((r) => r.fieldId === 'firstName' && r.newValue === 'Anandan' && /Anand/.test(r.memberName)), pending.text.slice(0, 200));
+  check('...marking the one the console cannot place', pending.body.rows.find((r) => r.fieldId === 'favouriteColour')?.known === false);
+
+  const nameReq = pending.body.rows.find((r) => r.fieldId === 'firstName');
+  const colourReq = pending.body.rows.find((r) => r.fieldId === 'favouriteColour');
+  const dateReq = pending.body.rows.find((r) => r.fieldId === 'dateOfBirth');
+  const mailReq = pending.body.rows.find((r) => r.fieldId === 'emailId1');
+  check('deciding needs a clear yes or no', (await call('POST', `/change-requests/${nameReq.id}/decide`, {}, BT)).status === 400);
+  check('turning one down needs a reason', (await call('POST', `/change-requests/${nameReq.id}/decide`, { approve: false }, BT)).status === 400);
+  check('finance cannot decide (403)', (await call('POST', `/change-requests/${nameReq.id}/decide`, { approve: true }, FT)).status === 403);
+  check('one the console cannot place cannot be approved (409)', (await call('POST', `/change-requests/${colourReq.id}/decide`, { approve: true }, BT)).status === 409);
+  check('one with a value that is not valid cannot be applied (422)', (await call('POST', `/change-requests/${dateReq.id}/decide`, { approve: true }, BT)).status === 422);
+  check('an unknown request is a 404', (await call('POST', '/change-requests/1/decide', { approve: false, note: 'x' }, BT)).status === 404);
+
+  const ok = await call('POST', `/change-requests/${nameReq.id}/decide`, { approve: true, note: 'Spelling corrected' }, BT);
+  check('approving a request marks it approved', ok.status === 200 && ok.body?.status === 'approved', ok.text.slice(0, 160));
+  check('...and the request is no longer pending', (await call('GET', '/change-requests?status=pending', null, BT)).body?.rows?.every((r) => r.id !== nameReq.id));
+  check('...and cannot be decided again (409)', (await call('POST', `/change-requests/${nameReq.id}/decide`, { approve: true }, BT)).status === 409);
+  const no = await call('POST', `/change-requests/${colourReq.id}/decide`, { approve: false, note: 'We do not keep that' }, BT);
+  check('turning one down with a reason works', no.status === 200 && no.body?.status === 'rejected');
+  const mailOk = await call('POST', `/change-requests/${mailReq.id}/decide`, { approve: true }, BT);
+  check('a contact detail is applied by someone who may see contact details', mailOk.status === 200 && mailOk.body?.applied?.join() === 'Email', mailOk.text.slice(0, 160));
+  check('...and the member now has the address the app asked for', (await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token)).body?.values?.email === 'anand.rao@example.com');
+  check('...and it is in the audit log', ((await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || []).some((a) => /change asked for from the app/i.test(a.action)));
+
+  /* put the name back, so nothing later depends on this section */
+  await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anand', gender: 'male' } }, membership.token);
+}
+
+/* ================================================================== */
+section('Giving the roles a member holds in the app, and reading what the app sent');
+
+{
+  const give = await call('POST', `/app-roles/${ANAND_ID}/pastor`, { on: true }, BT);
+  check('making someone a pastor works', give.status === 200 && give.body?.roles?.includes('pastor'), give.text.slice(0, 200));
+  if (NO_KEY) {
+    check('...without the Noah API key it writes the column and says so', give.body?.via === 'table' && /key is not set/.test(give.body?.warning || ''), JSON.stringify([give.body?.via, give.body?.warning]));
+  } else {
+    check('...through the Noah API, which is how the office\'s own tools see it', give.body?.via === 'noah-api' && !give.body?.warning, JSON.stringify([give.body?.via, give.body?.warning]));
+  }
+  const peopleRoles = (await call('GET', '/app-roles/people', null, BT)).body?.rows?.find((r) => r.memberRowId === ANAND_ID);
+  check('...and the app\'s role list shows it', peopleRoles?.roles?.includes('pastor'), JSON.stringify(peopleRoles?.roles));
+
+  const warrior = await call('POST', `/app-roles/${ANAND_ID}/prayerWarrior`, { on: true }, BT);
+  check('a prayer warrior is a plain column, written directly', warrior.status === 200 && warrior.body?.via === 'table' && !warrior.body?.warning && warrior.body.roles.includes('prayerWarrior'), JSON.stringify([warrior.body?.via, warrior.body?.warning]));
+  const take = await call('POST', `/app-roles/${ANAND_ID}/pastor`, { on: false }, BT);
+  check('taking pastor away works too', take.status === 200 && !take.body?.roles?.includes('pastor'), take.text.slice(0, 160));
+  await call('POST', `/app-roles/${ANAND_ID}/prayerWarrior`, { on: false }, BT);
+  check('finance cannot give roles (403)', (await call('POST', `/app-roles/${ANAND_ID}/pastor`, { on: true }, FT)).status === 403);
+}
+
+/* ================================================================== */
+section('Reading less, and seeing what was spent');
+
+{
+  const first = await call('POST', '/refresh', null, BT);
+  const second = await call('POST', '/refresh', null, BT);
+  check('Refresh clears what was read, so the next screen asks again', first.status === 200 || first.status === 429, `${first.status}`);
+  check('...but not more than once every ten seconds', second.status === 429 && /seconds/.test(second.body?.error || ''), `${second.status} ${second.text.slice(0, 80)}`);
+  check('it needs a sign-in', (await call('POST', '/refresh')).status === 401);
+  const health = await call('GET', '/health');
+  check('health says what this process has spent of the free allowance, for nothing', health.status === 200 && typeof health.body?.catalystSpent?.fetches === 'number' && 'updates' in health.body.catalystSpent, health.text.slice(0, 200));
+}
+
+/* ================================================================== */
 section('When Catalyst stops answering');
 
 const outage = (message) =>

@@ -17,7 +17,7 @@
 
 import { rolesFromRow, patchForRole, appRoleSummary } from './roles.js';
 
-import { S, T, tables, writes, reset, seed, U, M } from './fake-catalyst.mjs';
+import { S, T, tables, writes, reset, seed, U, M, CR } from './fake-catalyst.mjs';
 
 /* ---------- the harness ---------- */
 
@@ -734,6 +734,285 @@ try {
 } finally {
   Date.now = realNow;
   Object.assign(D.transport, realTransport);
+}
+
+/* ================================================================== */
+section('Finding the Catalyst tables by name, and talking to Catalyst properly');
+
+/* A second copy of the schema module, so these tests use the REAL client (the
+   fake replaced the first copy's), with fetch stubbed so nothing leaves. */
+const REAL = await import('./noah-schema.js?real');
+const CAT = await import('./catalyst.js');
+{
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const MEMBERS_ID = '73626000000075359'; /* past Number.MAX_SAFE_INTEGER */
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    calls.push({ url: u, method: init.method || 'GET', headers: init.headers || {}, body: init.body });
+    const json = (o, status = 200) => new Response(typeof o === 'string' ? o : JSON.stringify(o), { status });
+    if (u.includes('/oauth/v2/token')) return json({ access_token: 'tok', expires_in: 3600 });
+    if (/\/table$/.test(u) && (init.method || 'GET') === 'GET') {
+      /* The real list sends table_id as a bare number. */
+      return json(`{"status":"success","data":[{"table_name":"members","table_id":${MEMBERS_ID}},{"table_name":"users","table_id":73626000000075001}]}`);
+    }
+    if (/\/table$/.test(u) && init.method === 'POST') return json(`{"status":"success","data":{"table_name":"consoleStaff","table_id":73626000000099001}}`);
+    if (/\/column$/.test(u) && (init.method || 'GET') === 'GET') {
+      return json({ status: 'success', data: [{ column_name: 'ROWID', data_type: 'bigint' }, { column_name: 'firstName', data_type: 'varchar', max_length: '255' }] });
+    }
+    if (/\/column$/.test(u) && init.method === 'POST') return json({ status: 'success', data: [] });
+    if (u.endsWith('/query')) return json({ status: 'success', data: [{ members: { ROWID: '9', firstName: 'A' } }, { members: { ROWID: '10', firstName: 'B' } }] });
+    if (/\/row/.test(u)) return json({ status: 'success', data: [{ ROWID: '1' }, { ROWID: '2' }], more_records: false });
+    return json({ status: 'failure', message: 'unexpected ' + u }, 404);
+  };
+  try {
+    const before = CAT.usage();
+    const rows = await REAL.io.getRows('tbl:members');
+    await REAL.io.getRows('tbl:members');
+    await REAL.io.getRows('tbl:users');
+    const rowCalls = calls.filter((c) => /\/row/.test(c.url));
+    const listCalls = calls.filter((c) => /\/table$/.test(c.url));
+
+    check('a table is found by its name, from the project\'s own list', rows.length === 2 && rowCalls[0].url.includes(`/table/${MEMBERS_ID}/row`), rowCalls[0]?.url);
+    check('...a 17-digit table id arrives intact, not rounded', rowCalls[0].url.includes(MEMBERS_ID) && !rowCalls[0].url.includes('73626000000075360'), rowCalls[0]?.url);
+    check('...the list is read once, however many tables are used', listCalls.length === 1, String(listCalls.length));
+    check('every call names the organisation and the environment',
+      rowCalls.every((c) => c.headers['CATALYST-ORG'] === 'offline' && c.headers.Environment === 'Development' && /^Zoho-oauthtoken /.test(c.headers.authorization)),
+      JSON.stringify(rowCalls[0]?.headers));
+    check('the free allowance spent is counted, a page at a time', CAT.usage().fetches - before.fetches === 3, JSON.stringify(CAT.usage()));
+
+    let missing = null;
+    try { await REAL.io.getRows('tbl:nosuch'); } catch (e) { missing = e; }
+    check('a table that is not in the project says so, by name', /no table called "nosuch"/.test(missing?.message || ''), missing?.message);
+    check('...without asking the list again straight away (30 seconds apart at most)', calls.filter((c) => /\/table$/.test(c.url)).length === 1);
+    check('a plain id is passed through untouched', (await REAL.tableId('12345678901234567')) === '12345678901234567');
+    /* (The fake sets an id for it in the environment; take that away for this check.) */
+    await withEnv({ CATALYST_TABLE_CONSOLE_STAFF: undefined }, async () => {
+      check('the console-staff table is absent until the project has one', !REAL.NOAH_TABLES.consoleStaff && !REAL.tableExists('consoleStaff'));
+    });
+    check('...and an id in the environment is honoured, for a table with another name', (await withEnv({ CATALYST_TABLE_CONSOLE_STAFF: '99' }, async () => REAL.NOAH_TABLES.consoleStaff)) === '99');
+
+    /* columns */
+    const cols = await CAT.listColumns(MEMBERS_ID);
+    check('a table\'s columns are listed, with the system ones marked',
+      cols.length === 2 && cols[0].system === true && cols[1].name === 'firstName' && cols[1].maxLength === '255', JSON.stringify(cols));
+
+    calls.length = 0;
+    await CAT.createColumns(MEMBERS_ID, [{ column_name: 'corrCity', data_type: 'varchar', max_length: 255 }]);
+    const made = calls.find((c) => c.method === 'POST' && /\/column$/.test(c.url));
+    const sent = JSON.parse(made.body);
+    check('a column is created with the flags Catalyst wants, as strings',
+      Array.isArray(sent) && sent[0].column_name === 'corrCity' && sent[0].is_mandatory === 'false' && sent[0].audit_consent === 'false' && sent[0].search_index_enabled === 'false' && sent[0].is_unique === 'false', made.body);
+
+    check('a table is created and its id comes back as a string, intact', (await CAT.createTable('consoleStaff')) === '73626000000099001');
+    const q = await CAT.query('SELECT * FROM members LIMIT 2');
+    check('a ZCQL result is flattened out of its table name', q.length === 2 && q[0].ROWID === '9' && q[1].firstName === 'B', JSON.stringify(q));
+    check('...and counted as a query', CAT.usage().queries === before.queries + 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+/* ================================================================== */
+section('Does the console\'s schema match the project?');
+
+reset(seed());
+{
+  const report = await S.verifySchema();
+  const members = report.find((r) => r.table === 'members');
+  check('every table the console uses is checked', ['users', 'members', 'membersExtra', 'files', 'appRegistrations', 'appChangeRequests'].every((n) => report.some((r) => r.table === n)));
+  check('a column the project does not have yet is named', members.checked && members.missing.includes('corrAddress') && members.missing.includes('emailId2'), JSON.stringify(members.missing));
+  check('...and an existing one is not', !members.missing.includes('firstName'));
+  const FC2 = await import('./fake-catalyst.mjs');
+  FC2.fakeColumns(T.members, ['emailId2', 'anniversaryDate', 'corrAddress', 'corrArea', 'corrCity', 'corrState', 'corrCountry', 'corrPincode', 'religion', 'motherTongue', 'educationDetail', 'employedIn', 'commLanguage', 'language', 'memberType', 'dateOfJoining', 'verifiedOn', 'aadharNo', 'voterId', 'passportNumber', 'drivingLicense', 'emiratesID', 'referBy', 'maritalStatus', 'isKid', 'memberId', 'photo']);
+  const again = (await S.verifySchema()).find((r) => r.table === 'members');
+  check('once the columns are added the table passes', again.missing.length === 0, JSON.stringify(again.missing));
+  const staff = report.find((r) => r.table === 'consoleStaff');
+  check('the console-staff table is checked once it exists', staff && staff.exists === true);
+}
+
+/* ================================================================== */
+section('Editing a member from the console, and it reaching the app');
+
+const MF = await import('./member-fields.js');
+{
+  const ok = MF.checkPatch({ firstName: ' Anandan ', city: 'Pune', gender: 'female', dateOfBirth: '1991-02-03' }, { canContact: true });
+  check('a good change is cleaned and mapped to its columns', Object.keys(ok.errors).length === 0 && ok.values.firstName === 'Anandan' && ok.values.city === 'Pune' && ok.values.gender === 2 && ok.values.dateOfBirth === '1991-02-03', JSON.stringify(ok));
+  check('a first name cannot be emptied', !!MF.checkPatch({ firstName: '  ' }).errors.firstName);
+  check('an optional detail can be cleared', MF.checkPatch({ middleName: '' }).values.middleName === null);
+  check('an email must be an email', !!MF.checkPatch({ email: 'nope' }, { canContact: true }).errors.email);
+  check('a date must be real', !!MF.checkPatch({ dateOfBirth: '2026-02-30' }).errors.dateOfBirth && !!MF.checkPatch({ dateOfBirth: '03/02/1991' }).errors.dateOfBirth);
+  check('a birth date cannot be in the future', !!MF.checkPatch({ dateOfBirth: '2999-01-01' }).errors.dateOfBirth);
+  check('gender is one of three', !!MF.checkPatch({ gender: 'robot' }).errors.gender && MF.checkPatch({ gender: 'other' }).values.gender === 3);
+  check('a name that is too long is refused', !!MF.checkPatch({ firstName: 'x'.repeat(101) }).errors.firstName);
+  check('a field that is not editable is refused, not ignored', !!MF.checkPatch({ mobile: '9999999999' }).errors.mobile && !!MF.checkPatch({ aadharNo: '1' }).errors.aadharNo);
+  check('the login number and ID numbers are not on the editable list', !MF.MEMBER_FIELDS.some((f) => /mobile|aadhar|pan|passport|voter|driving|emirates|userId/i.test(f.key + f.column)));
+  check('contact details need permission to see them', !!MF.checkPatch({ email: 'a@b.co' }, { canContact: false }).errors.email && !MF.checkPatch({ email: 'a@b.co' }, { canContact: true }).errors.email);
+  check('a request names a field loosely and still finds it', MF.fieldByName('EmailId1')?.key === 'email' && MF.fieldByName('first_name')?.key === 'firstName' && MF.fieldByName('favouriteColour') === null);
+}
+
+reset(seed());
+{
+  const rowOf = () => tables[T.members].find((m) => m.ROWID === M.approved);
+  const before = writes.length;
+  const r = await S.updateMemberFields(M.approved, { firstName: 'Anandan', city: 'Pune' });
+  check('an edit changes the member\'s own columns', rowOf().firstName === 'Anandan' && rowOf().city === 'Pune');
+  check('...and says what changed, from what to what', r.changed.length === 2 && r.changed.find((c) => c.key === 'firstName').before === 'Anand' && r.changed.find((c) => c.key === 'firstName').after === 'Anandan', JSON.stringify(r.changed));
+  const w = writes.slice(before).filter((x) => x.op === 'update');
+  check('...in one write, of only those columns and the row id', w.length === 1 && Object.keys(w[0].row).sort().join() === 'ROWID,city,firstName', JSON.stringify(w[0]?.row));
+  check('...the row id is a string, intact', w[0].row.ROWID === M.approved);
+  check('the app sees it: the register now shows the new name', (await S.loadMembers()).find((x) => x.rowId === M.approved).name === 'Anandan Rao');
+
+  const n = writes.length;
+  const same = await S.updateMemberFields(M.approved, { firstName: 'Anandan', city: 'Pune' });
+  check('saving what is already there writes nothing', same.changed.length === 0 && writes.length === n);
+
+  /* The app changed the pincode a moment ago; the console cache has not noticed. */
+  tables[T.members].find((m) => m.ROWID === M.approved).pincode = '411001';
+  const stale = await S.updateMemberFields(M.approved, { pincode: '400070' });
+  check('an edit is judged against Catalyst now, not against a minute-old copy', stale.changed.length === 1 && stale.changed[0].before === '411001' && rowOf().pincode === '400070', JSON.stringify(stale.changed));
+
+  await S.updateMemberFields(M.approved, { gender: 2, middleName: 'K', dateOfBirth: '1991-02-03' });
+  check('gender is stored as the code the app reads (2), a date as YYYY-MM-DD', rowOf().gender === 2 && rowOf().dateOfBirth === '1991-02-03' && rowOf().middleName === 'K');
+  await S.updateMemberFields(M.approved, { middleName: null });
+  check('clearing a detail stores null', rowOf().middleName === null);
+
+  let gone = null;
+  try { await S.updateMemberFields('27145000000999999', { city: 'X' }); } catch (e) { gone = e; }
+  check('a member that does not exist is refused, and nothing is written', gone?.code === 'not_found');
+
+  const person = await S.loadPerson(M.approved);
+  check('the person carries the stored values the edit form starts from', person.editable.firstName === 'Anandan' && person.editable.gender === 'female' && person.editable.pincode === '400070' && person.editable.dateOfBirth === '1991-02-03', JSON.stringify(person.editable).slice(0, 200));
+}
+
+/* ================================================================== */
+section('Changes the members ask for from the app');
+
+reset(seed());
+{
+  const pending = await S.loadChangeRequests({ status: 'pending' });
+  check('the pending requests are listed, newest first', pending.length === 4 && pending[0].id === CR.badDate, pending.map((p) => p.fieldId).join());
+  check('...each with who asked, the old value and the new', pending.find((p) => p.id === CR.name).memberName === 'Anand Rao' && pending.find((p) => p.id === CR.name).newValue === 'Anandan');
+  check('...marking the ones the console can place', pending.find((p) => p.id === CR.name).known && pending.find((p) => p.id === CR.email).contact && !pending.find((p) => p.id === CR.unknown).known);
+  check('a request already decided is not pending', (await S.loadChangeRequests({ status: 'approved' })).length === 1);
+
+  const approved = await S.decideChangeRequest({ id: CR.name, approve: true, note: 'ok', byMemberRowId: M.boss, canContact: false });
+  const reqRow = () => tables[T.appChangeRequests].find((r) => r.ROWID === CR.name);
+  check('approving writes the new value to the member', tables[T.members].find((m) => m.ROWID === M.approved).firstName === 'Anandan' && approved.applied.length === 1);
+  check('...and marks the request, with who and when', reqRow().status === 'approved' && reqRow().reviewedByRowId === M.boss && !!reqRow().reviewedAt && reqRow().note === 'ok', JSON.stringify(reqRow()));
+  let again = null;
+  try { await S.decideChangeRequest({ id: CR.name, approve: true }); } catch (e) { again = e; }
+  check('a request is decided once', again?.code === 'not_pending');
+
+  let unknown = null;
+  try { await S.decideChangeRequest({ id: CR.unknown, approve: true, canContact: true }); } catch (e) { unknown = e; }
+  check('a request for something the console cannot place cannot be approved', unknown?.code === 'unknown_field' && /favouriteColour/.test(unknown.message));
+  check('...and is left pending', tables[T.appChangeRequests].find((r) => r.ROWID === CR.unknown).status === 'pending');
+  check('...but it can be turned down', (await S.decideChangeRequest({ id: CR.unknown, approve: false, note: 'Not a detail we keep' })).status === 'rejected');
+
+  let noPii = null;
+  try { await S.decideChangeRequest({ id: CR.email, approve: true, canContact: false }); } catch (e) { noPii = e; }
+  check('applying a contact detail needs permission to see contact details', noPii?.code === 'forbidden_field' && tables[T.members].find((m) => m.ROWID === M.approved).emailId1 === 'anand@example.com');
+  await S.decideChangeRequest({ id: CR.email, approve: true, canContact: true });
+  check('...and with it, the email is changed', tables[T.members].find((m) => m.ROWID === M.approved).emailId1 === 'anand.rao@example.com');
+
+  let bad = null;
+  try { await S.decideChangeRequest({ id: CR.badDate, approve: true, canContact: true }); } catch (e) { bad = e; }
+  check('a requested value that is not valid is not applied', bad?.code === 'invalid_value' && tables[T.appChangeRequests].find((r) => r.ROWID === CR.badDate).status === 'pending' && tables[T.members].find((m) => m.ROWID === M.approved).dateOfBirth === '1990-05-14', bad?.message);
+
+  /* The member write fails: the request must NOT be left marked approved. */
+  reset(seed());
+  const realUpdate = S.io.update;
+  S.io.update = async (id, row) => { if (id === T.members) throw new Error('Catalyst: boom'); return realUpdate(id, row); };
+  let failed = null;
+  try { await S.decideChangeRequest({ id: CR.name, approve: true, canContact: true }); } catch (e) { failed = e; } finally { S.io.update = realUpdate; }
+  check('if the member cannot be written, the request stays pending to retry', !!failed && tables[T.appChangeRequests].find((r) => r.ROWID === CR.name).status === 'pending');
+}
+
+/* ================================================================== */
+section('Adding what the project is missing (npm run catalyst:columns)');
+
+const SS = await import('./schema-spec.js');
+{
+  const spec = SS.buildSpec();
+  const of = (t) => spec.find((s) => s.table === t);
+  const cols = (t) => of(t).columns.map((c) => c.column_name);
+
+  check('the spec covers the Noah tables, the console\'s own, and every content table',
+    ['members', 'membersExtra', 'users', 'files', 'appRegistrations', 'appChangeRequests', 'consoleStaff', 'dailyMana', 'rowilCourseManagement', 'videos'].every((t) => of(t)));
+  check('only the console\'s own table and Noah Tube\'s two are ever created; the developer\'s tables never',
+    spec.filter((s) => s.create).map((s) => s.table).sort().join() === 'consoleStaff,videoCategories,videos', spec.filter((s) => s.create).map((s) => s.table).join());
+  check('Catalyst\'s refused names are written the way the project spells them', cols('rowilCourseLessonGroupManagement').includes('orderCol') && !cols('rowilCourseLessonGroupManagement').includes('order') && cols('noahGram').includes('dateCol') && !cols('noahGram').includes('date'));
+  const { columnFor } = await import('./content-types.js');
+  check('...the same spelling the console writes with', columnFor('order') === 'orderCol' && columnFor('title') === 'title');
+  check('no column in the spec has a name Catalyst refuses', spec.every((s) => s.columns.every((c) => !['date', 'order', 'time', 'key', 'rows', 'in', 'out', 'priority', 'timestamp'].includes(c.column_name))));
+  check('a field\'s kind picks its type', of('dailyMana').columns.find((c) => c.column_name === 'publishDate').data_type === 'date'
+    && of('dailyMana').columns.find((c) => c.column_name === 'content').data_type === 'text'
+    && of('dailyMana').columns.find((c) => c.column_name === 'published').data_type === 'boolean'
+    && of('dailyMana').columns.find((c) => c.column_name === 'categoryId').data_type === 'bigint'
+    && of('rowilCourseManagement').columns.find((c) => c.column_name === 'donationAmount').data_type === 'double');
+  check('a short text is a 255-character varchar', of('dailyMana').columns.find((c) => c.column_name === 'title').max_length === 255);
+  check('the console-staff table has what the console writes', ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'].every((c) => cols('consoleStaff').includes(c)));
+  check('guessed types for a missing developer column are sensible', SS.guessType('isPrayerWarrior').data_type === 'boolean'
+    && SS.guessType('reviewedAt').data_type === 'datetime' && SS.guessType('dateOfBirth').data_type === 'date'
+    && SS.guessType('memberRowId').data_type === 'bigint' && SS.guessType('reviewNote').data_type === 'text'
+    && SS.guessType('city').data_type === 'varchar');
+
+  /* A fake project: the Noah tables are there, dailyMana is an empty shell,
+     consoleStaff and the Noah Tube tables are absent, members is full. */
+  const project = {
+    members: { id: '1001', cols: [...Array(104)].map((_, i) => ({ name: i === 0 ? 'ROWID' : `c${i}`, type: 'varchar' })) },
+    membersExtra: { id: '1002', cols: spec.find((s) => s.table === 'membersExtra').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
+    users: { id: '1003', cols: spec.find((s) => s.table === 'users').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
+    files: { id: '1004', cols: spec.find((s) => s.table === 'files').columns.map((c) => ({ name: c.column_name, type: 'varchar' })) },
+    appRegistrations: { id: '1005', cols: spec.find((s) => s.table === 'appRegistrations').columns.map((c) => ({ name: c.column_name, type: c.data_type })) },
+    appChangeRequests: { id: '1006', cols: [{ name: 'ROWID', type: 'bigint' }, { name: 'memberRowId', type: 'bigint' }] },
+    dailyMana: { id: '2001', cols: [{ name: 'ROWID', type: 'bigint' }, { name: 'CREATEDTIME', type: 'datetime' }] },
+  };
+  const calls = [];
+  const api = {
+    listTables: async () => Object.entries(project).map(([name, t]) => ({ name, id: t.id })),
+    listColumns: async (id) => Object.values(project).find((t) => t.id === id).cols,
+    createTable: async (name) => { calls.push(['table', name]); project[name] = { id: String(9000 + calls.length), cols: [{ name: 'ROWID', type: 'bigint' }] }; return project[name].id; },
+    createColumns: async (id, columns) => {
+      calls.push(['columns', id, columns.length]);
+      if (id === '2001' && process.env.__BREAK) throw new Error('Catalyst: no');
+      Object.values(project).find((t) => t.id === id).cols.push(...columns.map((c) => ({ name: c.column_name, type: c.data_type })));
+    },
+  };
+
+  const planned = await SS.plan(spec, api);
+  const state = (t) => planned.find((p) => p.table === t);
+  check('nothing is changed while planning', calls.length === 0);
+  check('a table the project has complete is "ok"', state('membersExtra').state === 'ok' && state('users').state === 'ok');
+  check('an empty shell needs its columns', state('dailyMana').state === 'add-columns' && state('dailyMana').missing.length > 5);
+  check('the console-staff table does not exist yet, and would be created', state('consoleStaff').state === 'create-table' && state('consoleStaff').missing.length === 7);
+  check('Noah Tube\'s tables would be created', state('videos').state === 'create-table' && state('videoCategories').state === 'create-table');
+  check('a table the developer should own, if it were gone, is reported not created', (await SS.plan([{ table: 'threads', create: false, columns: [{ column_name: 'a', data_type: 'int' }] }], api))[0].state === 'absent');
+  check('a table already at 104 columns that needs more is refused, with why', state('members').state === 'too-wide' && /104/.test(state('members').problem), state('members').problem);
+  check('a column that exists as a different type is noted and left alone', state('files').notes.length > 0 || state('files').state === 'ok');
+  check('a developer\'s table missing columns is found (and its gap named)', state('appChangeRequests').state === 'add-columns' && state('appChangeRequests').missing.some((c) => c.column_name === 'fieldId'));
+
+  const results = await SS.apply(planned.filter((p) => ['add-columns', 'create-table'].includes(p.state)), api);
+  check('applying creates the tables, then their columns', calls.some((c) => c[0] === 'table' && c[1] === 'consoleStaff') && results.find((r) => r.table === 'consoleStaff').done.length === 7);
+  check('...one request per table for its columns', calls.filter((c) => c[0] === 'columns' && c[1] === '2001').length === 1);
+  check('...nothing is ever deleted or altered: only table and column creation are in the api', Object.keys(api).sort().join() === 'createColumns,createTable,listColumns,listTables');
+  const after = await SS.plan(spec, api);
+  check('read back, everything asked for is there (apart from the table that cannot widen)',
+    after.filter((p) => !['ok', 'too-wide', 'absent'].includes(p.state)).length === 0 && ['dailyMana', 'consoleStaff', 'videos', 'videoCategories'].every((t) => after.find((p) => p.table === t).state === 'ok'), after.filter((p) => !['ok', 'too-wide', 'absent'].includes(p.state)).map((p) => p.table).join());
+
+  /* one table failing must not stop the others */
+  const project2 = { dailyMana: { id: '2001', cols: [{ name: 'ROWID', type: 'bigint' }] }, dailyPrayers: { id: '2002', cols: [{ name: 'ROWID', type: 'bigint' }] } };
+  const api2 = {
+    listTables: async () => Object.entries(project2).map(([name, t]) => ({ name, id: t.id })),
+    listColumns: async (id) => Object.values(project2).find((t) => t.id === id).cols,
+    createTable: async () => '', createColumns: async (id) => { if (id === '2001') throw new Error('Catalyst: refused'); },
+  };
+  const two = await SS.plan(spec.filter((s) => ['dailyMana', 'dailyPrayers'].includes(s.table)), api2);
+  const done = await SS.apply(two, api2);
+  check('a failure on one table is reported and the rest carry on', done.find((r) => r.table === 'dailyMana').error === 'Catalyst: refused' && done.find((r) => r.table === 'dailyPrayers').done.length > 0 && !done.find((r) => r.table === 'dailyPrayers').error);
+  const noId = await SS.apply([{ table: 'x', state: 'create-table', missing: [{ column_name: 'a', data_type: 'int' }] }], { createTable: async () => '', createColumns: async () => { throw new Error('should not be called'); } });
+  check('a table created without an id back does not get columns written to nowhere', /id is/.test(noId[0].error || ''), noId[0].error);
 }
 
 /* ================================================================== */

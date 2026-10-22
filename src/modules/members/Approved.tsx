@@ -193,7 +193,7 @@ export default function Approved() {
             <hr className="div" />
             {/* Everything about them, with the photograph, ID and video already
                 open: see components/PersonDetail. */}
-            <PersonDetail memberRowId={open.memberRowId ?? open.memberId ?? ''} />
+            <PersonDetail memberRowId={open.memberRowId ?? open.memberId ?? ''} onChanged={q.reload} />
           </>
         )}
       </Drawer>

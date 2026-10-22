@@ -55,7 +55,7 @@ Set these yourself in Render's dashboard — the values never go in git:
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | the mailbox that emails sign-in codes. Optional; see `docs/CONSOLE-ACCESS.md` |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | the account that texts sign-in codes. Optional; Indian numbers need DLT registration first |
 
-The rest (`CATALYST_PROJECT_ID`, `ORG_ID`, `SCHEMA`, `FILE_FOLDER_ID`,
+The rest (`CATALYST_PROJECT_ID`, `ORG_ID`, `ENV`, `SCHEMA`,
 `NOAH_API_BASE`, `ALLOWED_ORIGINS`, `NODE_ENV`) are already in `render.yaml` —
 they are ids and URLs, not secrets.
 

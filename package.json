@@ -22,6 +22,7 @@
     "catalyst:scopes": "node server/catalyst.js --scopes",
     "start": "node server/index.js",
     "check:schema": "node server/check-schema.mjs",
+    "catalyst:columns": "node server/ensure-columns.mjs",
     "test:schema": "node server/test-schema-offline.mjs",
     "dev:offline": "node server/dev-offline.mjs",
     "test:stack": "node server/test-offline-stack.mjs"

@@ -14,6 +14,7 @@ import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { GROUPS, MODULES, buildProgress, type ModuleDef } from '@/modules/registry';
 import { Icon, Avatar, Age } from './ui';
+import { useToast } from './layers';
 import logo from '@/assets/logo.png';
 
 /* ---------- sidebar ---------- */
@@ -253,6 +254,34 @@ function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
+/* ---------- refresh ----------
+
+   What the console reads from Catalyst is kept for a minute, to spare Catalyst's
+   free allowance (the Noah app and the Noah API spend the same one). So a
+   registration the app has just sent in can take that long to show up. This is
+   the button for "now": it tells the server to forget what it kept, then the page
+   is read again. */
+
+function RefreshButton() {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true);
+    try {
+      await api.post('/refresh');
+      window.location.reload();
+    } catch (e) {
+      toast((e as Error).message, 'warn');
+      setBusy(false);
+    }
+  }
+  return (
+    <button className="icon-btn" aria-label="Refresh from Catalyst" title="Read the latest from Catalyst" disabled={busy} onClick={go}>
+      <Icon name="refresh" />
+    </button>
+  );
+}
+
 /* ---------- shell ---------- */
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -322,6 +351,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               Sample data
             </span>
           )}
+          {meta.data && !onSample && <RefreshButton />}
           <QueueBell />
           <MeMenu />
         </header>
