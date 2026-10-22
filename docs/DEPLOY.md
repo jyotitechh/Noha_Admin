@@ -4,7 +4,7 @@ Two pieces, two hosts:
 
 | | Where | What it is |
 |---|---|---|
-| Console (React) | **Catalyst Slate**: `https://karuna-admin-tnzlnait.onslate.in` | static files from `dist/` |
+| Console (React) | **Catalyst Slate**: `https://karuna-admin-eayoyuuw.onslate.in` | static files from `dist/` |
 | API (Express) | Render (or Railway / Fly) | `server/`, holds the secrets |
 
 They are split because Slate serves static files and does not run an Express server.

@@ -43,7 +43,7 @@ services:
       # --- who may call this API, and who may sign in -------------------
       # Comma separated. The Slate address, plus any custom domain later.
       - key: ALLOWED_ORIGINS
-        value: https://karuna-admin-tnzlnait.onslate.in
+        value: https://karuna-admin-eayoyuuw.onslate.in
       # Without this, anyone who finds the URL can request a sign-in code and
       # be handed it. Choose a long phrase; share it with the office only.
       - key: ADMIN_PASSPHRASE

@@ -48,7 +48,7 @@ const app = express();
    but there is no reason to let any site talk to this API, so it is a list.
 
    ALLOWED_ORIGINS is comma separated, e.g.
-     https://karuna-admin-tnzlnait.onslate.in,https://ksm-admin.karunasadan.org
+     https://karuna-admin-eayoyuuw.onslate.in,https://ksm-admin.karunasadan.org
    Catalyst hosting and localhost are allowed without listing (below). Vercel is
    not: the console no longer lives there. */
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '')

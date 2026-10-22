@@ -28,11 +28,11 @@ import { credentialProblems, clean } from './catalyst.js';
 import { passphraseLooksCopied } from './auth.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROJECT = process.env.SLATE_PROJECT_ID || '27145000000037001';
-const ORG = process.env.SLATE_ORG_ID || '60063007256';
+const PROJECT = process.env.SLATE_PROJECT_ID || '73626000000028001';
+const ORG = process.env.SLATE_ORG_ID || '60088815946';
 const NAME = process.env.APPSAIL_NAME || 'karuna-api';
 const DC = process.env.SLATE_DC || 'in';
-const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-tnzlnait.onslate.in';
+const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-eayoyuuw.onslate.in';
 const testLogin = process.argv.includes('--test-login');
 
 const say = (s) => console.log(`\n  ${s}`);
