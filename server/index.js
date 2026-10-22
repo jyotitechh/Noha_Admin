@@ -51,11 +51,11 @@ const ORIGINS = (process.env.ALLOWED_ORIGINS || '')
 
 const LOCAL = /^http:\/\/localhost:\d+$/;
 const VERCEL_PREVIEW = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
-/* Catalyst's own hosting (Slate, Client Hosting): <name>-<id>.<env>.catalystserverless.in or
-   catalystslate.in. The session is a Bearer header, never a cookie, so a page on one of
+/* Catalyst's own hosting (Slate, Client Hosting): <name>-<id>.onslate.in (Slate), or
+   <name>-<id>.<env>.catalystserverless.in / catalystslate.in. The session is a Bearer header, never a cookie, so a page on one of
    these cannot use anyone's session; it still has to sign in. ALLOWED_ORIGIN_SUFFIXES
    (comma separated, e.g. .karunasadan.org) adds more. */
-const CATALYST_HOSTING = /^https:\/\/[a-z0-9.-]+\.(catalystserverless|catalystslate)\.(in|com|eu|com\.au)$/i;
+const CATALYST_HOSTING = /^https:\/\/[a-z0-9.-]+\.(catalystserverless|catalystslate|onslate)\.(in|com|eu|com\.au)$/i;
 const SUFFIXES = (process.env.ALLOWED_ORIGIN_SUFFIXES || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.startsWith('.') && s.length > 3);
 
