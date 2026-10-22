@@ -123,7 +123,7 @@ try {
 
   say(`Project ${PROJECT}, organisation ${ORG}`);
   run(`catalyst init --project ${PROJECT} --org ${ORG} --dc ${DC} -ni`, work);
-  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api}" --command "node server/index.js" -ni`, work);
+  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api.replace(/\\/g, '/')}" --command "node server/index.js" -ni`, work);
 
   /* AppSail takes its settings from app-config.json. Written AFTER appsail:add, which makes it. */
   writeFileSync(join(api, 'app-config.json'), JSON.stringify({
