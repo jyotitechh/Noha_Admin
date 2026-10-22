@@ -1165,6 +1165,25 @@ const SS = await import('./schema-spec.js');
 }
 
 /* ================================================================== */
+section('Catalyst credentials pasted into a host\'s dashboard');
+
+{
+  const GOOD = { CATALYST_CLIENT_ID: '1000.ABCDEF1234567890ABCDEF1234567890', CATALYST_CLIENT_SECRET: 'f00dfeedbeefcafe1234567890abcdef12345678', CATALYST_REFRESH_TOKEN: '1000.0123456789abcdef.fedcba9876543210' };
+  check('a clean set has nothing wrong', CAT.credentialProblems(GOOD).length === 0, CAT.credentialProblems(GOOD).join(' | '));
+  check('whitespace and quotes around a value are dropped, not an error', CAT.clean('  "1000.abc"\r\n') === '1000.abc'
+    && CAT.credentialProblems({ ...GOOD, CATALYST_REFRESH_TOKEN: GOOD.CATALYST_REFRESH_TOKEN + '\r\n' }).length === 0);
+  const empty = CAT.credentialProblems({ ...GOOD, CATALYST_CLIENT_SECRET: '' });
+  check('an empty one is named', empty.length === 1 && /CATALYST_CLIENT_SECRET is empty/.test(empty[0]), empty.join(' | '));
+  check('a missing one is named too', CAT.credentialProblems({ CATALYST_CLIENT_ID: GOOD.CATALYST_CLIENT_ID }).length === 2);
+  const space = CAT.credentialProblems({ ...GOOD, CATALYST_REFRESH_TOKEN: '1000.abc def' });
+  check('a space inside a value is named', space.length === 1 && /space or line break inside/.test(space[0]), space.join(' | '));
+  const swapped = CAT.credentialProblems({ ...GOOD, CATALYST_CLIENT_ID: GOOD.CATALYST_CLIENT_SECRET, CATALYST_CLIENT_SECRET: GOOD.CATALYST_CLIENT_ID });
+  check('a secret in the id row, and an id in the secret row, are both caught', swapped.length === 2 && swapped.every((s) => /wrong row/.test(s)), swapped.join(' | '));
+  check('the same value in two rows is caught', CAT.credentialProblems({ ...GOOD, CATALYST_CLIENT_ID: GOOD.CATALYST_REFRESH_TOKEN }).some((s) => /same value/.test(s)));
+  check('nothing it says reveals a value', ![...swapped, ...space, ...empty].some((s) => Object.values(GOOD).some((v) => s.includes(v.slice(5)))));
+}
+
+/* ================================================================== */
 section('The office passphrase');
 
 await withEnv({ ADMIN_PASSPHRASE: 'amber-river-cedar-4821' }, async () => {

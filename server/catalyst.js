@@ -51,8 +51,35 @@ loadEnv();
 const ACCOUNTS = process.env.CATALYST_ACCOUNTS_HOST || 'https://accounts.zoho.in';
 const API = process.env.CATALYST_API_HOST || 'https://api.catalyst.zoho.in';
 
-export const PROJECT_ID = process.env.CATALYST_PROJECT_ID || '';
-export const ORG_ID = process.env.CATALYST_ORG_ID || '';
+/* A setting as it was meant, not as it was pasted. A value copied into a host's dashboard
+   often carries a trailing space or line break, or a pair of quotes, nobody can see, and
+   Zoho then answers a bare 400. Whitespace at the ends and surrounding quotes are dropped. */
+export const clean = (v) => String(v ?? '').trim().replace(/^["']+|["']+$/g, '').trim();
+const setting = (name) => clean(process.env[name]);
+
+export const PROJECT_ID = setting('CATALYST_PROJECT_ID');
+export const ORG_ID = setting('CATALYST_ORG_ID');
+
+/**
+ * What looks wrong with the three credentials, in words, WITHOUT revealing any of them.
+ * Zoho's answer to a bad one is a bare "400 {}", which says nothing; this does. Zoho client
+ * ids and refresh tokens start "1000."; a secret is a long run of letters and digits; none
+ * contains a space.
+ */
+export function credentialProblems(env = process.env) {
+  const get = (n) => clean(env[n]);
+  const out = [];
+  for (const [name, startsWith1000] of [['CATALYST_CLIENT_ID', true], ['CATALYST_CLIENT_SECRET', false], ['CATALYST_REFRESH_TOKEN', true]]) {
+    const v = get(name);
+    if (!v) { out.push(`${name} is empty or not set`); continue; }
+    if (/\s/.test(v)) out.push(`${name} has a space or line break inside it`);
+    if (startsWith1000 && !v.startsWith('1000.')) out.push(`${name} does not start with "1000." as a Zoho ${name.endsWith('ID') ? 'client id' : 'refresh token'} does (is it in the wrong row?)`);
+    if (!startsWith1000 && v.startsWith('1000.')) out.push(`${name} starts with "1000." like an id or token, not a secret (is it in the wrong row?)`);
+  }
+  const id = get('CATALYST_CLIENT_ID'), tok = get('CATALYST_REFRESH_TOKEN');
+  if (id && tok && id === tok) out.push('CATALYST_CLIENT_ID and CATALYST_REFRESH_TOKEN hold the same value');
+  return out;
+}
 
 /* What the console needs from Catalyst.
 
@@ -91,8 +118,8 @@ export const FILE_FOLDER_ID = process.env.CATALYST_FILE_FOLDER_ID || '';
 
 /** True when there is enough configuration to try. */
 export const configured = () =>
-  !!(PROJECT_ID && ORG_ID && process.env.CATALYST_REFRESH_TOKEN &&
-     process.env.CATALYST_CLIENT_ID && process.env.CATALYST_CLIENT_SECRET);
+  !!(PROJECT_ID && ORG_ID && setting('CATALYST_REFRESH_TOKEN') &&
+     setting('CATALYST_CLIENT_ID') && setting('CATALYST_CLIENT_SECRET'));
 
 /* Parse a Catalyst reply without losing a big id.
 
@@ -116,17 +143,21 @@ export async function accessToken() {
   if (token && Date.now() < tokenExpires - 60_000) return token;
 
   const url = new URL(ACCOUNTS + '/oauth/v2/token');
-  url.searchParams.set('refresh_token', process.env.CATALYST_REFRESH_TOKEN);
-  url.searchParams.set('client_id', process.env.CATALYST_CLIENT_ID);
-  url.searchParams.set('client_secret', process.env.CATALYST_CLIENT_SECRET);
+  url.searchParams.set('refresh_token', setting('CATALYST_REFRESH_TOKEN'));
+  url.searchParams.set('client_id', setting('CATALYST_CLIENT_ID'));
+  url.searchParams.set('client_secret', setting('CATALYST_CLIENT_SECRET'));
   url.searchParams.set('grant_type', 'refresh_token');
 
   const res = await fetch(url, { method: 'POST' });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.access_token) {
+    const problems = credentialProblems();
+    const said = body.error || (Object.keys(body).length ? JSON.stringify(body).slice(0, 200) : 'no reason given');
     throw new Error(
-      `Catalyst would not issue an access token (${res.status}). ` +
-      `${body.error || JSON.stringify(body).slice(0, 200)}. Check CATALYST_* in .env.local.`,
+      `Catalyst would not issue an access token (${res.status}: ${said}). ` +
+      (problems.length
+        ? `Problems found: ${problems.join('; ')}.`
+        : 'The three values look well formed, so one is wrong or was made for a different Self Client: the client id, secret and refresh token must all come from the same one. Check CATALYST_* on this server.'),
     );
   }
   token = body.access_token;
