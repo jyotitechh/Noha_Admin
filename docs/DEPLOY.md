@@ -95,6 +95,43 @@ your own branch deploys keep working without edits. Anything else gets no
 
 ---
 
+## Hosting the console on Catalyst Slate
+
+Slate hosts the **pages** only. It is a static host, like Vercel: it cannot run this
+project's Node server, so the API stays where it is (Render, section 1). The console
+finds the API from `VITE_API_BASE`, which the build bakes in.
+
+**The error that means it was built without one:** `POST /api/auth/request-code`
+answers **405** (or 404). The page posted sign-in to the Slate site itself, which has
+no `/api`. The console now says so on screen ("This site has no server behind it").
+
+The fix is in the repository: `.env.production` carries
+`VITE_API_BASE=https://ksm-admin-api.onrender.com`, which `npm run build` reads, so
+any static host builds correctly with no dashboard setting. A host's own
+`VITE_API_BASE` setting still overrides it. If the API ever moves, change that line.
+
+In Slate:
+
+1. Link the GitHub repository (`kishor-2026/Noha_admin`, branch `main`), framework
+   **React**, build command `npm run build`, output directory `dist`.
+2. Deploy again whenever `.env.production` or the code changes: the address is baked
+   in at build time, so a change without a rebuild does nothing.
+3. The API must accept the site's address. Catalyst hosting addresses
+   (`*.catalystserverless.in`, `*.catalystslate.in`) are allowed automatically. For a
+   custom domain add it to `ALLOWED_ORIGINS` on Render, or a whole domain with
+   `ALLOWED_ORIGIN_SUFFIXES=.karunasadan.org`.
+4. Deep links (`/members/approved`) need the host to serve `index.html` for any
+   path, as a single-page app. If a refresh on a screen shows "not found", turn on
+   Slate's single-page-app / rewrite-to-index option.
+
+Signing in on a deployed site needs the **office passphrase** (`ADMIN_PASSPHRASE` on
+Render) and a real staff number. Until someone has a console role, only a member
+flagged `users.is_super_admin` in Catalyst can sign in. To try it before that, add
+`ENABLE_TEST_LOGIN=true` and `TEST_LOGIN_OTP=<a code you choose>` in Render's
+Environment tab, and remove them again before real use.
+
+---
+
 ## What to expect on a free tier
 
 **It sleeps.** Render's free plan stops the service after about fifteen minutes

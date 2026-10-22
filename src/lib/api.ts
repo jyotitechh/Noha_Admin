@@ -15,6 +15,12 @@
 const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '') + '/api';
 const TOKEN_KEY = 'ksm-admin-token';
 
+/* True when no API address was built in, so calls go to this page's own host. Fine on a
+   developer's machine (Vite forwards /api), wrong anywhere else: a static host such as
+   Catalyst Slate or Vercel has no /api and answers 404 or 405. */
+const CALLS_ITSELF = !import.meta.env.VITE_API_BASE;
+const ON_DEV_MACHINE = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+
 export const getToken = () => {
   try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
 };
@@ -80,6 +86,14 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
           }`,
       );
     }
+  }
+
+  if (!res.ok && body == null && CALLS_ITSELF && !ON_DEV_MACHINE && [404, 405].includes(res.status)) {
+    throw new ApiError(
+      res.status,
+      `This site has no server behind it. It sent the request to itself (${location.host}), and a site that only serves pages answers ${res.status}. ` +
+      'The console was built without VITE_API_BASE: set it to the API address and rebuild (docs/DEPLOY.md).',
+    );
   }
 
   if (!res.ok) {

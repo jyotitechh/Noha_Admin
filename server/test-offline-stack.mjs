@@ -596,6 +596,29 @@ section('Reading less, and seeing what was spent');
 }
 
 /* ================================================================== */
+section('Which sites may call the API from a browser');
+
+{
+  /* A browser asks first (a preflight), then sends the request only if the answer names its origin. */
+  const ask = async (origin) => {
+    const res = await fetch(BASE + '/auth/request-code', {
+      method: 'OPTIONS',
+      headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
+    });
+    return res.headers.get('access-control-allow-origin');
+  };
+  const slate = 'https://noah-console-60088815946.development.catalystserverless.in';
+  check('a site on Catalyst hosting (a Slate or Client Hosting address) may call it', (await ask(slate)) === slate, String(await ask(slate)));
+  check('...Slate\'s own domain too', (await ask('https://admin-1234.catalystslate.in')) === 'https://admin-1234.catalystslate.in');
+  check('the developer\'s own machine may', (await ask('http://localhost:5173')) === 'http://localhost:5173');
+  check('a Vercel build may', (await ask('https://noha-admin.vercel.app')) === 'https://noha-admin.vercel.app');
+  check('a stranger\'s site may not', (await ask('https://evil.example.com')) === null);
+  check('...nor one that only looks like Catalyst hosting', (await ask('https://catalystserverless.in.evil.com')) === null && (await ask('https://x.catalystserverless.in.evil.com')) === null);
+  check('...nor plain http on a Catalyst-looking host', (await ask('http://x.development.catalystserverless.in')) === null);
+  check('...nor a lookalike domain that merely ends in the same letters', (await ask('https://evilcatalystserverless.in')) === null);
+}
+
+/* ================================================================== */
 section('When Catalyst stops answering');
 
 const outage = (message) =>

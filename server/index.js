@@ -51,6 +51,13 @@ const ORIGINS = (process.env.ALLOWED_ORIGINS || '')
 
 const LOCAL = /^http:\/\/localhost:\d+$/;
 const VERCEL_PREVIEW = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
+/* Catalyst's own hosting (Slate, Client Hosting): <name>-<id>.<env>.catalystserverless.in or
+   catalystslate.in. The session is a Bearer header, never a cookie, so a page on one of
+   these cannot use anyone's session; it still has to sign in. ALLOWED_ORIGIN_SUFFIXES
+   (comma separated, e.g. .karunasadan.org) adds more. */
+const CATALYST_HOSTING = /^https:\/\/[a-z0-9.-]+\.(catalystserverless|catalystslate)\.(in|com|eu|com\.au)$/i;
+const SUFFIXES = (process.env.ALLOWED_ORIGIN_SUFFIXES || '')
+  .split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.startsWith('.') && s.length > 3);
 
 app.use(cors({
   origin(origin, cb) {
@@ -58,7 +65,9 @@ app.use(cors({
        there is no cross-origin question to answer. */
     if (!origin) return cb(null, true);
     const clean = origin.replace(/\/+$/, '');
-    if (ORIGINS.includes(clean) || LOCAL.test(clean) || VERCEL_PREVIEW.test(clean)) {
+    const host = (() => { try { return new URL(clean).hostname.toLowerCase(); } catch { return ''; } })();
+    if (ORIGINS.includes(clean) || LOCAL.test(clean) || VERCEL_PREVIEW.test(clean) || CATALYST_HOSTING.test(clean)
+        || (clean.startsWith('https://') && SUFFIXES.some((x) => host.endsWith(x)))) {
       return cb(null, true);
     }
     /* Refuse by not allowing, rather than by throwing: an error here becomes
