@@ -63,7 +63,15 @@ const CATALYST_HOSTING = /^https:\/\/[a-z0-9.-]+\.(catalystserverless|catalystsl
 const SUFFIXES = (process.env.ALLOWED_ORIGIN_SUFFIXES || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.startsWith('.') && s.length > 3);
 
-app.use(cors({
+/* On Catalyst AppSail the gateway in front answers CORS itself, for the domains listed under
+   Authentication → Authorised Domains, and adds the header to every reply. Sending ours too
+   gives the browser the header twice, which it refuses. So there ours stays out of it
+   (CORS_BY_GATEWAY=false puts it back). */
+const BEHIND_GATEWAY = process.env.CORS_BY_GATEWAY
+  ? String(process.env.CORS_BY_GATEWAY).toLowerCase() === 'true'
+  : !!process.env.X_ZOHO_CATALYST_LISTEN_PORT;
+
+const corsHandler = cors({
   origin(origin, cb) {
     /* No Origin header: curl, a health check, the tests. Not a browser, so
        there is no cross-origin question to answer. */
@@ -81,7 +89,8 @@ app.use(cors({
   /* The console sends the session as a Bearer header, not a cookie. */
   allowedHeaders: ['content-type', 'authorization'],
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-}));
+});
+if (!BEHIND_GATEWAY) app.use(corsHandler);
 app.use(express.json({ limit: '2mb' }));
 
 /* Small request log, so you can see the console talking to the API. */
