@@ -1,4 +1,4 @@
-# The Node API, for Render. The React console stays on Vercel.
+# The Node API, for Render. The React console is on Catalyst Slate (npm run deploy:slate).
 #
 # Render reads this when you create a Blueprint from the repository. Every
 # value below is safe to commit; every secret is marked `sync: false`, which
@@ -41,7 +41,7 @@ services:
         sync: false
 
       # --- who may call this API, and who may sign in -------------------
-      # Comma separated. Your Vercel domain, plus any custom domain later.
+      # Comma separated. The Slate address, plus any custom domain later.
       - key: ALLOWED_ORIGINS
         value: https://karuna-admin-tnzlnait.onslate.in
       # Without this, anyone who finds the URL can request a sign-in code and

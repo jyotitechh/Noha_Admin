@@ -43,14 +43,13 @@ const app = express();
    but there is no reason to let any site talk to this API, so it is a list.
 
    ALLOWED_ORIGINS is comma separated, e.g.
-     https://noha-admin.vercel.app,https://ksm-admin.karunasadan.org
-   Vercel preview deployments get their own URL per commit, so *.vercel.app
-   previews are allowed too — convenient, and they are your own builds. */
+     https://karuna-admin-tnzlnait.onslate.in,https://ksm-admin.karunasadan.org
+   Catalyst hosting and localhost are allowed without listing (below). Vercel is
+   not: the console no longer lives there. */
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
 
 const LOCAL = /^http:\/\/localhost:\d+$/;
-const VERCEL_PREVIEW = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 /* Catalyst's own hosting (Slate, Client Hosting): <name>-<id>.onslate.in (Slate), or
    <name>-<id>.<env>.catalystserverless.in / catalystslate.in. The session is a Bearer header, never a cookie, so a page on one of
    these cannot use anyone's session; it still has to sign in. ALLOWED_ORIGIN_SUFFIXES
@@ -66,7 +65,7 @@ app.use(cors({
     if (!origin) return cb(null, true);
     const clean = origin.replace(/\/+$/, '');
     const host = (() => { try { return new URL(clean).hostname.toLowerCase(); } catch { return ''; } })();
-    if (ORIGINS.includes(clean) || LOCAL.test(clean) || VERCEL_PREVIEW.test(clean) || CATALYST_HOSTING.test(clean)
+    if (ORIGINS.includes(clean) || LOCAL.test(clean) || CATALYST_HOSTING.test(clean)
         || (clean.startsWith('https://') && SUFFIXES.some((x) => host.endsWith(x)))) {
       return cb(null, true);
     }

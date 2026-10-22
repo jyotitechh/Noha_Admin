@@ -6,9 +6,9 @@
 /* Where the API lives.
 
    Empty in development: Vite proxies /api to localhost:4000, so same-origin.
-   In a deployment where the server is NOT on the same host — the console on
-   Vercel, the API elsewhere — set VITE_API_BASE at build time to that
-   server's origin, for example https://ksm-api.onrender.com
+   In a deployment where the server is NOT on the same host (the console on
+   Catalyst Slate, the API on Render) VITE_API_BASE is set at build time to that
+   server's origin; .env.production carries it.
 
    It is baked into the bundle at build time, so it must be a URL and never a
    secret. Anything the browser holds, anyone can read. */
@@ -17,7 +17,7 @@ const TOKEN_KEY = 'ksm-admin-token';
 
 /* True when no API address was built in, so calls go to this page's own host. Fine on a
    developer's machine (Vite forwards /api), wrong anywhere else: a static host such as
-   Catalyst Slate or Vercel has no /api and answers 404 or 405. */
+   Catalyst Slate has no /api and answers 404 or 405. */
 const CALLS_ITSELF = !import.meta.env.VITE_API_BASE;
 const ON_DEV_MACHINE = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 

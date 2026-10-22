@@ -613,7 +613,7 @@ section('Which sites may call the API from a browser');
   check('...a lookalike of it may not', (await ask('https://onslate.in.evil.com')) === null && (await ask('https://evilonslate.in')) === null);
   check('...Slate\'s other domain too', (await ask('https://admin-1234.catalystslate.in')) === 'https://admin-1234.catalystslate.in');
   check('the developer\'s own machine may', (await ask('http://localhost:5173')) === 'http://localhost:5173');
-  check('a Vercel build may', (await ask('https://noha-admin.vercel.app')) === 'https://noha-admin.vercel.app');
+  check('Vercel is no longer used, so its sites are not let in', (await ask('https://noha-admin.vercel.app')) === null && (await ask('https://anything.vercel.app')) === null);
   check('a stranger\'s site may not', (await ask('https://evil.example.com')) === null);
   check('...nor one that only looks like Catalyst hosting', (await ask('https://catalystserverless.in.evil.com')) === null && (await ask('https://x.catalystserverless.in.evil.com')) === null);
   check('...nor plain http on a Catalyst-looking host', (await ask('http://x.development.catalystserverless.in')) === null);
