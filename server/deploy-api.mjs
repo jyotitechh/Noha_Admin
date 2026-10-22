@@ -146,7 +146,10 @@ try {
     command: COMMAND, build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
   }, null, 2));
 
-  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "${COMMAND}" -ni`, work);
+  /* Run from INSIDE the app's folder: with no --source the CLI uploads the folder it is run
+     from, and run from `work` it uploaded an empty shell (a 677-byte archive), which is why
+     AppSail answered 503 "check the startup command or port" for every version before this. */
+  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "${COMMAND}" -ni`, api);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
