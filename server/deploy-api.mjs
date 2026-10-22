@@ -4,8 +4,8 @@
      npm run deploy:api -- --test-login also switch on the test accounts (for trying it out)
 
    Slate hosts the pages; AppSail runs this Node server. It sends what is COMMITTED
-   (`git archive HEAD`: server/, package.json, package-lock.json), installs the production
-   dependencies, and writes the server's settings into AppSail's own config.
+   (`git archive HEAD`: server/, package.json, package-lock.json), bundles it with esbuild
+   into a single api.mjs, and writes the server's settings into AppSail's own config.
 
    SECRETS never appear on screen or in the repository:
      - the Catalyst credentials are read from .env.local and checked first (an empty value, a
@@ -116,25 +116,37 @@ say(`Deploying: ${execSync('git log --oneline -1', { cwd: root }).toString().tri
 
 const work = mkdtempSync(join(tmpdir(), 'appsail-'));
 try {
+  const src = join(work, 'src');
   const api = join(work, 'api');
+  mkdirSync(src);
   mkdirSync(api);
   /* An archive file, unpacked from inside the folder: `tar -C <drive path>` misreads "C:" as a host. */
   const tarball = join(work, 'source.tar');
   execSync(`git archive --format=tar -o "${tarball}" HEAD server package.json package-lock.json`, { cwd: root });
-  run('tar -xf ../source.tar', api);
-  say('Installing the production dependencies…');
-  run('npm ci --omit=dev --no-audit --no-fund', api);
+  run('tar -xf ../source.tar', src);
+
+  /* The server goes up as ONE file with its dependencies folded in: AppSail then has no
+     node_modules to install or find, and starts it the same way it started here. */
+  say('Bundling the server into one file…');
+  const esbuild = join(root, 'node_modules', '.bin', 'esbuild').replace(/\\/g, '/');
+  const banner = "import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);";
+  const bundled = spawnSync(`"${esbuild}" server/index.js --bundle --platform=node --format=esm --target=node22 --outfile=../api/api.mjs --banner:js="${banner}" --log-level=warning`, {
+    cwd: src, shell: true, stdio: 'inherit', env: { ...cliEnv(), NODE_PATH: join(root, 'node_modules') },
+  });
+  if (bundled.status !== 0) fail('FAILED: bundling the server (run npm install first).');
+  writeFileSync(join(api, 'package.json'), JSON.stringify({ name: NAME, private: true, type: 'module' }, null, 2));
+  const COMMAND = 'node api.mjs 9000';
 
   say(`Project ${PROJECT}, organisation ${ORG}`);
   run(`catalyst init --project ${PROJECT} --org ${ORG} --dc ${DC} -ni`, work);
-  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api.replace(/\\/g, '/')}" --command "node server/index.js 9000" -ni`, work);
+  run(`catalyst appsail:add --name ${NAME} --stack node22 --source "${api.replace(/\\/g, '/')}" --command "${COMMAND}" -ni`, work);
 
   /* AppSail takes its settings from app-config.json. Written AFTER appsail:add, which makes it. */
   writeFileSync(join(api, 'app-config.json'), JSON.stringify({
-    command: 'node server/index.js 9000', build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
+    command: COMMAND, build_path: './', stack: 'node22', env_variables: settings, memory: 256, scripts: {},
   }, null, 2));
 
-  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "node server/index.js 9000" -ni`, work);
+  run(`catalyst deploy appsail --name ${NAME} --build-path ./ --stack node22 --command "${COMMAND}" -ni`, work);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
