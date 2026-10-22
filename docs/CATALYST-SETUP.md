@@ -16,6 +16,16 @@ disconnected: no id, credential or folder of it is left in the code or config.
 
 ## 1. A Self Client, once
 
+**The short way:** make the Self Client (steps 1 and 2 below), then run
+
+```
+npm run catalyst:connect
+```
+
+It asks for the Client ID, the Client Secret and the code (the secret and code are not
+shown as you type), writes them to `.env.local`, exchanges the code, reads back which
+scopes were granted, and shows what the project holds. Steps 3 onward are what it does.
+
 1. The Zoho account that owns the `noah` project (or one Shashank has added to
    it as a user) opens <https://api-console.zoho.in/> and makes a **Self Client**.
 2. Print the scopes to tick, and paste them as one comma-separated line:

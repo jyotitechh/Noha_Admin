@@ -33,9 +33,12 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 
 /* A very small .env reader, so there is no dependency for five values. */
+/* CATALYST_ENV_FILE points at another file, for tests: nothing else sets it. */
+const envFile = (name) => (process.env.CATALYST_ENV_FILE && name === '.env.local' ? resolve(process.env.CATALYST_ENV_FILE) : resolve(here, '..', name));
+
 function loadEnv() {
   for (const file of ['.env.local', '.env']) {
-    const path = resolve(here, '..', file);
+    const path = envFile(file);
     if (!existsSync(path)) continue;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -429,7 +432,7 @@ if (process.argv[2] === '--exchange') {
   /* Write it straight into .env.local. The code cannot be used twice, so
      printing it and hoping someone copies it correctly is one slip away from
      having to start over. */
-  const envPath = resolve(here, '..', '.env.local');
+  const envPath = envFile('.env.local');
   const line = `CATALYST_REFRESH_TOKEN=${body.refresh_token}`;
   let text = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
   text = /^CATALYST_REFRESH_TOKEN=.*$/m.test(text)

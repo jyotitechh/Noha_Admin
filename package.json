@@ -23,6 +23,8 @@
     "start": "node server/index.js",
     "check:schema": "node server/check-schema.mjs",
     "catalyst:columns": "node server/ensure-columns.mjs",
+    "catalyst:connect": "node server/connect.mjs",
+    "test:connect": "node server/test-connect.mjs",
     "test:schema": "node server/test-schema-offline.mjs",
     "dev:offline": "node server/dev-offline.mjs",
     "test:stack": "node server/test-offline-stack.mjs"
