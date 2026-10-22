@@ -107,6 +107,10 @@ if (testLogin) {
   settings.TEST_LOGIN_OTP = testCode.value;
 }
 for (const [k, v] of Object.entries(settings)) if (v === '') delete settings[k];
+/* AppSail rejects names starting CATALYST_ as reserved: send them as KSM_ (catalyst.js maps them back). */
+for (const k of Object.keys(settings)) {
+  if (k.startsWith('CATALYST_')) { settings['KSM_' + k.slice('CATALYST_'.length)] = settings[k]; delete settings[k]; }
+}
 
 /* ---------- stage and deploy ---------- */
 

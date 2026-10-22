@@ -49,6 +49,14 @@ function loadEnv() {
 }
 loadEnv();
 
+/* Catalyst AppSail refuses settings whose names start CATALYST_ ("reserved keywords"), so
+   there they are given as KSM_PROJECT_ID, KSM_CLIENT_SECRET, ... and read here as the
+   CATALYST_ ones the rest of the server (and .env.local) uses. A CATALYST_ one that is
+   already set wins. */
+for (const [k, v] of Object.entries(process.env)) {
+  if (k.startsWith('KSM_') && v && !process.env['CATALYST_' + k.slice(4)]) process.env['CATALYST_' + k.slice(4)] = v;
+}
+
 const ACCOUNTS = process.env.CATALYST_ACCOUNTS_HOST || 'https://accounts.zoho.in';
 const API = process.env.CATALYST_API_HOST || 'https://api.catalyst.zoho.in';
 
