@@ -21,6 +21,7 @@ import { demoMode, DEMO_MOBILE } from './demo.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
 import { check, explainCatalyst, usage, ENVIRONMENT, PROJECT_ID } from './catalyst.js';
 import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from './noah-schema.js';
+import { noahConfigured } from './noah-api.js';
 import { queuesFor } from './queues.js';
 import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
@@ -140,7 +141,9 @@ async function catalystState(force = false) {
    It used to make a Data Store fetch every thirty seconds, around the clock.
    That is roughly three thousand fetches a day spent to learn nothing. */
 app.get('/api/health', async (req, res) => {
-  const base = { ok: true, at: now(), dataSource: source() };
+  /* noahApi: whether the Noah API key is set, i.e. whether a decision can reach the member's phone.
+     A yes or no only; the key itself never leaves the server. */
+  const base = { ok: true, at: now(), dataSource: source(), noahApi: noahConfigured() };
   /* What this process has spent of Catalyst's free allowance since it started. Free to ask. */
   if (live()) base.catalystSpent = usage();
   if (!live()) {
