@@ -81,7 +81,10 @@ export function Upload({ registrationId, kind, filename, seconds, sizeKb, auto =
     return (
       <div>
         {kind === 'video' ? (
-          <video src={src} controls preload="metadata" style={{ width: '100%', maxHeight: 340, borderRadius: 10, background: '#000' }} />
+          /* The whole file is already here (a blob), so load it and show the first frame
+             (#t=0.1): with only the metadata loaded the player sat black at 0:00 and
+             looked as if the video were missing. */
+          <video src={src + '#t=0.1'} controls preload="auto" playsInline style={{ width: '100%', maxHeight: 340, borderRadius: 10, background: '#000' }} />
         ) : (
           <img
             src={src}
