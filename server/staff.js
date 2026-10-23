@@ -16,7 +16,7 @@
    are not staff any more. */
 
 import { db, roleById } from './db.js';
-import { demoMode, DEMO_CODE } from './demo.js';
+import { demoMode, codeOnScreen, DEMO_CODE } from './demo.js';
 import { live, isNoah, staffByEmail, allStaff } from './store.js';
 import {
   mobileKey, findStaffByMobile, findStaffByEmail, loadStaffDirectory, consoleStaffEnabled, touchStaffSignIn,
@@ -43,7 +43,7 @@ export const testOtp = () =>
 
 export const testLoginEnabled = () => {
   if (flag() === 'false') return false;
-  if (demoMode()) return true;
+  if (demoMode() || codeOnScreen()) return true;
   if (production()) return flag() === 'true' && !!testOtp();
   return true;
 };

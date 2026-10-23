@@ -2,6 +2,9 @@
 
      npm run deploy:api                 deploy what is committed
      npm run deploy:api -- --test-login also switch on the test accounts (for trying it out)
+     npm run deploy:api -- --code-on-screen  sign-in as on localhost: no passphrase, a random
+                                        code shown on the page (anyone with a staff or test
+                                        number can sign in; see server/demo.js)
 
    Slate hosts the pages; AppSail runs this Node server. It sends what is COMMITTED
    (`git archive HEAD`: server/, package.json, package-lock.json), bundles it with esbuild
@@ -34,6 +37,8 @@ const NAME = process.env.APPSAIL_NAME || 'karuna-api';
 const DC = process.env.SLATE_DC || 'in';
 const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-eayoyuuw.onslate.in';
 const testLogin = process.argv.includes('--test-login');
+/* Sign-in as on localhost: no passphrase, a fresh random code shown on the page (see demo.js). */
+const onScreen = process.argv.includes('--code-on-screen');
 
 const say = (s) => console.log(`\n  ${s}`);
 const fail = (s) => { console.error(`\n  ${s}\n`); process.exit(1); };
@@ -101,7 +106,10 @@ for (const k of ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'
   if (envFile[k]) settings[k] = envFile[k];
 }
 let testCode = null;
-if (testLogin) {
+if (onScreen) {
+  settings.SHOW_CODE_ON_SCREEN = 'true';
+  delete settings.ADMIN_PASSPHRASE;
+} else if (testLogin) {
   testCode = kept('ksm-test-code.txt', () => String(randomInt(100000, 999999)), (v) => /^\d{6}$/.test(v));
   settings.ENABLE_TEST_LOGIN = 'true';
   settings.TEST_LOGIN_OTP = testCode.value;
@@ -161,6 +169,6 @@ try {
 console.log(`
   Deployed. The address is printed above.
 
-  The office passphrase is in:   ${passphrase.path}${passphrase.fresh ? '   (new)' : ''}
+${onScreen ? '  Sign-in: no passphrase; the code is shown on the page.' : `  The office passphrase is in:   ${passphrase.path}${passphrase.fresh ? '   (new)' : ''}`}
 ${testCode ? `  The test sign-in code is in:   ${testCode.path}${testCode.fresh ? '   (new)' : ''}\n` : ''}  Read a file with:  cat <that path>   Nothing was printed here.
 `);

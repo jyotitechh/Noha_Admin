@@ -14,5 +14,12 @@
 
 export const demoMode = () => String(process.env.DEMO_MODE ?? '').trim().toLowerCase() === 'true';
 
+/* SHOW_CODE_ON_SCREEN=true: sign-in behaves as it does on localhost, on the REAL data.
+   No passphrase; every request gets a fresh random code (the test accounts too, never a
+   fixed one), and it is shown on the page because nothing texts or emails it. Asked for by
+   the office knowing that anyone who knows a staff number (or a test number) can then sign
+   in. Setting up email or SMS (docs/CONSOLE-ACCESS.md) and switching this off closes that. */
+export const codeOnScreen = () => String(process.env.SHOW_CODE_ON_SCREEN ?? '').trim().toLowerCase() === 'true';
+
 export const DEMO_CODE = '123456';
 export const DEMO_MOBILE = '+91 90000 00001';

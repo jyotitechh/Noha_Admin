@@ -18,7 +18,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, roleById } from './db.js';
 import { allStaff, live } from './store.js';
-import { demoMode } from './demo.js';
+import { demoMode, codeOnScreen } from './demo.js';
 import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
 import { channels, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
 
@@ -88,7 +88,7 @@ const sixDigits = () => String(Math.floor(100000 + Math.random() * 900000));
 /* Trimmed on both sides. A value pasted into a host's dashboard often carries a trailing
    space or line break nobody can see, and a person typing it on the sign-in screen may add
    one too. Neither should make the right passphrase look wrong. */
-const PASSPHRASE = () => (demoMode() ? '' : String(process.env.ADMIN_PASSPHRASE || '').trim());
+const PASSPHRASE = () => (demoMode() || codeOnScreen() ? '' : String(process.env.ADMIN_PASSPHRASE || '').trim());
 export const passphraseRequired = () => !!PASSPHRASE();
 
 /* Slow down guessing. One instance, in memory: enough for a shared
@@ -216,7 +216,7 @@ export async function requestCode({ mobile, email } = {}) {
 
   /* Neither a real channel nor a gate: the code would go to whoever asked.
      That is only ever the prototype's behaviour on someone's own machine. */
-  if (!isTest && !delivering && production() && !passphraseRequired()) {
+  if (!isTest && !delivering && production() && !passphraseRequired() && !codeOnScreen()) {
     return {
       ok: false, status: 503,
       error: `Codes cannot be ${via === 'sms' ? 'texted' : 'emailed'} yet: ${via === 'sms' ? 'SMS' : 'email'} is not set up on this server.`
@@ -229,7 +229,8 @@ export async function requestCode({ mobile, email } = {}) {
     if (wait) return { ok: false, ...wait };
   }
 
-  const code = isTest ? testOtp() : sixDigits();
+  /* With the code on screen there is no fixed code at all, not even for the test accounts. */
+  const code = isTest && !codeOnScreen() ? testOtp() : sixDigits();
   const to = via === 'sms' ? e164(key) : key;
 
   if (delivering) {
@@ -262,7 +263,7 @@ export async function requestCode({ mobile, email } = {}) {
     resendAfterSeconds: delivering ? RESEND_AFTER_MS / 1000 : undefined,
     /* Only when nothing was sent. Test accounts in production do not get it:
        whoever is testing knows the code. */
-    devCode: delivering || (isTest && production()) ? undefined : code,
+    devCode: delivering || (isTest && production() && !codeOnScreen()) ? undefined : code,
     expiresInSeconds: CODE_TTL_MS / 1000,
   };
 }

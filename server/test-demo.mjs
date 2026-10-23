@@ -42,6 +42,21 @@ await withServer({
   check('123456 signs in', ok.status === 200 && !!ok.json.token);
 });
 
+console.log('\nCode on screen (as on localhost)\n' + '─'.repeat(64));
+
+await withServer({ SHOW_CODE_ON_SCREEN: 'true', ADMIN_PASSPHRASE: 'would-be-asked', ENABLE_TEST_LOGIN: 'true', TEST_LOGIN_OTP: '111111' }, async () => {
+  const meta = await (await fetch(base + '/meta')).json();
+  check('asks for no passphrase', meta.passphraseRequired === false);
+  check('shows no demo code on the sign-in page', meta.demo === undefined);
+  const asked = await post('/auth/request-code', { mobile: '+91 90000 00001' });
+  const code = asked.json.devCode;
+  check('a code is requested and shown on screen', asked.status === 200 && /^\d{6}$/.test(code || ''), JSON.stringify(asked.json));
+  const fixed = await post('/auth/verify', { mobile: '+91 90000 00001', code: '111111' });
+  check('the fixed test code is NOT accepted', fixed.status === 400 || code === '111111');
+  await post('/auth/request-code', { mobile: '+91 90000 00001' }).then((r) => { check('each request gets its own code', !!r.json.devCode); return post('/auth/verify', { mobile: '+91 90000 00001', code: r.json.devCode }); })
+    .then((ok) => check('the code shown signs in', ok.status === 200 && !!ok.json.token, JSON.stringify(ok.json)));
+});
+
 await withServer({ ADMIN_PASSPHRASE: 'keep-out-1234' }, async () => {
   const meta = await (await fetch(base + '/meta')).json();
   check('without DEMO_MODE there is no demo sign-in', meta.demo === undefined);
