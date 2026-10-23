@@ -9,7 +9,7 @@
    video it has watched. */
 
 import { useEffect, useRef, useState } from 'react';
-import { getToken } from '@/lib/api';
+import { apiUrl, getToken } from '@/lib/api';
 import { Icon, Note } from './ui';
 
 type Kind = 'id' | 'photo' | 'video';
@@ -43,7 +43,8 @@ export function Upload({ registrationId, kind, filename, seconds, sizeKb, auto =
     setState('loading');
     setError('');
     try {
-      const res = await fetch(`/api/registrations/${registrationId}/file/${kind}`, {
+      /* Through apiUrl, not a bare /api path: on Slate that would ask the static site for the file. */
+      const res = await fetch(apiUrl(`/registrations/${registrationId}/file/${kind}`), {
         headers: { authorization: 'Bearer ' + getToken() },
       });
       if (!res.ok) {

@@ -21,6 +21,10 @@ const TOKEN_KEY = 'ksm-admin-token';
 const CALLS_ITSELF = !import.meta.env.VITE_API_BASE;
 const ON_DEV_MACHINE = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 
+/** The full address of an API path, for the rare call that cannot go through `api`
+    (a file read as a blob). Same base, so it works on Slate as well as locally. */
+export const apiUrl = (path: string) => BASE + path;
+
 export const getToken = () => {
   try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
 };
