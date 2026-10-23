@@ -596,6 +596,51 @@ section('Reading less, and seeing what was spent');
 }
 
 /* ================================================================== */
+section('Telling the member about a decision (ADMIN_INTEGRATION.md)');
+
+if (!NO_KEY) {
+  /* The registration approved earlier in this run was decided THROUGH the API, which told the member then. */
+  const toldAlready = await call('POST', `/registrations/${a.id}/notify`, {}, BT);
+  check('asking again for a member already told says so, and is fine', toldAlready.status === 200 && /already been told/i.test(toldAlready.body?.message || '') && toldAlready.body?.delivered === true, `${toldAlready.status} ${toldAlready.text.slice(0, 160)}`);
+
+  /* One decided without the API (the fixture's own approved registration): nobody was told yet. */
+  const first = await call('POST', `/registrations/${APPROVED_REG}/notify`, {}, BT);
+  check('a decision stored without the API can be told to the member', first.status === 200 && /1 phone/.test(first.body?.message || '') && first.body?.delivered === true, `${first.status} ${first.text.slice(0, 160)}`);
+  const second = await call('POST', `/registrations/${APPROVED_REG}/notify`, {}, BT);
+  check('...once: the second ask says they were already told', /already been told/i.test(second.body?.message || ''), second.text.slice(0, 160));
+
+  const pending = await submit('Notify');
+  const early = await call('POST', `/registrations/${pending.id}/notify`, {}, BT);
+  check('there is nothing to tell about a registration not yet decided (409)', early.status === 409, `${early.status} ${early.text.slice(0, 120)}`);
+
+  check('the decision replies say what reached the member', typeof ok.body?.notifiedText === 'string' && ok.body.notifiedText.length > 0, JSON.stringify(ok.body));
+}
+check('telling a member needs the permission to edit members',
+  (await call('POST', `/registrations/${APPROVED_REG}/notify`, {}, verifier.token)).status === 403);
+check('...and a sign-in', (await call('POST', `/registrations/${APPROVED_REG}/notify`, {})).status === 401);
+const audited = await call('GET', '/data/AUD?limit=200', null, BT);
+if (!NO_KEY) check('telling the member is in the audit log', (audited.body?.rows || []).some((x) => /Told the member/.test(x.action || x.act || '')), JSON.stringify((audited.body?.rows || []).slice(0, 2)).slice(0, 200));
+
+section('Who looks after a member: pastor and cell leader');
+
+const withChoices = await call('GET', `/people/${ANAND_ID}`, null, BT);
+const pastors = withChoices.body?.pastoralChoices?.pastors || [];
+check('the person page offers who can be picked as a pastor', pastors.some((p) => p.name === 'Fr Thomas'), JSON.stringify(withChoices.body?.pastoralChoices));
+check('...but not to someone who may only view members', (await call('GET', `/people/${ANAND_ID}`, null, verifier.token)).status === 403
+  || !(await call('GET', `/people/${ANAND_ID}`, null, verifier.token)).body?.pastoralChoices);
+const thomas = pastors.find((p) => p.name === 'Fr Thomas')?.rowId;
+
+const cleared = await call('PATCH', `/people/${ANAND_ID}/pastoral`, { pastor: null }, BT);
+check('the pastor can be cleared', cleared.status === 200 && cleared.body?.person?.pastoral?.pastor === null, `${cleared.status} ${cleared.text.slice(0, 200)}`);
+const set = await call('PATCH', `/people/${ANAND_ID}/pastoral`, { pastor: thomas }, BT);
+check('...and set again, which the app reads from connectedPastor', set.status === 200 && set.body?.person?.pastoral?.pastor?.name === 'Fr Thomas', `${set.status} ${set.text.slice(0, 200)}`);
+check('someone who is not a pastor cannot be picked (400)', (await call('PATCH', `/people/${ANAND_ID}/pastoral`, { pastor: ANAND_ID }, BT)).status === 400);
+check('a pastor is not accepted as a cell leader (400)', (await call('PATCH', `/people/${ANAND_ID}/pastoral`, { leader: thomas }, BT)).status === 400);
+check('an empty change is refused (400)', (await call('PATCH', `/people/${ANAND_ID}/pastoral`, {}, BT)).status === 400);
+check('it needs the permission to edit members', (await call('PATCH', `/people/${ANAND_ID}/pastoral`, { pastor: thomas }, verifier.token)).status === 403);
+const care = await call('GET', '/data/AUD?limit=200', null, BT);
+check('changing it is in the audit log', (care.body?.rows || []).some((x) => /Changed pastoral care/.test(x.action || x.act || '')), JSON.stringify((care.body?.rows || []).slice(0, 2)).slice(0, 200));
+
 section('Which sites may call the API from a browser');
 
 {

@@ -62,6 +62,8 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 /* ---------- a stand-in for the Noah API, from ADMIN_INTEGRATION.md ---------- */
 
 const find = (id) => tables[T.appRegistrations].find((r) => r.ROWID === id);
+/* Registrations whose member the fake Noah API has already told. */
+const told = new Set();
 const send = (res, status, body, headers = {}) => {
   const isBuf = Buffer.isBuffer(body);
   res.writeHead(status, { 'content-type': isBuf ? 'application/octet-stream' : 'application/json', ...headers });
@@ -141,11 +143,23 @@ http.createServer(async (req, res) => {
     return send(res, 200, Buffer.from(`FAKE-${meta.purpose || 'file'}-BYTES`), { 'content-type': meta.mimeType || 'application/octet-stream' });
   }
 
+  /* ADMIN_INTEGRATION.md: notify tells the member about a decision ALREADY stored, once. A decision
+     made through the API tells them at the time, so it is recorded here and asking again says so. */
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/registrations\/(\d+)\/notify$/))) {
+    const r = find(m[1]);
+    if (!r) return err(res, 404, 'registration_not_found', 'No such registration.');
+    if (r.status === 'pending' || r.status === 'draft') return err(res, 409, 'not_decided', 'There is no decision to tell them about.');
+    if (told.has(m[1])) return send(res, 200, { id: r.ROWID, status: r.status, alreadySent: true });
+    told.add(m[1]);
+    return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 1, emailed: false } });
+  }
+
   if (req.method === 'POST' && (m = path.match(/^\/admin\/registrations\/(\d+)\/(approve|reject|return-video)$/))) {
     const r = find(m[1]);
     if (!r) return err(res, 404, 'registration_not_found', 'No such registration.');
     /* "A registration can be decided once. A second call returns 409." */
     if (r.status !== 'pending') return err(res, 409, 'not_pending', 'Already decided.');
+    told.add(m[1]);
 
     r.reviewedAt = stamp();
     r.reviewNote = body.note || '';

@@ -21,7 +21,7 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields } from '../noah-schema.js';
+import { updateMemberFields, pastoralChoices, setPastoral } from '../noah-schema.js';
 import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
 import { can, roleById } from '../db.js';
 import { explainCatalyst } from '../catalyst.js';
@@ -71,11 +71,58 @@ function shape(p, role) {
   return out;
 }
 
+/** The person, plus who the office may pick as their pastor and cell leader (editors only). */
+async function withChoices(p, role) {
+  const out = shape(p, role);
+  if (live() && isNoah() && can(role, 'members.edit')) out.pastoralChoices = await pastoralChoices();
+  return out;
+}
+
 export default function mountPeople(app, { requireSession, requirePerm }) {
   app.get('/api/people/:id', requireSession, requirePerm('members.view'), async (req, res) => {
     const p = await personProfile(req.params.id);
     if (!p) return res.status(404).json({ error: 'No such member.' });
-    res.json(shape(p, req.session.role));
+    res.json(await withChoices(p, req.session.role));
+  });
+
+  /* Assign a member's pastor and / or cell leader. Written to the columns the Noah app
+     reads (membersExtra.connectedPastor / connectedLeader), so the member's Messages and
+     Me tab change within about 20 seconds. Send only what changes; null clears one. */
+  app.patch('/api/people/:id/pastoral', requireSession, requirePerm('members.edit'), async (req, res) => {
+    if (!(live() && isNoah())) {
+      return res.status(409).json({ error: 'Assigning a pastor needs the Catalyst connection. The sample data cannot be saved.' });
+    }
+    const body = req.body || {};
+    const change = {};
+    if ('pastor' in body) change.pastor = body.pastor;
+    if ('leader' in body) change.leader = body.leader;
+    if (!Object.keys(change).length) return res.status(400).json({ error: 'Nothing to save.' });
+
+    try {
+      const before = await personProfile(req.params.id);
+      if (!before) return res.status(404).json({ error: 'No such member.' });
+      const { changed } = await setPastoral(req.params.id, change);
+      const after = await personProfile(req.params.id);
+      const name = (l) => l?.name || '(none)';
+      if (changed.length) {
+        await writeAudit({
+          actor: req.user.name, role: roleById(req.session.role).name,
+          action: 'Changed pastoral care', module: 'Membership', record: before.member.id,
+          before: { Pastor: name(before.pastoral.pastor), 'Cell leader': name(before.pastoral.cellLeader) },
+          after: { Pastor: name(after.pastoral.pastor), 'Cell leader': name(after.pastoral.cellLeader) },
+          remark: '', ip: req.ip || '',
+        });
+      }
+      res.json({ ok: true, changed, person: await withChoices(after, req.session.role) });
+    } catch (err) {
+      if (['not_a_pastor', 'not_a_leader', 'self'].includes(err.code)) return res.status(400).json({ error: err.message, code: err.code });
+      if (err.code === 'not_found') return res.status(404).json({ error: 'No such member.' });
+      const explained = explainCatalyst(err);
+      res.status(explained?.status ?? 502).json({
+        error: explained?.message ?? `Catalyst refused the change: ${err.message}`,
+        ...(explained ? { code: explained.code } : {}),
+      });
+    }
   });
 
   /* Reveal the contact details. Written to the audit log every time. */

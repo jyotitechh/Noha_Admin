@@ -40,6 +40,8 @@ interface Profile {
   registrationHidden?: boolean;
   earlier: { id: string; state: string; at: Date | null; remark: string }[];
   pastoral: { pastor: Link | null; cellLeader: Link | null; cell: string | null };
+  /* Who may be picked, for someone who may edit members. */
+  pastoralChoices?: { pastors: Link[]; leaders: Link[] };
   partnership: { isPartner: boolean; expiresOn: Date | null };
   family: { recorded: boolean; why?: string; rows: { rowId: string; name: string; rel?: string; age?: number; kid?: boolean }[] };
   groups: { recorded: boolean; why?: string; rows: { rowId: string; name: string }[] };
@@ -68,6 +70,8 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [contact, setContact] = useState<{ mobile: string; email: string; address: string } | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [telling, setTelling] = useState(false);
+  const [savingCare, setSavingCare] = useState(false);
 
   if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
   if (!q.data) return <Loading what="this person" />;
@@ -86,6 +90,37 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
     }
   }
   const s = registration ? STATE_CHIP[registration.state] : null;
+
+  /* The decision is stored; this makes sure the member has been told (push, or email if no
+     phone could be reached). The Noah API tells each member once, so repeating is harmless. */
+  async function tell() {
+    if (!registration) return;
+    setTelling(true);
+    try {
+      const r = await api.post<{ message: string; delivered: boolean }>(`/registrations/${registration.id}/notify`, {});
+      toast(r.message, r.delivered ? 'ok' : 'warn');
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setTelling(false);
+    }
+  }
+
+  /* Pastor and cell leader: written to the columns the Noah app reads, so the member's
+     Messages and Me tab change within about 20 seconds. */
+  async function assign(who: 'pastor' | 'leader', rowId: string) {
+    setSavingCare(true);
+    try {
+      await api.patch(`/people/${memberRowId}/pastoral`, { [who]: rowId || null });
+      toast(who === 'pastor' ? 'Pastor saved. The app shows it within a minute.' : 'Cell leader saved. The app shows it within a minute.');
+      q.reload();
+      onChanged?.();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setSavingCare(false);
+    }
+  }
 
   return (
     <div className="stack">
@@ -156,6 +191,14 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
             <div className="card pad mt8">
               <Steps r={registration} auto />
             </div>
+            {registration.state !== 'pending' && registration.state !== 'draft' && can('members.edit') && (
+              <div className="mt8">
+                <Btn icon="bell" disabled={telling} onClick={tell}>{telling ? 'Telling them…' : 'Tell the member'}</Btn>
+                <span className="xs muted" style={{ marginLeft: 8 }}>
+                  Sends the push notification for this decision (an email if no phone can be reached). Each member is told once.
+                </span>
+              </div>
+            )}
           </>
         ) : q.data.registrationHidden ? (
           <Note tone="mute" icon="lock">
@@ -193,6 +236,32 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
           ['Cell leader', pastoral.cellLeader ? <b key="l">{pastoral.cellLeader.name}</b> : <span className="muted">Not assigned</span>],
           ...(pastoral.cell ? [['Cell', pastoral.cell] as [string, string]] : []),
         ]} />
+        {q.data.pastoralChoices && (
+          <div className="mt8 stack" style={{ gap: 8 }}>
+            {([
+              ['pastor', 'Change pastor', pastoral.pastor, q.data.pastoralChoices.pastors, 'No one has the pastor role yet. Give it under App roles first.'],
+              ['leader', 'Change cell leader', pastoral.cellLeader, q.data.pastoralChoices.leaders, 'No one is a cell leader yet. Give the role under App roles first.'],
+            ] as const).map(([who, label, now, options, none]) => (
+              <label key={who} className="fld">
+                <span className="lbl">{label}</span>
+                {options.length === 0 ? (
+                  <span className="xs muted">{none}</span>
+                ) : (
+                  <select
+                    className="inp"
+                    disabled={savingCare}
+                    value={now?.rowId ?? ''}
+                    onChange={(e) => assign(who, e.target.value)}
+                  >
+                    <option value="">Not assigned</option>
+                    {options.filter((o) => o.rowId !== memberRowId).map((o) => <option key={o.rowId} value={o.rowId}>{o.name}</option>)}
+                  </select>
+                )}
+              </label>
+            ))}
+            <span className="xs muted">The Noah app reads this: the pastor is listed first in the member's messages, and the cell leader opens their cell chat.</span>
+          </div>
+        )}
       </section>
 
       {/* ---------- partnership ---------- */}

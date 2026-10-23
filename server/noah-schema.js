@@ -566,6 +566,54 @@ async function ensureExtra(memberRowId) {
   return fresh;
 }
 
+/* ---------- who looks after a member ----------
+
+   The app reads two columns on membersExtra: `connectedPastor` (the member's own pastor,
+   listed first in their Messages and shown on their Me tab) and `connectedLeader` (their
+   cell leader; without it the cell-leader chat is hidden). Each is the ROWID of another
+   member. A pastor is a member whose `memberType` is 'pastor'; a leader has `isLeader`.
+   There is no API call for this: the console writes the columns and the app picks the
+   change up within about 20 seconds. */
+
+/** Who can be chosen as a pastor, and who as a cell leader. */
+export async function pastoralChoices() {
+  const { members, extras } = await snapshot();
+  const extraOf = new Map(extras.map((x) => [String(x.id), x]));
+  const live = (m) => !asBool(m.archived);
+  const pick = (m) => ({ rowId: String(m.ROWID), name: memberFullName(m) });
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  return {
+    pastors: members.filter((m) => live(m) && String(m.memberType || '').toLowerCase() === 'pastor').map(pick).sort(byName),
+    leaders: members.filter((m) => live(m) && asBool(extraOf.get(String(m.ROWID))?.isLeader)).map(pick).sort(byName),
+  };
+}
+
+/**
+ * Set a member's pastor and / or cell leader. Pass only what changes; `null` clears one.
+ * Throws { code: 'not_found' | 'not_a_pastor' | 'not_a_leader' | 'self' }.
+ */
+export async function setPastoral(memberRowId, { pastor, leader } = {}) {
+  const { members } = await snapshot();
+  if (!members.some((m) => same(m.ROWID, memberRowId))) throw Object.assign(new Error('No such member.'), { code: 'not_found' });
+
+  const { pastors, leaders } = await pastoralChoices();
+  const write = {};
+  const check = (value, list, code, what) => {
+    if (value == null || value === '') return null;
+    if (same(value, memberRowId)) throw Object.assign(new Error(`A member cannot be their own ${what}.`), { code: 'self' });
+    if (!list.some((p) => same(p.rowId, value))) throw Object.assign(new Error(`That person is not a ${what}. Give them the ${what} role first.`), { code });
+    return String(value);
+  };
+  if (pastor !== undefined) write.connectedPastor = check(pastor, pastors, 'not_a_pastor', 'pastor');
+  if (leader !== undefined) write.connectedLeader = check(leader, leaders, 'not_a_leader', 'cell leader');
+  if (!Object.keys(write).length) return { changed: [] };
+
+  const extra = await ensureExtra(memberRowId);
+  await io.update(T.membersExtra, { ROWID: String(extra.ROWID), ...write });
+  clearCache();
+  return { changed: Object.keys(write) };
+}
+
 /** The members row for a number, or create the user, member and extra rows. */
 export async function findOrCreateMember(mobile, details = {}) {
   const { cc, number } = splitPhone(mobile);

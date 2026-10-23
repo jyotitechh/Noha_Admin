@@ -23,6 +23,9 @@ import { Upload } from '@/components/Upload';
 const LANG = { en: 'English', hi: 'हिन्दी Hindi', mr: 'मराठी Marathi' } as const;
 
 /* The six steps, in the app's order, as the member worked through them. */
+/** What the server says about telling the member, after a decision. Absent without the Noah API. */
+interface Told { notifiedText?: string; delivered?: boolean }
+
 export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) {
   return (
     <div>
@@ -227,16 +230,17 @@ export default function Registrations() {
   async function approve(r: Registration) {
     setBusy(true);
     try {
-      const res = await api.post<{ member: { id: string; name?: string }; warning?: string }>(
+      const res = await api.post<{ member: { id: string; name?: string }; warning?: string } & Told>(
         `/registrations/${r.id}/approve`,
         { loc: onCatalyst ? undefined : loc || undefined },
       );
       /* The reply names the member only in the sample data; on Catalyst it
          carries their id. The name is the one already on screen. */
-      await afterDecision(`${r.fullName} is now a member (${res.member.id}). The app opens for them.`);
+      await afterDecision(`${r.fullName} is now a member (${res.member.id}). The app opens for them. ${res.notifiedText ?? ''}`.trim());
       /* Approved, but the member was not told: say so, rather than leaving the
-         office to assume an email went out. */
+         office to assume a notification went out. */
       if (res.warning) toast(res.warning, 'warn');
+      else if (res.delivered === false) toast(res.notifiedText ?? 'The member could not be reached.', 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -249,9 +253,10 @@ export default function Registrations() {
     if (!remark.trim()) return;
     setBusy(true);
     try {
-      const res = await api.post<{ warning?: string }>(`/registrations/${r.id}/return-video`, { remark: remark.trim() });
-      await afterDecision(`The video went back to ${r.fullName}. They can re-record it in the app.`);
+      const res = await api.post<{ warning?: string } & Told>(`/registrations/${r.id}/return-video`, { remark: remark.trim() });
+      await afterDecision(`The video went back to ${r.fullName}. They can re-record it in the app. ${res.notifiedText ?? ''}`.trim());
       if (res.warning) toast(res.warning, 'warn');
+      else if (res.delivered === false) toast(res.notifiedText ?? 'The member could not be reached.', 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -264,9 +269,10 @@ export default function Registrations() {
     if (!remark.trim()) return;
     setBusy(true);
     try {
-      const res = await api.post<{ warning?: string }>(`/registrations/${r.id}/reject`, { remark: remark.trim() });
-      await afterDecision(`${r.fullName}'s registration was rejected.`);
+      const res = await api.post<{ warning?: string } & Told>(`/registrations/${r.id}/reject`, { remark: remark.trim() });
+      await afterDecision(`${r.fullName}'s registration was rejected. ${res.notifiedText ?? ''}`.trim());
       if (res.warning) toast(res.warning, 'warn');
+      else if (res.delivered === false) toast(res.notifiedText ?? 'The member could not be reached.', 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {

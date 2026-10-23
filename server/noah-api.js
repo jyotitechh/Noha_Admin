@@ -129,6 +129,31 @@ export const returnVideo = (id, { actor, note }) =>
     method: 'POST', actor, body: { note },
   });
 
+/**
+ * Tell the member about a decision that is ALREADY stored.
+ *
+ * For a registration decided without the API (the key was not set at the time, so the
+ * table was written and nobody was told). Sends the push, and the email if no phone could
+ * be reached. Each member is told once: asking again answers `{ alreadySent: true }`.
+ * Prefer approve / reject / returnVideo, which decide AND tell in one call.
+ */
+export const notify = (id, { actor } = {}) =>
+  call(`/admin/registrations/${encodeURIComponent(id)}/notify`, { method: 'POST', actor, body: {} });
+
+/**
+ * What a `notified` answer means, in a sentence the office can read, and whether it is
+ * good news. The API answers `{ pushed: <phones reached>, emailed: <bool> }`; an approval
+ * emails only when no phone could be reached.
+ */
+export function describeNotified(n) {
+  if (!n || typeof n !== 'object') return { text: '', ok: true, known: false };
+  if (n.alreadySent) return { text: 'The member had already been told.', ok: true, known: true };
+  const phones = Number(n.pushed) || 0;
+  if (phones > 0) return { text: `Push notification sent to ${phones} phone${phones === 1 ? '' : 's'}.`, ok: true, known: true };
+  if (n.emailed) return { text: 'No phone could be reached, so they were emailed.', ok: true, known: true };
+  return { text: 'The member could not be reached: no phone with the app and no email.', ok: false, known: true };
+}
+
 /* ---------- roles ----------
 
    POST /admin/members/:id/roles  { pastor?: boolean, admin?: boolean }

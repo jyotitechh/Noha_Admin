@@ -102,3 +102,46 @@ endpoint to ask the Catalyst developer for.
 | `404 registration_not_found` | Noah has no registration with that id |
 | `409 not_pending` | already decided; passed through as 409, not an error |
 | `503 server_misconfigured` | their service's settings are incomplete |
+
+---
+
+## Telling the member: push first, email as the fallback
+
+(From the newer ADMIN_INTEGRATION.md.) When the office decides on a registration, the Noah API
+updates it and tells the member: a **push notification** to their phone (Firebase), and an
+**email only if no phone could be reached**. The console never edits the registration status in
+the table to decide, because that notifies nobody.
+
+| Console action | Noah API call | What the office sees afterwards |
+|---|---|---|
+| Approve | `POST /admin/registrations/:id/approve` | "Push notification sent to N phones", or "No phone could be reached, so they were emailed", or a warning that nobody could be reached |
+| Reject | `POST /admin/registrations/:id/reject` (the reason is shown to the member) | the same sentence |
+| Return the video | `POST /admin/registrations/:id/return-video` (what to fix is shown to the member) | the same sentence |
+| **Tell the member** (person page, on a decided registration) | `POST /admin/registrations/:id/notify` | the same sentence, or "The member had already been told" |
+
+`notify` is for a decision that is **already stored**, for example one made while
+`NOAH_ADMIN_API_KEY` was not set (the table was written, so nobody was told). The API tells each
+member once, so pressing the button again is harmless. In the console: `server/noah-api.js`
+(`notify`, `describeNotified`) and `POST /api/registrations/:id/notify` in `server/routes/admin.js`.
+The decision replies carry `notified` (what the API said) plus `notifiedText` and `delivered`
+(what the screen shows).
+
+Nothing reaches a phone until `NOAH_ADMIN_API_KEY` is set on the API. Without it the console
+still records the decision and warns that the member was NOT told.
+
+## Pastor and cell leader
+
+The app reads two columns on `membersExtra` (they are called `connectedPastor` and
+`connectedLeader` in this project; the integration note calls them connectedPastorRowId and
+connectedLeaderRowId):
+
+| Column | Effect in the app |
+|---|---|
+| `members.memberType = pastor` | The member is a pastor: listed in every member's Messages, with a Pastor inbox. Set from App roles (through `POST /admin/members/:id/roles`). |
+| `membersExtra.connectedPastor` | The member's own pastor, listed first and shown on their Me tab. |
+| `membersExtra.connectedLeader` | The member's cell leader; without it the cell-leader chat is hidden. |
+
+There is no API call for the two links: the console writes them directly
+(`PATCH /api/people/:id/pastoral`, on the person page under Pastoral care) and the app picks the
+change up within about 20 seconds. Only members who are already a pastor (or a cell leader) can
+be chosen, and a member cannot be their own. Every change is in the audit log.

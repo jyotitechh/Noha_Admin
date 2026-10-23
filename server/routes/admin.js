@@ -22,6 +22,12 @@ const log = (req, ...rest) => audit(req.user.name, staffRole(req.session.role).n
 const notFound = (res) => res.status(404).json({ error: 'Not found.' });
 
 /** Why a registration cannot be decided right now, in the office's words. */
+/** The Noah API's `notified` answer as words the screen can show, or nothing when it said none. */
+const told = (notified) => {
+  const d = noah.describeNotified(notified);
+  return d.known ? { notifiedText: d.text, delivered: d.ok } : {};
+};
+
 const notPendingMessage = (state) => ({
   draft: 'That person has not finished registering yet, so there is nothing to decide.',
   approved: 'That registration is already approved.',
@@ -230,9 +236,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         registration: { ...r, state: 'approved', memberId },
         member,
         notified,
+        ...told(notified),
         appAccess: 'The member can now sign in to the Noah app.',
         warning: silent
-          ? 'Approved in the tables, but the member was NOT told: NOAH_ADMIN_API_KEY is not set, so no email went out.'
+          ? 'Approved in the tables, but the member was NOT told: NOAH_ADMIN_API_KEY is not set, so no push or email went out. Use "Tell the member" once it is.'
           : undefined,
         repaired: repaired || undefined,
       });
@@ -289,9 +296,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
          to record it again and needs to know what was wrong. Only the API
          delivers that, so a table write would return the video and tell them
          nothing. */
+      let notified = null;
       if (noahConfigured()) {
         try {
-          await noah.returnVideo(r.id, { actor: req.user.name, note: remark });
+          const result = await noah.returnVideo(r.id, { actor: req.user.name, note: remark });
+          notified = result?.notified ?? null;
         } catch (err) {
           return res.status(err.status === 409 ? 409 : 502)
             .json({ error: err.message, code: err.code });
@@ -315,8 +324,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       return res.json({
         ok: true,
         registration: { ...r, state: 'videoReturned', remark },
+        notified,
+        ...told(notified),
         warning: silent
-          ? 'Marked as returned, but the member was NOT told what to fix: NOAH_ADMIN_API_KEY is not set.'
+          ? 'Marked as returned, but the member was NOT told what to fix: NOAH_ADMIN_API_KEY is not set. Use "Tell the member" once it is.'
           : undefined,
       });
     }
@@ -352,9 +363,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
     if (live()) {
       let silent = false;
+      let notified = null;
       if (noahConfigured()) {
         try {
-          await noah.reject(r.id, { actor: req.user.name, note: remark });
+          const result = await noah.reject(r.id, { actor: req.user.name, note: remark });
+          notified = result?.notified ?? null;
         } catch (err) {
           return res.status(err.status === 409 ? 409 : 502).json({ error: err.message, code: err.code });
         }
@@ -375,8 +388,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       return res.json({
         ok: true,
         registration: { ...r, state: 'rejected', remark },
+        notified,
+        ...told(notified),
         warning: silent
-          ? 'Marked as rejected, but the member was NOT told why: NOAH_ADMIN_API_KEY is not set.'
+          ? 'Marked as rejected, but the member was NOT told why: NOAH_ADMIN_API_KEY is not set. Use "Tell the member" once it is.'
           : undefined,
       });
     }
@@ -387,6 +402,41 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     r.remark = remark;
     log(req, 'Rejected registration', 'Membership', r.id, before, { state: 'rejected' }, remark);
     res.json({ ok: true, registration: r });
+  });
+
+  /* Tell the member about a decision already stored.
+
+     For registrations decided while the admin key was not set: the table was written
+     and the member was not told. The Noah API sends the push (and the email if no phone
+     could be reached) for the decision that is stored, once per member; asking again
+     answers alreadySent. Harmless to repeat, so it is offered on every decided
+     registration. Needs the key: without it there is nothing that can reach the member. */
+  app.post('/api/registrations/:id/notify', ...guard('members.edit'), async (req, res) => {
+    if (!live()) return res.status(409).json({ error: 'There is nobody to notify in the sample data. Connect Catalyst.' });
+    const r = await registrationById(req.params.id);
+    if (!r) return notFound(res);
+    if (r.state === 'pending' || r.state === 'draft') {
+      return res.status(409).json({ error: 'There is no decision to tell them about yet. Approve, reject or return the video first.' });
+    }
+    if (!noahConfigured()) {
+      return res.status(409).json({ error: 'NOAH_ADMIN_API_KEY is not set, so nothing can reach the member. Set it on the API and try again.', needsAdminKey: true });
+    }
+
+    let result;
+    try {
+      result = await noah.notify(r.id, { actor: req.user.name });
+    } catch (err) {
+      return res.status(err.status === 409 ? 409 : 502).json({ error: err.message, code: err.code });
+    }
+    const notified = result?.notified ?? result ?? null;
+    const said = noah.describeNotified(notified);
+
+    await writeAudit({
+      actor: req.user.name, role: staffRole(req.session.role).name,
+      action: 'Told the member about the decision', module: 'Membership', record: r.id,
+      before: null, after: { state: r.state, result: said.text }, remark: '', ip: '10.20.4.17',
+    });
+    res.json({ ok: true, notified, message: said.text, delivered: said.ok });
   });
 
   /* A short-lived URL for one of the three uploads, so the office can read
