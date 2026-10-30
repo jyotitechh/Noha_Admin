@@ -36,18 +36,41 @@ Things to know:
 
 ### Daily Manna: table `dailyMana`
 
-The devotional the app opens on each day: the message and a prayer.
+The devotional the app opens on each day: the message and a prayer or confession.
 
 | Field | Column | Stored as | Notes |
 |---|---|---|---|
 | Title | `title` | varchar | required |
-| Show on | `publishDate` | date | required |
+| Published date | `publishDate` | date | required |
+| Writer | `writerId` | bigint |  |
 | Category | `categoryIds` | text | the id of a row in `dailyMannaCategories` |
-| Message | `content` | text | required |
-| Prayer | `prayer` | text | required |
 | Language | `contentLanguage` | int | stored as its code number |
-| Picture | `image` | text |  |
+| Members only | `visibleTo` | boolean |  |
 | Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
+| Message | `content` | text | required |
+| Embed 01 | `embed01` | text |  |
+| Embed 02 | `embed02` | text |  |
+| Embed 03 | `embed03` | text |  |
+| Embed 04 | `embed04` | text |  |
+| Embed 05 | `embed05` | text |  |
+| Embed 06 | `embed06` | text |  |
+| Embed 07 | `embed07` | text |  |
+| Embed 08 | `embed08` | text |  |
+| Embed 09 | `embed09` | text |  |
+| Embed 10 | `embed10` | text |  |
+| Embed 11 | `embed11` | text |  |
+| Embed 12 | `embed12` | text |  |
+| Embed 13 | `embed13` | text |  |
+| Embed 14 | `embed14` | text |  |
+| Embed 15 | `embed15` | text |  |
+| Embed 16 | `embed16` | text |  |
+| Embed 17 | `embed17` | text |  |
+| Embed 18 | `embed18` | text |  |
+| Embed 19 | `embed19` | text |  |
+| Embed 20 | `embed20` | text |  |
+| The closing is a confession | `isConfession` | boolean |  |
+| Prayer or confession | `prayer` | text | required |
+| Picture | `image` | text |  |
 | Published | `published` | boolean |  |
 
 written on create: `created`; on change: `updated`. "live" means `published`.
@@ -76,11 +99,32 @@ The prayer members are invited to pray with.
 | Field | Column | Stored as | Notes |
 |---|---|---|---|
 | Title | `title` | varchar | required |
-| Prayer | `content` | text | required |
-| Language | `contentLanguage` | int | stored as its code number |
 | Publish on | `publishedDate` | datetime | a date, stored as a datetime |
-| Picture | `image` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Members only | `visibleTo` | boolean |  |
 | Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
+| Prayer | `content` | text | required |
+| Embed 01 | `embed01` | text |  |
+| Embed 02 | `embed02` | text |  |
+| Embed 03 | `embed03` | text |  |
+| Embed 04 | `embed04` | text |  |
+| Embed 05 | `embed05` | text |  |
+| Embed 06 | `embed06` | text |  |
+| Embed 07 | `embed07` | text |  |
+| Embed 08 | `embed08` | text |  |
+| Embed 09 | `embed09` | text |  |
+| Embed 10 | `embed10` | text |  |
+| Embed 11 | `embed11` | text |  |
+| Embed 12 | `embed12` | text |  |
+| Embed 13 | `embed13` | text |  |
+| Embed 14 | `embed14` | text |  |
+| Embed 15 | `embed15` | text |  |
+| Embed 16 | `embed16` | text |  |
+| Embed 17 | `embed17` | text |  |
+| Embed 18 | `embed18` | text |  |
+| Embed 19 | `embed19` | text |  |
+| Embed 20 | `embed20` | text |  |
+| Picture | `image` | text |  |
 | Published | `published` | boolean |  |
 
 written on create: `created`; on change: `updated`. "live" means `published`.
@@ -92,10 +136,32 @@ The daily confession of faith.
 | Field | Column | Stored as | Notes |
 |---|---|---|---|
 | Title | `title` | varchar | required |
-| Confession | `content` | text | required |
-| Prayer | `prayer` | text |  |
+| Published date | `publishDate` | date |  |
+| Writer | `writerId` | bigint |  |
 | Language | `contentLanguage` | int | stored as its code number |
-| Show on | `publishDate` | date |  |
+| Members only | `visibleTo` | boolean |  |
+| Confession | `content` | text | required |
+| Embed 01 | `embed01` | text |  |
+| Embed 02 | `embed02` | text |  |
+| Embed 03 | `embed03` | text |  |
+| Embed 04 | `embed04` | text |  |
+| Embed 05 | `embed05` | text |  |
+| Embed 06 | `embed06` | text |  |
+| Embed 07 | `embed07` | text |  |
+| Embed 08 | `embed08` | text |  |
+| Embed 09 | `embed09` | text |  |
+| Embed 10 | `embed10` | text |  |
+| Embed 11 | `embed11` | text |  |
+| Embed 12 | `embed12` | text |  |
+| Embed 13 | `embed13` | text |  |
+| Embed 14 | `embed14` | text |  |
+| Embed 15 | `embed15` | text |  |
+| Embed 16 | `embed16` | text |  |
+| Embed 17 | `embed17` | text |  |
+| Embed 18 | `embed18` | text |  |
+| Embed 19 | `embed19` | text |  |
+| Embed 20 | `embed20` | text |  |
+| Prayer | `prayer` | text |  |
 | Picture | `image` | text |  |
 | Published | `published` | boolean |  |
 
@@ -108,11 +174,32 @@ What a dream may mean, entry by entry.
 | Field | Column | Stored as | Notes |
 |---|---|---|---|
 | Word or symbol | `title` | varchar | required |
-| Meaning | `content` | text | required |
 | Category | `categoryId` | bigint | the id of a row in `dreamDictionaryCategory` |
 | Language | `contentLanguage` | int | stored as its code number |
+| Members only | `visibleTo` | boolean |  |
 | Feature it | `isFeatured` | boolean |  |
 | Publish on | `publishedDate` | datetime | a date, stored as a datetime |
+| Meaning | `content` | text | required |
+| Embed 01 | `embed01` | text |  |
+| Embed 02 | `embed02` | text |  |
+| Embed 03 | `embed03` | text |  |
+| Embed 04 | `embed04` | text |  |
+| Embed 05 | `embed05` | text |  |
+| Embed 06 | `embed06` | text |  |
+| Embed 07 | `embed07` | text |  |
+| Embed 08 | `embed08` | text |  |
+| Embed 09 | `embed09` | text |  |
+| Embed 10 | `embed10` | text |  |
+| Embed 11 | `embed11` | text |  |
+| Embed 12 | `embed12` | text |  |
+| Embed 13 | `embed13` | text |  |
+| Embed 14 | `embed14` | text |  |
+| Embed 15 | `embed15` | text |  |
+| Embed 16 | `embed16` | text |  |
+| Embed 17 | `embed17` | text |  |
+| Embed 18 | `embed18` | text |  |
+| Embed 19 | `embed19` | text |  |
+| Embed 20 | `embed20` | text |  |
 | Picture | `image` | text |  |
 | Published | `published` | boolean |  |
 
@@ -128,6 +215,39 @@ How the dream dictionary is grouped.
 | Description | `description` | text |  |
 | Picture | `photo` | text |  |
 | Language | `contentLanguage` | int | stored as its code number |
+| Hidden (archived) | `isArchived` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
+
+### Banners: table `dashboard`
+
+The carousel at the top of the app’s home screen, in the order members swipe through it. A banner disappears after its end date.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Caption | `caption` | varchar | required |
+| Landscape picture | `landscapeImage` | text |  |
+| Portrait picture | `portraitImage` | text |  |
+| Opens | `url` | text |  |
+| Shown until | `expiryTime` | datetime | a date, stored as a datetime |
+| Order | `orderCol` | int | whole number |
+| Language | `contentLanguage` | int | stored as its code number |
+| Hide from the public | `hideFromPublic` | boolean |  |
+| Hidden (archived) | `isArchived` | boolean |  |
+
+written on create: `created`; on change: `updated`. there is no draft state: an entry is simply there.
+
+### Announcements: table `ads`
+
+Notices shown to members in the app.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Message | `description` | text |  |
+| Link | `link` | text |  |
+| Picture | `image` | text |  |
+| Type | `type` | int | whole number |
 | Hidden (archived) | `isArchived` | boolean |  |
 
 written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.

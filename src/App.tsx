@@ -38,10 +38,11 @@ const SCREENS: Record<string, ComponentType> = {
   'content/prayers': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Prayers }))),
   'content/confessions': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Confessions }))),
   'content/dictionary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Dictionary }))),
-  'content/announce': lazy(() => import('@/modules/content/Announce')),
+  'content/announce': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Announce }))),
   'media/noahgram': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Noahgram }))),
   'media/noahtube': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.NoahTube }))),
   'school/bibleschool': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.BibleSchool }))),
+  'school/biblestudy': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.BibleStudy }))),
   'school/courses': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Courses }))),
 
   'events/events': lazy(() => import('@/modules/events/Events')),

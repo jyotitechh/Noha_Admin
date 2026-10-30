@@ -11,7 +11,8 @@
 
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
-import { TYPES, SECTIONS, LANGUAGES, typeById } from '../content-types.js';
+import { loadMembers } from '../noah-schema.js';
+import { TYPES, SECTIONS, LANGUAGES, BOOKS, typeById } from '../content-types.js';
 import {
   listContent, createContent, updateContent, publishContent, deleteContent, ContentError, onCatalyst,
 } from '../content.js';
@@ -43,10 +44,28 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     res.json({
       sections: SECTIONS,
       languages: LANGUAGES,
+      books: BOOKS,
       source: onCatalyst() ? 'catalyst' : 'sample',
       types: TYPES,
     });
   });
+
+  /* Members to credit as the writer. Searched by name or mobile, or fetched by id to
+     show who is already chosen. Reads the member list the console already keeps
+     for a minute, so typing in the box does not spend Catalyst fetches. */
+  app.get('/api/content/writers', ...edit, guarded(async (req, res) => {
+    if (!onCatalyst()) return res.json({ rows: [] });
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const id = String(req.query.id || '').trim();
+    const pick = (m) => ({ id: m.rowId, name: m.name, mobile: m.mobile || '' });
+    const all = (await loadMembers()).filter((m) => m.name && m.name !== '(not registered yet)');
+    if (id) return res.json({ rows: all.filter((m) => m.rowId === id).map(pick) });
+    const digits = q.replace(/\D/g, '');
+    const hit = q
+      ? all.filter((m) => m.name.toLowerCase().includes(q) || (digits.length >= 3 && String(m.mobile).replace(/\D/g, '').includes(digits)))
+      : all;
+    res.json({ rows: hit.slice(0, 20).map(pick) });
+  }));
 
   app.get('/api/content/:type', ...edit, guarded(async (req, res) => {
     if (!typeById(req.params.type)) throw new ContentError(404, 'No such kind of content.');

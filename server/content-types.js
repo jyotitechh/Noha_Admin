@@ -39,6 +39,7 @@ export const SECTIONS = {
   content: { label: 'Content', desc: 'What the Noah app reads each day.' },
   media: { label: 'Media', desc: 'Noahgram and Noah Tube.' },
   school: { label: 'School', desc: 'The Bible school and its courses.' },
+  study: { label: 'Bible study', desc: 'Study plans, their steps and quiz questions.' },
 };
 
 const lang = (key = 'contentLanguage', label = 'Language') =>
@@ -48,6 +49,14 @@ const image = (key = 'image', label = 'Picture', hint = 'A link to the picture. 
 const published = (key = 'published', label = 'Published', store) =>
   ({ key, label, kind: 'toggle', ...(store ? { store } : {}), hint: 'Members see it in the app once this is on.' });
 const when = (key, label, extra = {}) => ({ key, label, kind: 'date', store: 'datetime', ...extra });
+const rich = (key, label, extra = {}) => ({ key, label, kind: 'richtext', ...extra });
+const writer = { key: 'writerId', label: 'Writer', kind: 'member', hint: 'The member credited as the author.' };
+const membersOnly = { key: 'visibleTo', label: 'Members only', kind: 'toggle', hint: 'Off means everyone can see it.' };
+/* embed01 to embed20: extra media (links or embed code) the app shows with the text. */
+const embeds = () => Array.from({ length: 20 }, (_, i) => {
+  const n = String(i + 1).padStart(2, '0');
+  return { key: 'embed' + n, label: 'Embed ' + n, kind: 'textarea', rows: 2, group: 'Embeds' };
+});
 const STAMPS = { created: 'created', updated: 'updated' };
 const STAMPS_ON = { created: 'createdOn', updated: 'updatedOn' };
 
@@ -60,17 +69,21 @@ export const TYPES = [
   /* ================= content ================= */
   {
     id: 'manna', section: 'content', label: 'Daily Manna', singular: 'devotional', table: 'dailyMana',
-    title: 'title', dateKey: 'publishDate', publish: 'published', stamps: STAMPS,
-    intro: 'The devotional the app opens on each day: the message and a prayer.',
+    title: 'title', dateKey: 'publishDate', publish: 'published', stamps: STAMPS, wordCount: 'numberOfWords',
+    intro: 'The devotional the app opens on each day: the message and a prayer or confession.',
     fields: [
       { key: 'title', label: 'Title', kind: 'text', required: true },
-      { key: 'publishDate', label: 'Show on', kind: 'date', required: true, hint: 'The day it appears in the app.' },
+      { key: 'publishDate', label: 'Published date', kind: 'date', required: true, hint: 'The day it appears in the app.' },
+      writer,
       { key: 'categoryIds', label: 'Category', kind: 'ref', ref: 'mannaCategories', catalyst: 'text' },
-      { key: 'content', label: 'Message', kind: 'textarea', required: true, rows: 9 },
-      { key: 'prayer', label: 'Prayer', kind: 'textarea', required: true, rows: 4 },
       lang(),
-      image(),
+      membersOnly,
       { key: 'showOnObituary', label: 'Show on obituary notices', kind: 'toggle', store: 'int' },
+      rich('content', 'Message', { required: true }),
+      ...embeds(),
+      { key: 'isConfession', label: 'The closing is a confession', kind: 'toggle', hint: 'Off means it is a prayer.' },
+      rich('prayer', 'Prayer or confession', { required: true }),
+      image(),
       published(),
     ],
   },
@@ -90,29 +103,34 @@ export const TYPES = [
     ],
   },
   {
-    id: 'prayers', section: 'content', label: 'Daily Prayers', singular: 'prayer', table: 'dailyPrayers',
+    id: 'prayers', section: 'content', label: 'Daily Prayers', singular: 'prayer', table: 'dailyPrayers', fromManna: { confession: false },
     title: 'title', dateKey: 'publishedDate', publish: 'published', stamps: STAMPS,
     intro: 'The prayer members are invited to pray with.',
     fields: [
       { key: 'title', label: 'Title', kind: 'text', required: true },
-      { key: 'content', label: 'Prayer', kind: 'textarea', required: true, rows: 9 },
-      lang(),
       when('publishedDate', 'Publish on'),
-      image(),
+      lang(),
+      membersOnly,
       { key: 'showOnObituary', label: 'Show on obituary notices', kind: 'toggle', store: 'int' },
+      rich('content', 'Prayer', { required: true }),
+      ...embeds(),
+      image(),
       published(),
     ],
   },
   {
-    id: 'confessions', section: 'content', label: 'Confessions', singular: 'confession', table: 'dailyConfessions',
+    id: 'confessions', section: 'content', label: 'Confessions', singular: 'confession', table: 'dailyConfessions', fromManna: { confession: true },
     title: 'title', dateKey: 'publishDate', publish: 'published', stamps: STAMPS, constants: { isConfession: true },
     intro: 'The daily confession of faith.',
     fields: [
       { key: 'title', label: 'Title', kind: 'text', required: true },
-      { key: 'content', label: 'Confession', kind: 'textarea', required: true, rows: 9 },
-      { key: 'prayer', label: 'Prayer', kind: 'textarea', rows: 4 },
+      { key: 'publishDate', label: 'Published date', kind: 'date' },
+      writer,
       lang(),
-      { key: 'publishDate', label: 'Show on', kind: 'date' },
+      membersOnly,
+      rich('content', 'Confession', { required: true }),
+      ...embeds(),
+      rich('prayer', 'Prayer'),
       image(),
       published(),
     ],
@@ -123,11 +141,13 @@ export const TYPES = [
     intro: 'What a dream may mean, entry by entry.',
     fields: [
       { key: 'title', label: 'Word or symbol', kind: 'text', required: true },
-      { key: 'content', label: 'Meaning', kind: 'textarea', required: true, rows: 9 },
       { key: 'categoryId', label: 'Category', kind: 'ref', ref: 'dictionaryCategories' },
       lang(),
+      membersOnly,
       { key: 'isFeatured', label: 'Feature it', kind: 'toggle', hint: 'Shown at the top of the dictionary.' },
       when('publishedDate', 'Publish on'),
+      rich('content', 'Meaning', { required: true }),
+      ...embeds(),
       image(),
       published(),
     ],
@@ -142,6 +162,35 @@ export const TYPES = [
       image('photo', 'Picture'),
       lang(),
       { key: 'isArchived', label: 'Hidden (archived)', kind: 'toggle' },
+    ],
+  },
+  {
+    id: 'banners', section: 'content', label: 'Banners', singular: 'banner', table: 'dashboard',
+    title: 'caption', dateKey: 'expiryTime', publish: null, stamps: STAMPS,
+    intro: 'The carousel at the top of the app’s home screen, in the order members swipe through it. A banner disappears after its end date.',
+    fields: [
+      { key: 'caption', label: 'Caption', kind: 'text', required: true },
+      image('landscapeImage', 'Landscape picture', 'A link to the wide picture, for tablets and wide screens.'),
+      image('portraitImage', 'Portrait picture', 'A link to the tall picture, for phones.'),
+      { key: 'url', label: 'Opens', kind: 'url', hint: 'The web address a tap on the banner opens.' },
+      when('expiryTime', 'Shown until', { hint: 'The last day it shows. Leave empty to show it until it is taken down.' }),
+      { key: 'orderCol', label: 'Order', kind: 'number', store: 'int', hint: 'Where it sits in the carousel; lowest first.' },
+      lang(),
+      { key: 'hideFromPublic', label: 'Hide from the public', kind: 'toggle', hint: 'Only signed-in members see it.' },
+      { key: 'isArchived', label: 'Hidden (archived)', kind: 'toggle', hint: 'Takes it out of the app without deleting it.' },
+    ],
+  },
+  {
+    id: 'announcements', section: 'content', label: 'Announcements', singular: 'announcement', table: 'ads',
+    title: 'title', dateKey: null, publish: null, stamps: STAMPS_ON,
+    intro: 'Notices shown to members in the app.',
+    fields: [
+      { key: 'title', label: 'Title', kind: 'text', required: true },
+      { key: 'description', label: 'Message', kind: 'textarea', rows: 5 },
+      { key: 'link', label: 'Link', kind: 'url', hint: 'A web address the notice points to.' },
+      image(),
+      { key: 'type', label: 'Type', kind: 'number', store: 'int', hint: 'The notice kind the app understands. Leave empty if unsure.' },
+      { key: 'isArchived', label: 'Hidden (archived)', kind: 'toggle', hint: 'Takes it out of the app without deleting it.' },
     ],
   },
 
@@ -283,6 +332,78 @@ export const TYPES = [
       published('published', 'Published', 'int'),
     ],
   },
+
+  /* ================= bible study ================= */
+  {
+    id: 'bibleStudies', section: 'study', label: 'Bible studies', singular: 'study', table: 'bibleStudy',
+    title: 'name', dateKey: null, publish: 'status', stamps: STAMPS_ON, columns: ['type', 'maxStepsPerDay'],
+    intro: 'A study plan members work through, a step at a time. Add its steps and quiz questions in the other tabs.',
+    fields: [
+      { key: 'name', label: 'Name', kind: 'text', required: true },
+      { key: 'description', label: 'Description', kind: 'textarea', rows: 4 },
+      {
+        key: 'type', label: 'Who can take it', kind: 'select', store: 'int', required: true, default: '1',
+        options: [{ v: '1', l: 'Free for all' }, { v: '2', l: 'Only partners' }, { v: '3', l: 'Only with a donation' }],
+        hint: 'Free for all, partners only, or a donation is asked for first.',
+      },
+      { key: 'donationAmount', label: 'Donation amount (INR)', kind: 'number', required: true, showIf: { key: 'type', in: ['3'] } },
+      { key: 'donationAmountUSD', label: 'Donation amount (USD)', kind: 'number', required: true, showIf: { key: 'type', in: ['3'] } },
+      { key: 'maxStepsPerDay', label: 'Only one step a day', kind: 'toggle', hint: 'Off means a member may take as many steps a day as they like.' },
+      image('photo', 'Picture'),
+      lang(),
+      published('status', 'Active'),
+    ],
+  },
+  {
+    id: 'bibleStudySteps', section: 'study', label: 'Steps', singular: 'step', table: 'bibleStudyConnect',
+    title: 'name', dateKey: null, publish: null, stamps: STAMPS, constants: { isArchived: false },
+    columns: ['bibleStudyId', 'orderCol'], sort: ['bibleStudyIdLabel', 'orderCol'],
+    intro: 'The steps of a study, in order. Each has verses to read, and may have a video, a picture and a quiz.',
+    fields: [
+      { key: 'bibleStudyId', label: 'Bible study', kind: 'ref', ref: 'bibleStudies', required: true },
+      { key: 'name', label: 'Name', kind: 'text', required: true },
+      { key: 'orderCol', label: 'Order', kind: 'number', store: 'int', required: true, default: '1', hint: 'Where it sits in the study; lowest first.' },
+      { key: 'description', label: 'Description', kind: 'textarea', rows: 4 },
+      { key: 'verses', label: 'Verses', kind: 'verses', hint: 'The passages to read in this step.' },
+      { key: 'youtubeId', label: 'Video (YouTube)', kind: 'text', hint: 'The YouTube link. Uploading a video from here is not available yet.' },
+      image('youtubeThumbnail', 'Video thumbnail link', 'Filled in from the YouTube link if you leave it empty.'),
+      image('photo', 'Photo'),
+      lang(),
+    ],
+  },
+  {
+    id: 'bibleStudyQuizzes', section: 'study', label: 'Quiz questions', singular: 'quiz question', table: 'bibleStudyStepQuiz',
+    title: 'question', dateKey: null, publish: null, stamps: STAMPS, constants: { isArchived: false },
+    columns: ['bibleStudyPlanId', 'bibleStudyStepId'], sort: ['bibleStudyPlanIdLabel', 'bibleStudyStepIdLabel'],
+    intro: 'A question at the end of a step, with up to four options. Tick each option that is a valid answer.',
+    fields: [
+      { key: 'bibleStudyPlanId', label: 'Bible study', kind: 'ref', ref: 'bibleStudies', required: true },
+      {
+        key: 'bibleStudyStepId', label: 'Step', kind: 'ref', ref: 'bibleStudySteps', required: true,
+        refParent: { field: 'bibleStudyPlanId', column: 'bibleStudyId' }, hint: 'Pick the study first; only its steps are offered.',
+      },
+      { key: 'question', label: 'Question', kind: 'textarea', rows: 3, required: true },
+      { key: 'option1', label: 'Option 1', kind: 'textarea', rows: 2 },
+      { key: 'option1isAnswer', label: 'Option 1 is a valid answer', kind: 'toggle' },
+      { key: 'option2', label: 'Option 2', kind: 'textarea', rows: 2 },
+      { key: 'option2isAnswer', label: 'Option 2 is a valid answer', kind: 'toggle' },
+      { key: 'option3', label: 'Option 3', kind: 'textarea', rows: 2 },
+      { key: 'option3isAnswer', label: 'Option 3 is a valid answer', kind: 'toggle' },
+      { key: 'option4', label: 'Option 4', kind: 'textarea', rows: 2 },
+      { key: 'option4isAnswer', label: 'Option 4 is a valid answer', kind: 'toggle' },
+    ],
+  },
+];
+
+/** The 66 books, in order. A verse is stored as "index,Book,startChapter,startVerse,endChapter,endVerse". */
+export const BOOKS = [
+  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
+  '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
+  'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
+  'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+  'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
+  'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy', '2 Timothy', 'Titus', 'Philemon',
+  'Hebrews', 'James', '1 Peter', '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation',
 ];
 
 export const typeById = (id) => TYPES.find((t) => t.id === id);

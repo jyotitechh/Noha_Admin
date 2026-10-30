@@ -11,6 +11,7 @@ import { downloadFile, fileScopeMissing, explainCatalyst } from '../catalyst.js'
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
+import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
@@ -653,7 +654,25 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
   /* ================= prayer requests from the app ================= */
 
-  app.post('/api/prayer-inbox/:id/decide', ...guard('community.moderate'), (req, res) => {
+  app.post('/api/prayer-inbox/:id/decide', ...guard('community.moderate'), async (req, res) => {
+    if (live()) {
+      try {
+        const decision = req.body?.decision;
+        if (!['Approved', 'Declined'].includes(decision)) return res.status(400).json({ error: 'Decide Approved or Declined.' });
+        const remark = String(req.body?.remark || '').trim();
+        if (decision === 'Declined' && !remark) return res.status(400).json({ error: 'Say why it was declined.' });
+        const p = await prayerRequestById(req.params.id);
+        if (!p) return notFound(res);
+        if (p.state !== 'Pending') return res.status(409).json({ error: `Already ${p.state.toLowerCase()}. Refresh the list.` });
+        await decidePrayerRequest(p.id, decision, { byRowId: req.user.memberRowId });
+        /* The table has no column for the reason, so it is kept in the audit log. */
+        log(req, decision === 'Approved' ? 'Approved prayer request' : 'Declined prayer request', 'Community', p.id, { state: p.state }, { state: decision }, remark);
+        return res.json({ ok: true, request: { ...p, state: decision, remark } });
+      } catch (err) {
+        const explained = explainCatalyst(err);
+        return res.status(503).json({ error: explained?.message ?? err.message });
+      }
+    }
     const p = find('PRAYER_INBOX', req.params.id);
     if (!p) return notFound(res);
     const decision = req.body?.decision;

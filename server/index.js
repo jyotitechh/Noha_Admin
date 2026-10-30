@@ -23,6 +23,7 @@ import { check, explainCatalyst, usage, ENVIRONMENT, PROJECT_ID } from './cataly
 import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from './noah-schema.js';
 import { noahConfigured } from './noah-api.js';
 import { queuesFor } from './queues.js';
+import { listPrayerRequests } from './prayer-requests.js';
 import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
@@ -366,6 +367,8 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
     REGISTRATIONS: () => listRegistrations({ state: req.query.state, search: req.query.q }),
     MEMBERS: () => listMembers({ search: req.query.q, loc: req.query.loc, status: req.query.status }),
     AUD: () => listAudit(),
+    /* What members send from the app's prayer pop-up. */
+    PRAYER_INBOX: () => listPrayerRequests({ state: req.query.state, search: req.query.q }),
     /* Staff are members with a role, found by mobile number. The sample people
        are not staff once Catalyst is connected. */
     STAFF: async () => {

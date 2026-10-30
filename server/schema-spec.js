@@ -61,6 +61,8 @@ const KIND_TYPE = {
   select: { data_type: 'varchar', max_length: 255 },
   color: { data_type: 'varchar', max_length: 255 },
   textarea: { data_type: 'text' },
+  richtext: { data_type: 'text' },
+  member: { data_type: 'bigint' },
   url: { data_type: 'text' },
   date: { data_type: 'date' },
   toggle: { data_type: 'boolean' },

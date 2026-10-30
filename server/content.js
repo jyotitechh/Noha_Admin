@@ -19,8 +19,9 @@
 
 import { io } from './noah-schema.js';
 import { live, isNoah } from './store.js';
-import { TYPES, typeById, columnFor } from './content-types.js';
+import { TYPES, typeById, columnFor, BOOKS } from './content-types.js';
 import { sampleRows } from './content-seed.js';
+import { cleanHtml, plainText, wordCount } from './rich.js';
 
 export class ContentError extends Error {
   constructor(status, message, extra = {}) {
@@ -59,6 +60,53 @@ function shape(def, row, id) {
   return out;
 }
 
+/* ---------- rules that belong to one kind ---------- */
+
+/** The 11-character id of a YouTube video, from a link or the id itself. */
+const youtubeId = (s) => {
+  const m = String(s).match(/(?:youtu\.be\/|[?&]v=|embed\/|shorts\/)([\w-]{11})/);
+  return m ? m[1] : /^[\w-]{11}$/.test(String(s)) ? String(s) : null;
+};
+
+/** A stored verse list -> [{ i, sc, sv, ec, ev }], or null when it is malformed. */
+export function parseVerses(text) {
+  const out = [];
+  for (const part of String(text).split(';').map((p) => p.trim()).filter(Boolean)) {
+    const [i, book, sc, sv, ec, ev] = part.split(',');
+    const n = [i, sc, sv, ec, ev].map(Number);
+    if (part.split(',').length !== 6 || n.some((x) => !Number.isInteger(x) || x < 0)) return null;
+    if (BOOKS[n[0]] !== book || n[1] < 1 || n[2] < 1 || n[3] < n[1] || (n[3] === n[1] && n[4] < n[2])) return null;
+    out.push({ i: n[0], sc: n[1], sv: n[2], ec: n[3], ev: n[4] });
+  }
+  return out;
+}
+
+const HOOKS = {
+  bibleStudySteps(value) {
+    const errors = {};
+    if (value.youtubeId) {
+      const id = youtubeId(value.youtubeId);
+      if (!id) errors.youtubeId = 'That is not a YouTube link.';
+      else {
+        value.youtubeId = id;
+        if (!value.youtubeThumbnail) value.youtubeThumbnail = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+      }
+    }
+    return errors;
+  },
+  bibleStudyQuizzes(value, { partial }) {
+    if (partial) return {};
+    const errors = {};
+    const filled = [1, 2, 3, 4].filter((n) => value['option' + n]);
+    if (filled.length < 2) errors.option2 = 'Give at least two options.';
+    for (const n of [1, 2, 3, 4]) {
+      if (value['option' + n + 'isAnswer'] && !value['option' + n]) errors['option' + n] = 'This is marked as a valid answer but has no text.';
+    }
+    if (!filled.some((n) => value['option' + n + 'isAnswer'])) errors.option1isAnswer = 'Tick at least one valid answer.';
+    return errors;
+  },
+};
+
 /* ---------- checking what was sent ---------- */
 
 const TEXT_MAX = 255; /* a Catalyst varchar */
@@ -77,10 +125,20 @@ export function validate(def, body, { partial = false } = {}) {
     if (partial && !present) continue;
     let v = body[f.key];
 
+    /* A field that applies only in some cases (the donation amounts, when a donation is asked for)
+       is not checked, and is cleared, when the case does not hold. */
+    if (f.showIf && Object.prototype.hasOwnProperty.call(body, f.showIf.key) && !f.showIf.in.includes(String(body[f.showIf.key]))) {
+      value[f.key] = f.kind === 'toggle' ? false : null;
+      continue;
+    }
+
     /* A toggle left out is off, unless the field says it starts on (an active category). */
     if (f.kind === 'toggle') { value[f.key] = present ? (v === true || v === 'true' || v === 1) : !!f.default; continue; }
 
     v = v === null || v === undefined ? '' : (typeof v === 'string' ? v.trim() : v);
+    /* Formatted text is cleaned here, whatever the browser sent. An editor holding
+       only empty paragraphs counts as empty. */
+    if (f.kind === 'richtext' && typeof v === 'string') v = plainText(v) ? cleanHtml(v) : '';
     const empty = v === '';
 
     if (empty) {
@@ -120,6 +178,21 @@ export function validate(def, body, { partial = false } = {}) {
         else value[f.key] = String(v);
         break;
       }
+      case 'richtext': {
+        if (String(v).length > LONG_MAX) errors[f.key] = `${f.label} is too long (${LONG_MAX.toLocaleString('en-IN')} characters at most, counting the formatting).`;
+        else value[f.key] = String(v);
+        break;
+      }
+      case 'member': {
+        if (!/^\d{1,20}$/.test(String(v))) errors[f.key] = `${f.label} is not valid.`;
+        else value[f.key] = String(v);
+        break;
+      }
+      case 'verses': {
+        if (String(v).length > LONG_MAX || !parseVerses(v)) errors[f.key] = `${f.label} are not valid. Add them with the Add verse button.`;
+        else value[f.key] = String(v);
+        break;
+      }
       case 'ref': {
         if (String(v).length > 64) errors[f.key] = `${f.label} is not valid.`;
         else value[f.key] = String(v);
@@ -132,6 +205,7 @@ export function validate(def, body, { partial = false } = {}) {
       }
     }
   }
+  Object.assign(errors, HOOKS[def.id]?.(value, { partial, body }) ?? {});
   return { value, errors };
 }
 
@@ -183,6 +257,8 @@ const toCatalyst = (def, value, { creating = false } = {}) => {
     }
     row[columnFor(f.key)] = v;
   }
+  /* The word count the Laravel backend kept, worked out from the message. */
+  if (def.wordCount && typeof value.content === 'string') row[def.wordCount] = wordCount(value.content);
   const at = stampNow();
   if (creating) {
     Object.assign(row, def.constants || {});
@@ -207,8 +283,50 @@ let nextSample = 1000;
 const matchesQuery = (def, row, q) => {
   if (!q) return true;
   const n = q.toLowerCase();
-  return def.fields.some((f) => ['text', 'textarea'].includes(f.kind) && String(row[f.key] ?? '').toLowerCase().includes(n));
+  return def.fields.some((f) => ['text', 'textarea', 'richtext'].includes(f.kind) && String(row[f.key] ?? '').toLowerCase().includes(n));
 };
+
+/** The Daily Manna entries whose closing is of the kind `def` lists (a prayer or a confession),
+    shaped like that kind's own rows. They are edited in the Daily Manna, not here. */
+async function mannaClosings(def) {
+  const m = typeById('manna');
+  let src;
+  try {
+    src = onCatalyst()
+      ? (await io.getRows(await tableIdFor(m))).map((r) => shape(m, r, String(r.ROWID)))
+      : memoryRows(m).map((r) => shape(m, r, r._id));
+  } catch (e) {
+    if (e instanceof ContentError) return [];
+    throw e;
+  }
+  return src
+    .filter((x) => !!x.isConfession === def.fromManna.confession && x.prayer)
+    .map((x) => ({
+      id: x.id, [def.title]: x.title, content: x.prayer, [def.dateKey]: x.publishDate,
+      contentLanguage: x.contentLanguage, writerId: x.writerId, visibleTo: x.visibleTo, image: x.image,
+      published: x.published, live: x.published, createdAt: x.createdAt, updatedAt: x.updatedAt,
+      from: 'manna', fromLabel: 'Daily Manna', source: x,
+    }));
+}
+
+/** The name of what each row points at, as `<key>Label`, for the pointers a type lists as columns. */
+async function addRefLabels(def, rows) {
+  const refs = (def.columns || []).map((k) => def.fields.find((f) => f.key === k)).filter((f) => f?.kind === 'ref');
+  for (const f of refs) {
+    const target = typeById(f.ref);
+    let src;
+    try {
+      src = onCatalyst()
+        ? (await io.getRows(await tableIdFor(target))).map((r) => shape(target, r, String(r.ROWID)))
+        : memoryRows(target).map((r) => shape(target, r, r._id));
+    } catch (e) {
+      if (e instanceof ContentError) continue;
+      throw e;
+    }
+    const names = new Map(src.map((r) => [r.id, String(r[target.title] ?? '')]));
+    for (const r of rows) r[f.key + 'Label'] = names.get(String(r[f.key])) ?? '';
+  }
+}
 
 /** Every entry of a type, newest first. */
 export async function listContent(typeId, { q = '', state = '' } = {}) {
@@ -232,9 +350,28 @@ export async function listContent(typeId, { q = '', state = '' } = {}) {
     rows = memoryRows(def).map((r) => shape(def, r, r._id));
   }
 
+  /* A Daily Manna ends in a prayer or a confession. The ones that end in this kind
+     are listed here too, marked as coming from the Daily Manna. */
+  if (def.fromManna) rows = rows.concat(await mannaClosings(def));
+
   rows = rows.filter((r) => matchesQuery(def, r, q));
   if (state === 'live') rows = rows.filter((r) => r.live);
   if (state === 'draft') rows = rows.filter((r) => !r.live);
+
+  if (def.columns) await addRefLabels(def, rows);
+
+  if (def.sort) {
+    const num = (v) => (v === '' || v === null || v === undefined ? Infinity : Number(v));
+    rows.sort((a, b) => {
+      for (const k of def.sort) {
+        const x = a[k], y = b[k];
+        const c = typeof x === 'number' || typeof y === 'number' ? num(x) - num(y) : String(x ?? '').localeCompare(String(y ?? ''));
+        if (c) return c;
+      }
+      return 0;
+    });
+    return { rows, total: rows.length, source: onCatalyst() ? 'catalyst' : 'sample', notReady };
+  }
 
   rows.sort((a, b) => {
     const k = def.dateKey;

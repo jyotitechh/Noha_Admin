@@ -8,9 +8,11 @@ export const Manna = () => <ContentManager types={['manna', 'mannaCategories']} 
 export const Prayers = () => <ContentManager types={['prayers']} />;
 export const Confessions = () => <ContentManager types={['confessions']} />;
 export const Dictionary = () => <ContentManager types={['dictionary', 'dictionaryCategories']} />;
+export const Announce = () => <ContentManager types={['banners', 'announcements']} />;
 
 export const Noahgram = () => <ContentManager types={['noahgramPosts', 'noahgramCategories']} />;
 export const NoahTube = () => <ContentManager types={['tubeVideos', 'tubeCategories']} />;
 
 export const BibleSchool = () => <ContentManager types={['bibleSchools']} />;
+export const BibleStudy = () => <ContentManager types={['bibleStudies', 'bibleStudySteps', 'bibleStudyQuizzes']} />;
 export const Courses = () => <ContentManager types={['courses', 'courseCategories', 'courseSections', 'courseLessons']} />;

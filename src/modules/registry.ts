@@ -174,6 +174,7 @@ export const MODULES: ModuleDef[] = [
     badges: ['playback'],
     tabs: [
       { id: 'bibleschool', label: 'Bible school', status: 'built', desc: 'The school levels members can enrol in.' },
+      { id: 'biblestudy', label: 'Bible study', status: 'built', desc: 'Study plans, their steps (verses, video, photo) and quiz questions.' },
       { id: 'courses', label: 'Courses', status: 'built', desc: 'Courses, their sections and lessons, and how they are grouped.' },
     ],
   },

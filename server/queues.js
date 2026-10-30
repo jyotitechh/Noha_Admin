@@ -8,6 +8,7 @@
 
 import { db } from './db.js';
 import { live, listRegistrations } from './store.js';
+import { pendingPrayerRequests } from './prayer-requests.js';
 
 const minDate = (a) => (a.length ? new Date(Math.min(...a.map((d) => +d))) : null);
 const open = (coll, fn) => (db[coll] || []).filter(fn);
@@ -27,7 +28,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -96,20 +97,22 @@ export function queues() {
 export async function queuesFor(roleId, canFn) {
   const rows = queues().filter((x) => canFn(roleId, x.perm));
 
-  let real = null;
+  /* Real counts, per queue, once Catalyst is connected. */
+  const real = {};
+  const tally = (list) => ({
+    count: list.length,
+    oldest: list.map((r) => r.at).filter(Boolean).sort((a, b) => +a - +b)[0] ?? null,
+  });
   if (live()) {
-    try {
-      const regs = await listRegistrations({});
-      const waiting = regs.filter((r) => r.state === 'pending');
-      real = {
-        count: waiting.length,
-        oldest: waiting.map((r) => r.at).filter(Boolean).sort((a, b) => +a - +b)[0] ?? null,
-      };
-    } catch { /* fall back to the seed count rather than failing the page */ }
+    try { real.registrations = tally((await listRegistrations({})).filter((r) => r.state === 'pending')); }
+    catch { /* fall back to the seed count rather than failing the page */ }
+    try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
+    catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }
   }
 
   return rows.map(({ count, oldest, ...rest }) =>
-    real && rest.id === 'registrations'
-      ? { ...rest, ...real }
+    real[rest.id]
+      ? { ...rest, ...real[rest.id] }
       : { ...rest, count: count(), oldest: oldest() });
 }
+

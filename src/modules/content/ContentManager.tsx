@@ -16,7 +16,7 @@
        something live, taking it down and deleting need content.publish. The
        server checks the same. */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
@@ -24,15 +24,25 @@ import { useToast, Drawer, Confirm } from '@/components/layers';
 import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Empty, Failed, Field, Kpi, Kpis, Loading, Note, Seg, Switch } from '@/components/ui';
 import { fd } from '@/lib/format';
+import { RichText } from './RichText';
 
 interface FieldDef {
-  key: string; label: string; kind: 'text' | 'textarea' | 'date' | 'select' | 'toggle' | 'number' | 'url' | 'color' | 'ref';
+  key: string; label: string; kind: 'text' | 'textarea' | 'date' | 'select' | 'toggle' | 'number' | 'url' | 'color' | 'ref' | 'richtext' | 'member' | 'verses';
+  default?: string | boolean;
+  /** Shown only while another field holds one of these values. */
+  showIf?: { key: string; in: string[] };
+  /** A pointer offered only among the rows whose `column` equals what another field holds. */
+  refParent?: { field: string; column: string };
   required?: boolean; hint?: string; rows?: number; ref?: string; options?: { v: string; l: string }[];
+  /** Fields sharing a group are folded into one collapsible section. */
+  group?: string;
 }
 
 interface TypeDef {
   id: string; section: string; label: string; singular: string; table: string; title: string;
   dateKey: string | null; publish: string | null; intro: string; fields: FieldDef[];
+  /** Fields shown as extra columns in the list. */
+  columns?: string[];
 }
 
 interface Row { id: string; live: boolean; [k: string]: unknown }
@@ -46,17 +56,80 @@ type Values = Record<string, string | boolean>;
 
 const asDate = (v: unknown) => (typeof v === 'string' && v ? new Date(v + 'T00:00:00') : null);
 
+/* ---------- verses: the passages a step has the member read ---------- */
+
+interface Verse { i: number; sc: number; sv: number; ec: number; ev: number }
+
+/* Stored as "index,Book,startChapter,startVerse,endChapter,endVerse", entries joined by ";". */
+const readVerses = (text: string, books: string[]): Verse[] =>
+  text.split(';').map((p) => p.trim()).filter(Boolean).map((p) => {
+    const [i, , sc, sv, ec, ev] = p.split(',');
+    return { i: Number(i), sc: Number(sc), sv: Number(sv), ec: Number(ec), ev: Number(ev) };
+  }).filter((v) => books[v.i]);
+const writeVerses = (list: Verse[], books: string[]) =>
+  list.map((v) => [v.i, books[v.i], v.sc, v.sv, v.ec, v.ev].join(',')).join(';');
+const verseLabel = (v: Verse, books: string[]) =>
+  `${books[v.i]} ${v.sc}:${v.sv} – ${v.ec === v.sc ? '' : v.ec + ':'}${v.ev}`;
+
+function VersesEditor({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string }) {
+  const defs = useQuery(() => api.get<{ books: string[] }>('/content/types'), []);
+  const books = defs.data?.books ?? [];
+  const list = readVerses(value, books);
+  const [draft, setDraft] = useState({ i: '0', sc: '1', sv: '1', ec: '1', ev: '1' });
+  const [problem, setProblem] = useState('');
+
+  const add = () => {
+    const v: Verse = { i: Number(draft.i), sc: Number(draft.sc), sv: Number(draft.sv), ec: Number(draft.ec), ev: Number(draft.ev) };
+    if ([v.sc, v.sv, v.ec, v.ev].some((n) => !Number.isInteger(n) || n < 1)) return setProblem('Chapters and verses are whole numbers, 1 or more.');
+    if (v.ec < v.sc || (v.ec === v.sc && v.ev < v.sv)) return setProblem('The passage must end after it starts.');
+    setProblem('');
+    onChange(writeVerses([...list, v], books));
+  };
+  const num = (k: 'sc' | 'sv' | 'ec' | 'ev', label: string) => (
+    <label className="xs muted" style={{ flex: 1 }}>{label}
+      <input className="inp" type="number" min={1} value={draft[k]} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} />
+    </label>
+  );
+
+  return (
+    <div className="embeds">
+      {list.length === 0 && <p className="xs muted" style={{ margin: 0 }}>No verses yet.</p>}
+      <div className="stack" style={{ gap: 6 }}>
+        {list.map((v, n) => (
+          <div key={n} className="row" style={{ alignItems: 'center', gap: 8 }}>
+            <b style={{ flex: 1 }}>{verseLabel(v, books)}</b>
+            <Btn sm aria-label={'Remove ' + verseLabel(v, books)} onClick={() => onChange(writeVerses(list.filter((_, j) => j !== n), books))}>Remove</Btn>
+          </div>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <label className="xs muted" style={{ flex: '2 1 180px' }}>Book
+          <select className="sel" value={draft.i} onChange={(e) => setDraft((d) => ({ ...d, i: e.target.value }))}>
+            {books.map((b, i) => <option key={b} value={i}>{b}</option>)}
+          </select>
+        </label>
+        {num('sc', 'Start chapter')}{num('sv', 'Start verse')}{num('ec', 'End chapter')}{num('ev', 'End verse')}
+        <Btn sm icon="plus" onClick={add}>Add verse</Btn>
+      </div>
+      {(problem || error) && <p className="xs" style={{ color: 'var(--bad)', margin: '6px 0 0' }}>{problem || error}</p>}
+    </div>
+  );
+}
+
 /* ---------- one field of the form ---------- */
 
-function RefSelect({ field, value, onChange }: { field: FieldDef; value: string; onChange: (v: string) => void }) {
+function RefSelect({ field, value, onChange, parent }: { field: FieldDef; value: string; onChange: (v: string) => void; parent?: string }) {
   /* Loaded when the form opens, one request per picker. */
   const q = useQuery(() => api.get<List>(`/content/${field.ref}`), [field.ref]);
   const defs = useQuery(() => api.get<{ types: TypeDef[] }>('/content/types'), []);
   const target = defs.data?.types.find((t) => t.id === field.ref);
+  const scoped = field.refParent
+    ? (q.data?.rows ?? []).filter((r) => !!parent && String(r[field.refParent!.column]) === parent)
+    : (q.data?.rows ?? []);
   return (
-    <select className="sel" value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{q.loading ? 'Loading…' : '— none —'}</option>
-      {(q.data?.rows ?? []).map((r) => (
+    <select className="sel" value={value} disabled={!!field.refParent && !parent && !value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{q.loading ? 'Loading…' : field.refParent && !parent ? 'Pick the study first' : '— none —'}</option>
+      {scoped.map((r) => (
         <option key={r.id} value={r.id}>{String(r[target?.title ?? 'title'] ?? r.id)}</option>
       ))}
       {/* A value that is no longer in the list is kept visible, not silently dropped. */}
@@ -67,7 +140,102 @@ function RefSelect({ field, value, onChange }: { field: FieldDef; value: string;
   );
 }
 
-function Input({ f, v, set, error }: { f: FieldDef; v: string | boolean; set: (v: string | boolean) => void; error?: string }) {
+interface Writer { id: string; name: string; mobile: string }
+
+/* The member credited as the writer. Search by name or mobile number. */
+function WriterPick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [q, setQ] = useState('');
+  const [typed, setTyped] = useState('');
+  const [open, setOpen] = useState(false);
+
+  /* Wait for a pause in typing before asking the server. */
+  useEffect(() => { const t = setTimeout(() => setTyped(q), 250); return () => clearTimeout(t); }, [q]);
+
+  const current = useQuery(
+    () => (value ? api.get<{ rows: Writer[] }>(`/content/writers?id=${encodeURIComponent(value)}`) : Promise.resolve({ rows: [] as Writer[] })),
+    [value],
+  );
+  const found = useQuery(
+    () => (open ? api.get<{ rows: Writer[] }>(`/content/writers?q=${encodeURIComponent(typed)}`) : Promise.resolve({ rows: [] as Writer[] })),
+    [typed, open],
+  );
+
+  const chosen = current.data?.rows[0];
+  if (value && !open) {
+    return (
+      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <b>{chosen?.name ?? (current.loading ? 'Loading…' : `Member ${value}`)}</b>
+          {chosen?.mobile && <span className="muted"> · {chosen.mobile}</span>}
+        </div>
+        <Btn sm onClick={() => { setQ(''); setOpen(true); }}>Change</Btn>
+        <Btn sm onClick={() => onChange('')}>Remove</Btn>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <input className="inp" value={q} placeholder="Search a member by name or mobile number"
+        onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }} />
+      {open && (
+        <div className="writer-list">
+          {found.loading && <div className="muted" style={{ padding: 10 }}>Searching…</div>}
+          {!found.loading && !(found.data?.rows.length) && <div className="muted" style={{ padding: 10 }}>No member found.</div>}
+          {(found.data?.rows ?? []).map((w) => (
+            <button type="button" key={w.id} onClick={() => { onChange(w.id); setOpen(false); }}>
+              <b>{w.name}</b><span className="muted">{w.mobile}</span>
+            </button>
+          ))}
+          {value && <button type="button" onClick={() => setOpen(false)}><span className="muted">Keep the current writer</span></button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The embeds of an entry. Only the ones in use are drawn; the + button adds the next,
+   and removing one moves the rest up, so the slots stay filled from the first. */
+function EmbedList({ title, members, values, errors, setValues }: {
+  title: string; members: FieldDef[]; values: Values; errors: Record<string, string>;
+  setValues: (fn: (s: Values) => Values) => void;
+}) {
+  const filledTo = members.reduce((n, m, i) => (String(values[m.key] ?? '').trim() ? i + 1 : n), 0);
+  const [asked, setAsked] = useState(0);
+  const shown = Math.min(members.length, Math.max(filledTo, asked));
+
+  const remove = (i: number) => {
+    setValues((s) => {
+      const next = { ...s };
+      for (let j = i; j < members.length; j++) next[members[j].key] = j + 1 < members.length ? s[members[j + 1].key] ?? '' : '';
+      return next;
+    });
+    setAsked(Math.max(0, shown - 1));
+  };
+
+  return (
+    <div className="embeds">
+      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <b style={{ flex: 1, fontSize: 13 }}>{title} <span className="muted" style={{ fontWeight: 400 }}>({shown} of {members.length})</span></b>
+        <Btn sm icon="plus" disabled={shown >= members.length} onClick={() => setAsked(shown + 1)}>Add embed</Btn>
+      </div>
+      {shown === 0 && <p className="xs muted" style={{ margin: '8px 0 0' }}>No embeds yet. Use the + button to add one.</p>}
+      <div className="stack" style={{ marginTop: shown ? 10 : 0 }}>
+        {members.slice(0, shown).map((m, i) => (
+          <Field key={m.key} label={m.label} error={errors[m.key]}>
+            <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+              <textarea className={'ta' + (errors[m.key] ? ' err' : '')} rows={2} style={{ flex: 1 }}
+                value={String(values[m.key] ?? '')} placeholder="A link or embed code"
+                onChange={(e) => setValues((s) => ({ ...s, [m.key]: e.target.value }))} />
+              <Btn sm aria-label={'Remove ' + m.label} onClick={() => remove(i)}>Remove</Btn>
+            </div>
+          </Field>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Input({ f, v, set, error, parent }: { f: FieldDef; v: string | boolean; set: (v: string | boolean) => void; error?: string; parent?: string }) {
   const text = typeof v === 'string' ? v : '';
   const invalid = error ? ' err' : '';
 
@@ -97,7 +265,13 @@ function Input({ f, v, set, error }: { f: FieldDef; v: string | boolean; set: (v
           </select>
         );
       case 'ref':
-        return <RefSelect field={f} value={text} onChange={set} />;
+        return <RefSelect field={f} value={text} onChange={set} parent={parent} />;
+      case 'verses':
+        return <VersesEditor value={text} onChange={set} error={error} />;
+      case 'member':
+        return <WriterPick value={text} onChange={set} />;
+      case 'richtext':
+        return <RichText value={text} onChange={set} invalid={!!error} label={f.label} />;
       case 'color':
         return (
           <div className="row" style={{ gap: 8 }}>
@@ -138,7 +312,8 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
     const v: Values = {};
     for (const f of fields) {
       const cur = row?.[f.key];
-      v[f.key] = f.kind === 'toggle' ? !!cur : cur === null || cur === undefined ? '' : String(cur);
+      v[f.key] = f.kind === 'toggle' ? (row ? !!cur : !!f.default)
+        : cur === null || cur === undefined ? (!row && f.default !== undefined ? String(f.default) : '') : String(cur);
     }
     return v;
   });
@@ -224,10 +399,27 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
           {!canPublish && def.publish && (
             <Note tone="mute" icon="lock">Your role can write this but not make it live. Save it as a draft.</Note>
           )}
-          {fields.map((f) => (
-            <Input key={f.key} f={f} v={values[f.key]} error={errors[f.key]}
-              set={(v) => setValues((s) => ({ ...s, [f.key]: v }))} />
-          ))}
+          {fields.map((f, i) => {
+            if (f.showIf && !f.showIf.in.includes(String(values[f.showIf.key] ?? ''))) return null;
+            const input = (g: FieldDef) => (
+              <Input key={g.key} f={g} v={values[g.key]} error={errors[g.key]}
+                parent={g.refParent ? String(values[g.refParent.field] ?? '') : undefined}
+                set={(v) => setValues((s) => {
+                  const next = { ...s, [g.key]: v };
+                  /* Changing the study clears a step that belonged to the old one. */
+                  for (const d of fields) if (d.refParent?.field === g.key) next[d.key] = '';
+                  return next;
+                })} />
+            );
+            if (!f.group) return input(f);
+            /* A group is drawn once, where its first field sits, folded away until it is needed. */
+            if (fields.findIndex((x) => x.group === f.group) !== i) return null;
+            const members = fields.filter((x) => x.group === f.group);
+            return (
+              <EmbedList key={'group-' + f.group} title={f.group} members={members} values={values}
+                errors={errors} setValues={setValues} />
+            );
+          })}
         </div>
       </Drawer>
 
@@ -250,7 +442,7 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
 
 /* ---------- one kind of content ---------- */
 
-function TypeScreen({ def, source }: { def: TypeDef; source: string }) {
+function TypeScreen({ def, source, lookup }: { def: TypeDef; source: string; lookup: (id: string) => TypeDef | undefined }) {
   const { can } = useAuth();
   const [search, setSearch] = useState('');
   const [state, setState] = useState<'' | 'live' | 'draft'>('');
@@ -268,17 +460,22 @@ function TypeScreen({ def, source }: { def: TypeDef; source: string }) {
       if (state === 'live' && !r.live) return false;
       if (state === 'draft' && r.live) return false;
       if (!n) return true;
-      return def.fields.some((f) => (f.kind === 'text' || f.kind === 'textarea') && String(r[f.key] ?? '').toLowerCase().includes(n));
+      return def.fields.some((f) => (f.kind === 'text' || f.kind === 'textarea' || f.kind === 'richtext') && String(r[f.key] ?? '').toLowerCase().includes(n));
     });
   }, [all, search, state, def]);
 
   const langLabel = (v: unknown) =>
-    def.fields.find((f) => f.kind === 'select')?.options?.find((o) => o.v === v)?.l ?? '';
+    def.fields.find((f) => f.kind === 'select' && /anguage/i.test(f.key))?.options?.find((o) => o.v === v)?.l ?? '';
 
   const columns: Column<Row>[] = [
     {
       key: def.title, label: def.label.replace(/s$/, ''),
-      cell: (r) => <b>{String(r[def.title] || '(untitled)')}</b>,
+      cell: (r) => (
+        <>
+          <b>{String(r[def.title] || '(untitled)')}</b>
+          {r.from ? <> <Chip tone="plain">From {String(r.fromLabel)}</Chip></> : null}
+        </>
+      ),
       sortBy: (r) => String(r[def.title] ?? ''),
     },
     ...(def.dateKey ? [{
@@ -286,8 +483,17 @@ function TypeScreen({ def, source }: { def: TypeDef; source: string }) {
       cell: (r: Row) => (asDate(r[def.dateKey!]) ? <span className="muted">{fd(asDate(r[def.dateKey!])!)}</span> : <span className="muted">—</span>),
       sortBy: (r: Row) => String(r[def.dateKey!] ?? ''),
     } as Column<Row>] : []),
-    ...(def.fields.some((f) => f.kind === 'select')
-      ? [{ key: 'lang', label: 'Language', cell: (r: Row) => <span className="muted">{langLabel(r[def.fields.find((f) => f.kind === 'select')!.key]) || '—'}</span> } as Column<Row>]
+    ...(def.columns ?? []).map((k): Column<Row> => {
+      const fld = def.fields.find((x) => x.key === k)!;
+      const show = (r: Row) =>
+        fld.kind === 'ref' ? String(r[k + 'Label'] ?? '')
+          : fld.kind === 'select' ? (fld.options?.find((o) => o.v === String(r[k]))?.l ?? '')
+            : fld.kind === 'toggle' ? (r[k] ? 'Yes' : 'No')
+              : String(r[k] ?? '');
+      return { key: k, label: fld.label, cell: (r) => <span className={fld.kind === 'ref' ? undefined : 'muted'}>{show(r) || '—'}</span>, sortBy: (r) => show(r) };
+    }),
+    ...(def.fields.some((f) => f.kind === 'select' && /anguage/i.test(f.key))
+      ? [{ key: 'lang', label: 'Language', cell: (r: Row) => <span className="muted">{langLabel(r[def.fields.find((f) => f.kind === 'select' && /anguage/i.test(f.key))!.key]) || '—'}</span> } as Column<Row>]
       : []),
     ...(def.publish ? [{
       key: 'live', label: 'Status',
@@ -356,9 +562,9 @@ function TypeScreen({ def, source }: { def: TypeDef; source: string }) {
 
       {editing && (
         <Editor
-          key={editing === 'new' ? 'new' : editing.id}
-          def={def}
-          row={editing === 'new' ? null : editing}
+          key={editing === 'new' ? 'new' : (editing.from ? 'from-' : '') + editing.id}
+          def={editing !== 'new' && editing.from ? (lookup(String(editing.from)) ?? def) : def}
+          row={editing === 'new' ? null : editing.from ? (editing.source as Row) : editing}
           onClose={() => setEditing(null)}
           onDone={() => { setEditing(null); setBump((n) => n + 1); }}
         />
@@ -385,7 +591,7 @@ export function ContentManager({ types }: { types: string[] }) {
       {mine.length > 1 && (
         <Seg value={def.id} onChange={setActive} options={mine.map((t) => ({ id: t.id, label: t.label }))} />
       )}
-      <TypeScreen key={def.id} def={def} source={defs.data.source} />
+      <TypeScreen key={def.id} def={def} source={defs.data.source} lookup={(id) => defs.data!.types.find((t) => t.id === id)} />
     </div>
   );
 }
