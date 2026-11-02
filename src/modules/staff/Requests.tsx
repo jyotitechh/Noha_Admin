@@ -91,7 +91,7 @@ export default function Requests() {
                 <span className="t1">{r.name}</span>
                 <span className="t2">
                   <span className="mono">{mask(r.mobile)}</span>
-                  {r.at ? ` · asked ${since(r.at)} ago (${fdt(r.at)})` : ''}
+                  {r.at ? ` · asked ${since(r.at)} (${fdt(r.at)})` : ''}
                 </span>
                 {r.note && <span className="t2">“{r.note}”</span>}
               </span>
