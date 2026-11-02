@@ -12,7 +12,7 @@
    the code in the response, which is only acceptable on a developer's machine
    or behind the office passphrase. */
 
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,9 @@ import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, 
 import { channels, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+/* How long a sign-in lasts. A week by default (SESSION_HOURS changes it): the token lives in the browser
+   tab's sessionStorage, so closing the tab ends it long before that, and signing out ends it at once. */
+const SESSION_TTL_MS = (Number(process.env.SESSION_HOURS) || 168) * 60 * 60 * 1000;
 
 /** email -> { code, expires, tries } */
 const codes = new Map();
@@ -66,6 +68,61 @@ function saveSessions() {
 }
 
 loadSessions();
+
+/* ---------- sessions that survive a restart ----------
+
+   Sessions are kept in the Map above. On a deployed server (AppSail) a restart, a redeploy or the
+   platform recycling the process empties it, and everybody's next page refresh answered 401 and signed them
+   out. So when SESSION_SECRET is set, the token is signed and carries the session inside it: after a
+   restart a valid, unexpired token is picked up again, and the staff member is re-checked straight away
+   (suspended or revoked since => signed out, role changed => the new role).
+
+   Signing out, or revoking someone, is remembered for as long as the process runs. A token signed out and then
+   carried across a restart could come back until it expires; the tab's token is deleted on sign-out, so that
+   needs someone to have copied it first. SESSION_SECRET must be long and private, and changing it signs everyone out. */
+const secret = () => String(process.env.SESSION_SECRET || '').trim();
+const sign = (body) => createHmac('sha256', secret()).update(body).digest('base64url');
+/** Tokens signed out or removed since this process started. */
+const revoked = new Set();
+const revoke = (token) => { revoked.add(token); if (revoked.size > 5000) revoked.delete(revoked.values().next().value); };
+
+/** A new token for a session: a plain random id, or (with SESSION_SECRET) one that carries the session, signed. */
+function mintToken(session) {
+  const id = randomUUID();
+  if (!secret()) return id;
+  const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
+  return `${id}.${payload}.${sign(id + '.' + payload)}`;
+}
+
+/** Pick a session up again from its signed token, after a restart. Null when it is not one of ours. */
+function resumeFromToken(token) {
+  if (!secret() || !token || revoked.has(token)) return null;
+  const parts = String(token).split('.');
+  if (parts.length !== 3) return null;
+  const [id, payload, sig] = parts;
+  const good = Buffer.from(sign(id + '.' + payload));
+  const given = Buffer.from(sig);
+  if (good.length !== given.length || !timingSafeEqual(good, given)) return null;
+  let data;
+  try { data = JSON.parse(Buffer.from(payload, 'base64url').toString()); } catch { return null; }
+  if (!(data?.expires > Date.now())) return null;
+  const s = { ...data, token };
+  sessions.set(token, s);
+  recheck(s);
+  return s;
+}
+
+/** After a restart: is this person still allowed in, and as what? Does not wait: the request that
+    resumed the session goes ahead, and a person who is no longer allowed is out from the next one. */
+async function recheck(s) {
+  try {
+    const found = await resolveStaff(s.mobile ? { mobile: s.mobile } : { email: s.email });
+    if (!found.staff) { sessions.delete(s.token); revoke(s.token); return; }
+    s.role = found.staff.role;
+    s.name = found.staff.name || s.name;
+    s.title = found.staff.title || s.title;
+  } catch { /* Catalyst unreachable just now: keep the session rather than sign everyone out over a blip */ }
+}
 
 const production = () => process.env.NODE_ENV === 'production';
 
@@ -292,9 +349,7 @@ export async function verifyCode({ mobile, email } = {}, code) {
   if (!found.staff) return { ok: false, error: found.error };
   const staff = found.staff;
 
-  const token = randomUUID();
   const session = {
-    token,
     staffId: staff.id,
     rowId: staff.rowId,
     memberRowId: staff.memberRowId ?? null,
@@ -306,6 +361,8 @@ export async function verifyCode({ mobile, email } = {}, code) {
     role: staff.role,
     expires: Date.now() + SESSION_TTL_MS,
   };
+  const token = mintToken(session);
+  session.token = token;
   sessions.set(token, session);
   saveSessions();
   /* Stamp the sign-in. Not worth failing the sign-in over. */
@@ -339,7 +396,7 @@ export const publicUser = (s) => ({
 });
 
 export function sessionFor(token) {
-  const s = sessions.get(token);
+  const s = sessions.get(token) || resumeFromToken(token);
   if (!s) return null;
   if (Date.now() > s.expires) { sessions.delete(token); saveSessions(); return null; }
   return s;
@@ -358,7 +415,7 @@ export function refreshSessions(staffId, patch = null) {
   let n = 0;
   for (const [token, sess] of sessions) {
     if (sess.staffId !== staffId) continue;
-    if (patch) Object.assign(sess, patch); else sessions.delete(token);
+    if (patch) Object.assign(sess, patch); else { sessions.delete(token); revoke(token); }
     n++;
   }
   if (n) saveSessions();
@@ -367,6 +424,7 @@ export function refreshSessions(staffId, patch = null) {
 
 /* Signing out must outlive a restart too, or the token would come back. */
 export const signOut = (token) => {
+  revoke(token);
   const had = sessions.delete(token);
   if (had) saveSessions();
   return had;

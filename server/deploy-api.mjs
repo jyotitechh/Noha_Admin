@@ -26,7 +26,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomBytes } from 'node:crypto';
 import { credentialProblems, clean } from './catalyst.js';
 import { passphraseLooksCopied } from './auth.js';
 
@@ -88,7 +88,12 @@ const passphrase = kept('ksm-passphrase.txt',
   () => [word(), word(), word(), word(), randomInt(1000, 9999)].join('-'),
   (v) => !passphraseLooksCopied(v) && v.length >= 12);
 
+/* Signs the session tokens, so a signed-in tab keeps working when the API restarts or is redeployed
+   (server/auth.js). Made once and kept, like the passphrase; deleting the file signs everyone out. Never printed. */
+const sessionSecret = kept('ksm-session-secret.txt', () => randomBytes(48).toString('base64url'), (v) => v.length >= 40);
+
 const settings = {
+  SESSION_SECRET: sessionSecret.value,
   NODE_ENV: 'production',
   CATALYST_SCHEMA: envFile.CATALYST_SCHEMA || 'noah',
   CATALYST_ENV: envFile.CATALYST_ENV || 'Development',

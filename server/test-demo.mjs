@@ -15,7 +15,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function withServer(env, fn) {
   const child = spawn(process.execPath, [join(here, 'index.js'), String(PORT)], {
-    env: { ...process.env, NODE_ENV: 'production', SESSIONS_FILE: 'off', ...env }, stdio: 'ignore',
+    /* CATALYST_ENV_FILE points at a file that is not there, so the real .env.local is never read: nothing here can touch Catalyst. */
+    env: { ...process.env, NODE_ENV: 'production', SESSIONS_FILE: 'off', CATALYST_ENV_FILE: join(here, 'no-such-env-file'), ...env }, stdio: 'ignore',
   });
   try {
     for (let i = 0; i < 40; i++) { try { if ((await fetch(base + '/health')).ok) break; } catch { /* starting */ } await wait(250); }
@@ -55,6 +56,41 @@ await withServer({ SHOW_CODE_ON_SCREEN: 'true', ADMIN_PASSPHRASE: 'would-be-aske
   check('the fixed test code is NOT accepted', fixed.status === 400 || code === '111111');
   await post('/auth/request-code', { mobile: '+91 90000 00001' }).then((r) => { check('each request gets its own code', !!r.json.devCode); return post('/auth/verify', { mobile: '+91 90000 00001', code: r.json.devCode }); })
     .then((ok) => check('the code shown signs in', ok.status === 200 && !!ok.json.token, JSON.stringify(ok.json)));
+});
+
+console.log('\nSigned in, then the server restarts\n' + '─'.repeat(64));
+
+const SIGNED = { SHOW_CODE_ON_SCREEN: 'true', SESSION_SECRET: 'a-long-private-test-secret-that-is-not-real-0123456789' };
+const mobile = '+91 90000 00001';
+const login = async () => {
+  const a = await post('/auth/request-code', { mobile });
+  return (await post('/auth/verify', { mobile, code: a.json.devCode })).json.token;
+};
+const me = (token) => fetch(base + '/auth/me', { headers: { authorization: 'Bearer ' + token } }).then((r) => r.status);
+
+let kept = '';
+await withServer(SIGNED, async () => {
+  kept = await login();
+  check('a signed token is handed out', kept.split('.').length === 3 && (await me(kept)) === 200);
+  check('a token that was altered is refused', (await me(kept.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')))) === 401);
+  const [id, , sig] = kept.split('.');
+  const forged = Buffer.from(JSON.stringify({ staffId: 'x', role: 'super', name: 'Forged', expires: Date.now() + 1e9 })).toString('base64url');
+  check('a made-up session is refused', (await me(`${id}.${forged}.${sig}`)) === 401);
+  const out = await login();
+  await fetch(base + '/auth/sign-out', { method: 'POST', headers: { authorization: 'Bearer ' + out } });
+  check('signing out ends it at once', (await me(out)) === 401);
+});
+await withServer(SIGNED, async () => {
+  check('after a restart the same token still works (a refresh does not sign you out)', (await me(kept)) === 200);
+});
+
+let plain = '';
+await withServer({ SHOW_CODE_ON_SCREEN: 'true' }, async () => { plain = await login(); });
+await withServer({ SHOW_CODE_ON_SCREEN: 'true' }, async () => {
+  check('without SESSION_SECRET a restart does sign people out (why the deployed API sets it)', (await me(plain)) === 401);
+});
+await withServer({ SHOW_CODE_ON_SCREEN: 'true', SESSION_SECRET: 'a-different-private-test-secret-0123456789-abcdefghijk' }, async () => {
+  check('changing the secret signs everyone out', (await me(kept)) === 401);
 });
 
 await withServer({ ADMIN_PASSPHRASE: 'keep-out-1234' }, async () => {

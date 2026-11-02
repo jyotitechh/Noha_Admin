@@ -26,6 +26,9 @@ export interface CodeSent {
 interface AuthValue {
   user: User | null;
   loading: boolean;
+  /** The server could not be reached to check the saved login. The login is kept; `retry` tries again. */
+  unreachable: boolean;
+  retry: () => Promise<void>;
   /** True when the signed-in role holds any one of `perm`. */
   can: (perm?: string | string[]) => boolean;
   /* `devCode` is only present when nothing was really sent: no SMS or email
@@ -42,15 +45,36 @@ const Ctx = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  /* Set when the saved session could not be checked because the server did not answer: the
+     login is KEPT, and the screen offers to try again. */
+  const [unreachable, setUnreachable] = useState(false);
 
-  /* Pick up an existing session on reload. */
-  useEffect(() => {
+  /* Pick up an existing session on reload.
+
+     Refreshing the page must not sign anyone out; only signing out, the tab closing (the token
+     lives in sessionStorage) or the server saying the session is no longer valid (401) does.
+     A server that is waking up, a dropped connection or a 503 is none of those, so those are
+     retried and, if they keep failing, the saved login is kept rather than thrown away. */
+  const resume = useCallback(async () => {
     if (!getToken()) { setLoading(false); return; }
-    api.get<{ user: User }>('/auth/me')
-      .then((r) => setUser(r.user))
-      .catch(() => setToken(''))
-      .finally(() => setLoading(false));
+    setLoading(true);
+    setUnreachable(false);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const r = await api.get<{ user: User }>('/auth/me');
+        setUser(r.user);
+        setLoading(false);
+        return;
+      } catch (e) {
+        if ((e as { status?: number }).status === 401) { setToken(''); setLoading(false); return; }
+        if (attempt < 3) await new Promise((ok) => setTimeout(ok, 1200 * (attempt + 1)));
+      }
+    }
+    setUnreachable(true);
+    setLoading(false);
   }, []);
+
+  useEffect(() => { resume(); }, [resume]);
 
   const requestCode = useCallback(async (who: Identity, passphrase?: string) => {
     return api.post<CodeSent>('/auth/request-code', { ...who, passphrase });
@@ -85,8 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthValue>(
-    () => ({ user, loading, can, requestCode, verify, viewAs, signOut }),
-    [user, loading, can, requestCode, verify, viewAs, signOut],
+    () => ({ user, loading, unreachable, retry: resume, can, requestCode, verify, viewAs, signOut }),
+    [user, loading, unreachable, resume, can, requestCode, verify, viewAs, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -106,12 +106,27 @@ function ModulePage() {
 }
 
 function Routed() {
-  const { user, loading } = useAuth();
+  const { user, loading, unreachable, retry } = useAuth();
 
   if (loading) {
     return (
       <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
         <Loading what="the console" />
+      </div>
+    );
+  }
+
+  /* The saved login is still there; the server just did not answer. Do not send them to sign in again. */
+  if (!user && unreachable) {
+    return (
+      <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 24 }}>
+        <div className="stack" style={{ maxWidth: 420, textAlign: 'center', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>Cannot reach the server</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            You are still signed in; the server did not answer just now. It may be waking up. Try again in a moment.
+          </p>
+          <div><button className="btn pri" onClick={() => retry()}>Try again</button></div>
+        </div>
       </div>
     );
   }
