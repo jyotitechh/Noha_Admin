@@ -188,3 +188,27 @@ If the Catalyst developer sends `ADMIN_API_KEY.txt`, none of this is needed:
 `GET /admin/files/:id` on the Noah API reads the same files with the admin key
 and no Catalyst scope at all. See [NOAH-API.md](NOAH-API.md). Either route
 fixes it; the scope is the one you can do without waiting for anyone.
+
+---
+
+# Pictures dragged in from the computer (Stratus)
+
+The content forms (prayers, confessions, manna, banners, announcements, Bible study and the rest)
+take a picture as a web link, because that is all the Noah app reads. The picture box also accepts
+a file dragged in from the computer: the console stores it in a **Catalyst Stratus** bucket and puts
+that bucket public link in the field. Pasting a link still works.
+
+One-off setup:
+
+1. In the Catalyst console, Cloud Scale > **Stratus**, create a bucket and make it **public**
+   (the app loads the pictures straight from it, so it must not need a sign-in to read).
+2. Give the console key the **Stratus.fileop.CREATE** permission. It is in the list that
+   `npm run catalyst:scopes` prints. Make a new Self Client code with that list, then run
+   `npm run catalyst:connect` and paste the client id, secret and code in your own terminal.
+3. Set on the API (and in .env.local to try it locally):
+   `STRATUS_BUCKET=<the bucket name>` and, if the data centre is not India, `STRATUS_DC=<ending>`
+   (it is `in` by default, for zohostratus.in). `npm run deploy:api` sends both to AppSail.
+
+The link looks like `https://<bucket>-development.zohostratus.in/pictures/2026/<random>.jpg` while the
+project is in Development. Accepted: JPEG, PNG, WebP or GIF up to 5 MB, judged by the file itself.
+Without STRATUS_BUCKET the drop box says uploading is not set up and the link box keeps working.

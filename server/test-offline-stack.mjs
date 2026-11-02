@@ -596,6 +596,47 @@ section('Reading less, and seeing what was spent');
 }
 
 /* ================================================================== */
+section('Pictures dragged in from the computer, and the two form changes');
+
+const rawUpload = async (bytes, tok, type = 'image/png') => {
+  const r = await fetch(BASE + '/uploads/picture', { method: 'POST', headers: { 'content-type': type, ...(tok ? { authorization: 'Bearer ' + tok } : {}) }, body: bytes });
+  return { status: r.status, body: await r.json().catch(() => null) };
+};
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('fake-png-body-for-the-test')]);
+const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('fake-jpeg-body-for-the-test')]);
+
+const up = await rawUpload(PNG, ET);
+check('a picture dropped by the content editor is stored and answers with its link',
+  up.status === 201 && /^http:[/][/]127[.]0[.]0[.]1:\d+[/]pictures[/]\d{4}[/][0-9a-f-]{36}[.]png$/.test(up.body?.url || ''), JSON.stringify(up.body));
+if (up.body?.url) {
+  const back = Buffer.from(await (await fetch(up.body.url)).arrayBuffer());
+  check('...and that link serves the same bytes back', back.equals(PNG));
+}
+const upJpg = await rawUpload(JPG, ET, 'image/jpeg');
+check('a JPEG is accepted too, under a different name', upJpg.status === 201 && /[.]jpg$/.test(upJpg.body?.url || '') && upJpg.body.url !== up.body?.url);
+check('what counts is the file itself, not what the browser calls it', (await rawUpload(JPG, ET, 'text/plain')).status === 201);
+check('a file that is not a picture is refused (400)', (await rawUpload(Buffer.from('<script>alert(1)</script> not a picture at all'), ET, 'image/png')).status === 400);
+check('an empty drop is refused (400)', (await rawUpload(Buffer.alloc(0), ET)).status === 400);
+check('a picture over 5 MB is refused (413)', (await rawUpload(Buffer.concat([JPG, Buffer.alloc(5 * 1048576)]), ET, 'image/jpeg')).status === 413);
+check('uploading needs the permission to write content (403)', (await rawUpload(PNG, FT)).status === 403);
+check('...and a sign-in (401)', (await rawUpload(PNG, '')).status === 401);
+const upAud = await call('GET', '/data/AUD?limit=200', null, BT);
+check('an upload is in the audit log', (upAud.body?.rows || []).some((x) => /Uploaded a picture/.test(x.action || '')));
+
+const ctypes = (await call('GET', '/content/types', null, ET)).body?.types || [];
+const prayersDef = ctypes.find((t) => t.id === 'prayers');
+const confessDef = ctypes.find((t) => t.id === 'confessions');
+check('Daily Prayers no longer asks about obituary notices', prayersDef && !prayersDef.fields.some((f) => f.key === 'showOnObituary'));
+check('Confessions no longer has a separate Prayer box', confessDef && !confessDef.fields.some((f) => f.key === 'prayer'));
+check('...but each still has its message, embeds and picture', ['content', 'embed01', 'image'].every((k) => prayersDef.fields.some((f) => f.key === k) && confessDef.fields.some((f) => f.key === k)));
+check('every picture field offers the drop box', ctypes.every((t) => t.fields.filter((f) => f.key === 'image').every((f) => f.picture === true)));
+
+if (up.body?.url) {
+  await fakeReady('dailyPrayers');
+  const withPic = await call('POST', '/content/prayers', { title: 'With a dropped picture', content: '<p>Lord, hear us.</p>', publishedDate: '2026-10-09', contentLanguage: '1', image: up.body.url }, ET);
+  check('a prayer saves with the uploaded picture link in its picture field', withPic.status === 201, `${withPic.status} ${JSON.stringify(withPic.body)?.slice(0, 200)}`);
+}
+
 section('Telling the member about a decision (ADMIN_INTEGRATION.md)');
 
 if (!NO_KEY) {

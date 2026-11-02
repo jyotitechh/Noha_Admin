@@ -26,6 +26,7 @@ import http from 'node:http';
 
 const PORT = process.env.PORT || '4300';
 const NOAH_PORT = process.env.NOAH_PORT || '4301';
+const STRATUS_PORT = process.env.STRATUS_PORT || '4302';
 const KEY = 'offline-admin-key';
 
 /* Set BEFORE anything imports catalyst.js, which reads the environment once.
@@ -41,6 +42,12 @@ Object.assign(process.env, {
   CATALYST_REFRESH_TOKEN: 'offline',
   NOAH_API_BASE: `http://127.0.0.1:${NOAH_PORT}`,
   NOAH_ADMIN_API_KEY: process.env.OFFLINE_NO_KEY ? '' : KEY,
+  /* Pictures dropped on a content form go to a Stratus bucket; this is the stand-in for it. */
+  ...(process.env.OFFLINE_NO_STRATUS ? { STRATUS_BUCKET: '' } : {
+    STRATUS_BUCKET: 'offline-bucket',
+    STRATUS_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
+    CATALYST_ACCOUNTS_HOST: `http://127.0.0.1:${STRATUS_PORT}`,
+  }),
 });
 delete process.env.ADMIN_PASSPHRASE;
 
@@ -189,6 +196,33 @@ http.createServer(async (req, res) => {
   }
   err(res, 404, 'not_found', 'No such endpoint.');
 }).listen(Number(NOAH_PORT), '127.0.0.1');
+
+/* ---------- a stand-in for the Stratus bucket ----------
+   PUT <bucket>/<key> with Authorization: Zoho-oauthtoken, as Catalyst documents it; GET serves it back,
+   as a public bucket would. */
+const stored = new Map();
+http.createServer(async (req, res) => {
+  const key = new URL(req.url, 'http://x').pathname;
+  /* Also stands in for accounts.zoho.in: an upload signs in to Catalyst first, and the real one is refused here. */
+  if (key === '/oauth/v2/token') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ access_token: 'offline-access-token', expires_in: 3600 }));
+  }
+  if (req.method === 'GET') {
+    const f = stored.get(key);
+    if (!f) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': f.type });
+    return res.end(f.buf);
+  }
+  if (req.method === 'PUT') {
+    const chunks = []; for await (const c of req) chunks.push(c);
+    if (!/^Zoho-oauthtoken /.test(req.headers.authorization || '')) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end('{"error":"access_forbidden"}'); }
+    if (stored.has(key)) { res.writeHead(409, { 'content-type': 'application/json' }); return res.end('{"error":"key_already_exists"}'); }
+    stored.set(key, { buf: Buffer.concat(chunks), type: req.headers['content-type'] || 'application/octet-stream' });
+    res.writeHead(200); return res.end();
+  }
+  res.writeHead(405); res.end();
+}).listen(Number(STRATUS_PORT), '127.0.0.1');
 
 /* ---------- the real server, on the fake ---------- */
 

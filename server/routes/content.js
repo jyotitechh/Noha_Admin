@@ -9,6 +9,8 @@
    A role with only content.edit can write a devotional but cannot put it in
    front of members. Everything done here is written to the audit log. */
 
+import express from 'express';
+import { storePicture, PictureError, MAX_BYTES } from '../pictures.js';
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers } from '../noah-schema.js';
@@ -66,6 +68,27 @@ export default function mountContent(app, { requireSession, requirePerm }) {
       : all;
     res.json({ rows: hit.slice(0, 20).map(pick) });
   }));
+
+  /* A picture dragged in from the office's computer. The file's bytes are the body. It goes to
+     the Stratus bucket and the reply is the public link, which the form then stores in the
+     picture field like any pasted link. Anyone who may write content may upload one. */
+  app.post('/api/uploads/picture',
+    requireSession, requirePerm('content.edit'),
+    express.raw({ type: () => true, limit: MAX_BYTES + 1024 }),
+    async (req, res) => {
+      try {
+        const saved = await storePicture(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0));
+        await writeAudit({
+          actor: req.user.name, role: roleById(req.session.role).name,
+          action: 'Uploaded a picture', module: 'Content', record: saved.url,
+          before: null, after: { bytes: saved.bytes, type: saved.type }, remark: '', ip: req.ip || '',
+        });
+        res.status(201).json(saved);
+      } catch (e) {
+        if (e instanceof PictureError) return res.status(e.status).json({ error: e.message, ...e.extra });
+        throw e;
+      }
+    });
 
   app.get('/api/content/:type', ...edit, guarded(async (req, res) => {
     if (!typeById(req.params.type)) throw new ContentError(404, 'No such kind of content.');

@@ -114,6 +114,8 @@ export const SCOPES = [
   'ZohoCatalyst.zcql.CREATE',
   'ZohoCatalyst.folders.READ',
   'ZohoCatalyst.files.READ',
+  /* Pictures uploaded from the content forms go to a Stratus bucket (server/pictures.js). */
+  'Stratus.fileop.CREATE',
 ];
 
 /* Development or Production. Catalyst wants it named on every call. There is

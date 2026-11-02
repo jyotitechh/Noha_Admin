@@ -102,7 +102,6 @@ The prayer members are invited to pray with.
 | Publish on | `publishedDate` | datetime | a date, stored as a datetime |
 | Language | `contentLanguage` | int | stored as its code number |
 | Members only | `visibleTo` | boolean |  |
-| Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
 | Prayer | `content` | text | required |
 | Embed 01 | `embed01` | text |  |
 | Embed 02 | `embed02` | text |  |
@@ -161,7 +160,6 @@ The daily confession of faith.
 | Embed 18 | `embed18` | text |  |
 | Embed 19 | `embed19` | text |  |
 | Embed 20 | `embed20` | text |  |
-| Prayer | `prayer` | text |  |
 | Picture | `image` | text |  |
 | Published | `published` | boolean |  |
 
@@ -409,3 +407,63 @@ The lessons a member watches or reads.
 | Published | `published` | int | stored as 1 or 0 |
 
 written on create: `createdOn`; on change: `updatedOn`. "live" means `published`.
+
+---
+
+## Bible study: Study plans, their steps and quiz questions.
+
+### Bible studies: table `bibleStudy`
+
+A study plan members work through, a step at a time. Add its steps and quiz questions in the other tabs.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Name | `name` | varchar | required |
+| Description | `description` | text |  |
+| Who can take it | `type` | int | stored as its code number; required; on by default |
+| Donation amount (INR) | `donationAmount` | double | required |
+| Donation amount (USD) | `donationAmountUSD` | double | required |
+| Only one step a day | `maxStepsPerDay` | boolean |  |
+| Picture | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Active | `status` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. "live" means `status`.
+
+### Steps: table `bibleStudyConnect`
+
+The steps of a study, in order. Each has verses to read, and may have a video, a picture and a quiz.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Bible study | `bibleStudyId` | bigint | the id of a row in `bibleStudy`; required |
+| Name | `name` | varchar | required |
+| Order | `orderCol` | int | whole number; required; on by default |
+| Description | `description` | text |  |
+| Verses | `verses` | varchar |  |
+| Video (YouTube) | `youtubeId` | varchar |  |
+| Video thumbnail link | `youtubeThumbnail` | text |  |
+| Photo | `photo` | text |  |
+| Language | `contentLanguage` | int | stored as its code number |
+
+written on create: `created`; on change: `updated`. always written: `isArchived = false`. there is no draft state: an entry is simply there.
+
+### Quiz questions: table `bibleStudyStepQuiz`
+
+A question at the end of a step, with up to four options. Tick each option that is a valid answer.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Bible study | `bibleStudyPlanId` | bigint | the id of a row in `bibleStudy`; required |
+| Step | `bibleStudyStepId` | bigint | the id of a row in `bibleStudyConnect`; required |
+| Question | `question` | text | required |
+| Option 1 | `option1` | text |  |
+| Option 1 is a valid answer | `option1isAnswer` | boolean |  |
+| Option 2 | `option2` | text |  |
+| Option 2 is a valid answer | `option2isAnswer` | boolean |  |
+| Option 3 | `option3` | text |  |
+| Option 3 is a valid answer | `option3isAnswer` | boolean |  |
+| Option 4 | `option4` | text |  |
+| Option 4 is a valid answer | `option4isAnswer` | boolean |  |
+
+written on create: `created`; on change: `updated`. always written: `isArchived = false`. there is no draft state: an entry is simply there.

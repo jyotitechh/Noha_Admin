@@ -44,8 +44,10 @@ export const SECTIONS = {
 
 const lang = (key = 'contentLanguage', label = 'Language') =>
   ({ key, label, kind: 'select', options: LANGUAGES, store: 'int', hint: 'The language this is written in.' });
-const image = (key = 'image', label = 'Picture', hint = 'A link to the picture. Uploading from here is not available yet.') =>
-  ({ key, label, kind: 'url', hint });
+/* A picture: drop one from the computer, or paste a link. Stored as a web link either way (kind url);
+   `picture` is what makes the form draw the drop box (server/pictures.js stores the upload). */
+const image = (key = 'image', label = 'Picture', hint = 'Drop a picture here from your computer, or paste a link to one.') =>
+  ({ key, label, kind: 'url', picture: true, hint });
 const published = (key = 'published', label = 'Published', store) =>
   ({ key, label, kind: 'toggle', ...(store ? { store } : {}), hint: 'Members see it in the app once this is on.' });
 const when = (key, label, extra = {}) => ({ key, label, kind: 'date', store: 'datetime', ...extra });
@@ -111,7 +113,6 @@ export const TYPES = [
       when('publishedDate', 'Publish on'),
       lang(),
       membersOnly,
-      { key: 'showOnObituary', label: 'Show on obituary notices', kind: 'toggle', store: 'int' },
       rich('content', 'Prayer', { required: true }),
       ...embeds(),
       image(),
@@ -130,7 +131,6 @@ export const TYPES = [
       membersOnly,
       rich('content', 'Confession', { required: true }),
       ...embeds(),
-      rich('prayer', 'Prayer'),
       image(),
       published(),
     ],
@@ -170,8 +170,8 @@ export const TYPES = [
     intro: 'The carousel at the top of the app’s home screen, in the order members swipe through it. A banner disappears after its end date.',
     fields: [
       { key: 'caption', label: 'Caption', kind: 'text', required: true },
-      image('landscapeImage', 'Landscape picture', 'A link to the wide picture, for tablets and wide screens.'),
-      image('portraitImage', 'Portrait picture', 'A link to the tall picture, for phones.'),
+      image('landscapeImage', 'Landscape picture', 'The wide picture, for tablets and wide screens. Drop one here or paste a link.'),
+      image('portraitImage', 'Portrait picture', 'The tall picture, for phones. Drop one here or paste a link.'),
       { key: 'url', label: 'Opens', kind: 'url', hint: 'The web address a tap on the banner opens.' },
       when('expiryTime', 'Shown until', { hint: 'The last day it shows. Leave empty to show it until it is taken down.' }),
       { key: 'orderCol', label: 'Order', kind: 'number', store: 'int', hint: 'Where it sits in the carousel; lowest first.' },

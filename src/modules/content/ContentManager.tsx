@@ -25,10 +25,13 @@ import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Empty, Failed, Field, Kpi, Kpis, Loading, Note, Seg, Switch } from '@/components/ui';
 import { fd } from '@/lib/format';
 import { RichText } from './RichText';
+import { PictureInput } from './PictureInput';
 
 interface FieldDef {
   key: string; label: string; kind: 'text' | 'textarea' | 'date' | 'select' | 'toggle' | 'number' | 'url' | 'color' | 'ref' | 'richtext' | 'member' | 'verses';
   default?: string | boolean;
+  /** A picture: draws the drop box as well as the link box. */
+  picture?: boolean;
   /** Shown only while another field holds one of these values. */
   showIf?: { key: string; in: string[] };
   /** A pointer offered only among the rows whose `column` equals what another field holds. */
@@ -281,6 +284,8 @@ function Input({ f, v, set, error, parent }: { f: FieldDef; v: string | boolean;
           </div>
         );
       case 'url':
+        /* A picture field takes a dropped file as well as a link. */
+        if (f.picture) return <PictureInput value={text} onChange={set} invalid={!!error} label={f.label} />;
         return (
           <>
             <input className={'inp' + invalid} type="url" value={text} placeholder="https://" onChange={(e) => set(e.target.value)} />
