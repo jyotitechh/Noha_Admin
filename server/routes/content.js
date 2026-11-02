@@ -14,7 +14,7 @@ import { storePicture, PictureError, MAX_BYTES } from '../pictures.js';
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers } from '../noah-schema.js';
-import { TYPES, SECTIONS, LANGUAGES, BOOKS, typeById } from '../content-types.js';
+import { TYPES, SECTIONS, LANGUAGES, BOOKS, typeById, APP_READS } from '../content-types.js';
 import {
   listContent, createContent, updateContent, publishContent, deleteContent, ContentError, onCatalyst,
 } from '../content.js';
@@ -48,7 +48,7 @@ export default function mountContent(app, { requireSession, requirePerm }) {
       languages: LANGUAGES,
       books: BOOKS,
       source: onCatalyst() ? 'catalyst' : 'sample',
-      types: TYPES,
+      types: TYPES.map((t) => (t.id in APP_READS ? { ...t, inApp: APP_READS[t.id] } : t)),
     });
   });
 

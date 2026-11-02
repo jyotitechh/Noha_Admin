@@ -44,6 +44,8 @@ interface FieldDef {
 interface TypeDef {
   id: string; section: string; label: string; singular: string; table: string; title: string;
   dateKey: string | null; publish: string | null; intro: string; fields: FieldDef[];
+  /** Whether the Noah app can read this kind today; absent when it has not been checked. */
+  inApp?: boolean;
   /** Fields shown as extra columns in the list. */
   columns?: string[];
 }
@@ -518,6 +520,19 @@ function TypeScreen({ def, source, lookup }: { def: TypeDef; source: string; loo
         <p className="muted" style={{ margin: 0, flex: 1 }}>{def.intro}</p>
         <Btn variant="ok" icon="plus" disabled={!canWrite} onClick={() => setEditing('new')}>New {def.singular}</Btn>
       </div>
+
+      {/* Whether the Noah app can show what is saved here: not every kind has a route in the app's backend yet. */}
+      {def.inApp === true && (
+        <Note tone="ok" icon="mobile">
+          <b>The Noah app reads this.</b> A published item shows to members from its date, within a minute or so of saving.
+        </Note>
+      )}
+      {def.inApp === false && (
+        <Note tone="warn" icon="mobile">
+          <b>The Noah app does not read this yet.</b> What you save here is stored safely in Catalyst, and it
+          shows in the app once the app&rsquo;s backend has a route for it.
+        </Note>
+      )}
 
       {notReady && (
         <Note tone="warn" icon="alert">

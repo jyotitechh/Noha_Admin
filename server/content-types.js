@@ -408,6 +408,20 @@ export const BOOKS = [
 
 export const typeById = (id) => TYPES.find((t) => t.id === id);
 
+/* Which of these the Noah app can read today. Saving here stores the item in Catalyst; the app only
+   shows it once the Noah API has a route that reads that table.
+
+   Checked 2 Nov 2026 against the Noah API (GET /content/...): manna, its categories, prayers and
+   confessions answer (they ask for a member sign-in); the dictionary, banners and announcements
+   answer "no such endpoint", and no route reads Bible study (docs/FLUTTER-CONTENT-INTEGRATION.md).
+   Media and school are left out: not checked. Change an entry here when a route appears, and the
+   console stops (or starts) warning the office. */
+export const APP_READS = {
+  manna: true, mannaCategories: true, prayers: true, confessions: true,
+  dictionary: false, dictionaryCategories: false, banners: false, announcements: false,
+  bibleStudies: false, bibleStudySteps: false, bibleStudyQuizzes: false,
+};
+
 /* Catalyst refuses some column names outright, so the project's tables have them
    with `Col` added (`dateCol`, `orderCol`, `priorityCol`...). The definitions above
    already use the project's spelling; this is kept for anything that still names a

@@ -629,6 +629,7 @@ const confessDef = ctypes.find((t) => t.id === 'confessions');
 check('Daily Prayers no longer asks about obituary notices', prayersDef && !prayersDef.fields.some((f) => f.key === 'showOnObituary'));
 check('Confessions no longer has a separate Prayer box', confessDef && !confessDef.fields.some((f) => f.key === 'prayer'));
 check('...but each still has its message, embeds and picture', ['content', 'embed01', 'image'].every((k) => prayersDef.fields.some((f) => f.key === k) && confessDef.fields.some((f) => f.key === k)));
+check('the console says which kinds the Noah app reads today', ['manna','prayers','confessions'].every((id) => ctypes.find((x) => x.id === id)?.inApp === true) && ['dictionary','banners','announcements','bibleStudies'].every((id) => ctypes.find((x) => x.id === id)?.inApp === false));
 check('every picture field offers the drop box', ctypes.every((t) => t.fields.filter((f) => f.key === 'image').every((f) => f.picture === true)));
 
 if (up.body?.url) {
