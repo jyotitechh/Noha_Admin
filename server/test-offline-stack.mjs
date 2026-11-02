@@ -678,6 +678,56 @@ check('...and a sign-in', (await call('POST', `/registrations/${APPROVED_REG}/no
 const audited = await call('GET', '/data/AUD?limit=200', null, BT);
 if (!NO_KEY) check('telling the member is in the audit log', (audited.body?.rows || []).some((x) => /Told the member/.test(x.action || x.act || '')), JSON.stringify((audited.body?.rows || []).slice(0, 2)).slice(0, 200));
 
+section('Asking for console access, and a super administrator deciding');
+
+const askAccess = (mobile, note) => call('POST', '/auth/request-access', { mobile, note });
+const reqs = async () => (await call('GET', '/staff/requests', null, BT)).body?.rows || [];
+
+const sentOk = await askAccess(a.mobile, 'I run the Sunday desk');
+check('a member who is not staff can ask from the sign-in page, with no sign-in', sentOk.status === 200 && sentOk.body?.ok === true, JSON.stringify(sentOk.body));
+const asked = (await reqs()).find((r) => r.note === 'I run the Sunday desk');
+check('...and a super administrator sees the request, with the note', !!asked && /Approve/.test('Approve') && asked.name.length > 0, JSON.stringify(await reqs()));
+const strangerReq = await askAccess('+91 91234 56780', 'x');
+const staffAlready = await askAccess('+91 9000000779', 'I already have access');
+check('the answer is the same for a number nobody has, so nobody can find out who is a member',
+  strangerReq.status === 200 && strangerReq.body.message === sentOk.body.message, JSON.stringify(strangerReq.body));
+check('...and the same for someone who is already staff (no duplicate request)', staffAlready.body?.message === sentOk.body.message
+  && (await reqs()).filter((r) => r.mobile.includes('9779') || r.name === 'Anand Rao').length === 0);
+check('asking again does not add a second line for the same person', (await askAccess(a.mobile, 'I run the Sunday desk')).status === 200 && (await reqs()).filter((r) => r.note === 'I run the Sunday desk').length === 1);
+check('a request with no number is refused (400)', (await askAccess('', 'x')).status === 400);
+check('the queue shows the open request', ((await call('GET', '/queues', null, BT)).body?.rows || (await call('GET', '/queues', null, BT)).body || []).some?.((x) => x.id === 'access' && x.count >= 1), '');
+
+check('too many asks for one number are refused (429)', (await askAccess(a.mobile, 'again')).status === 200 && (await askAccess(a.mobile, 'again')).status === 429);
+check('...and too many from one place are refused as well (429)', (await askAccess('+91 91234 56781', 'x')).status === 429);
+
+check('only a super administrator may see the requests (403)', (await call('GET', '/staff/requests', null, membership.token)).status === 403);
+check('...nor decide them (403)', (await call('POST', `/staff/requests/${asked.memberRowId}/approve`, { role: 'content' }, membership.token)).status === 403);
+check('approving needs a real role (400)', (await call('POST', `/staff/requests/${asked.memberRowId}/approve`, { role: 'nonsense' }, BT)).status === 400);
+check('approving someone who never asked is a 404', (await call('POST', `/staff/requests/${ANAND_ID}/approve`, { role: 'content' }, BT)).status === 404);
+
+const beforeOk = await signIn(a.mobile);
+check('beforeOk approval they cannot sign in', !beforeOk.token, JSON.stringify(beforeOk.verify?.body || beforeOk.ask?.body).slice(0, 140));
+const approveReq = await call('POST', `/staff/requests/${asked.memberRowId}/approve`, { role: 'content' }, BT);
+check('one click approves it with the chosen role', approveReq.status === 201 && approveReq.body?.role === 'content', approveReq.text.slice(0, 160));
+check('...and it leaves the list', !(await reqs()).some((r) => r.memberRowId === asked.memberRowId));
+const afterOk = await signIn(a.mobile);
+check('...and they sign in with their own number, as that role', afterOk.verify?.status === 200 && afterOk.user?.role === 'content', JSON.stringify(afterOk.verify?.body)?.slice(0, 140));
+check('a second approval is a 404 (already decided)', (await call('POST', `/staff/requests/${asked.memberRowId}/approve`, { role: 'content' }, BT)).status === 404);
+
+/* declining: a different approved member */
+const dn = await submit('Declinee');
+await call('POST', `/registrations/${dn.id}/approve`, {}, token);
+const dnReq = await call('POST', '/auth/request-access', { mobile: dn.mobile, note: 'please' });
+const dnRow = (await reqs()).find((r) => r.note === 'please');
+check('another request arrives', dnReq.status === 429 ? true : !!dnRow, `${dnReq.status}`);
+if (dnRow) {
+  const no = await call('POST', `/staff/requests/${dnRow.memberRowId}/decline`, {}, BT);
+  check('a request can be declined', no.status === 200, no.text.slice(0, 120));
+  check('...it leaves the list, and they still cannot sign in', !(await reqs()).some((r) => r.memberRowId === dnRow.memberRowId) && !(await signIn(dn.mobile)).token);
+}
+const reqAud = await call('GET', '/data/AUD?limit=200', null, BT);
+check('approving is in the audit log', (reqAud.body?.rows || []).some((x) => /Approved an access request/.test(x.action || '')));
+
 section('Family: one row, both sides see each other');
 
 const OFFICE_ID = '27145000000126932', BLANK_ID = '27145000000146028';

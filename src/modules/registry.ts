@@ -254,8 +254,11 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'staff', title: 'Staff and permissions', nav: 'Staff and permissions', group: 'admin', icon: 'key', sec: '7', perm: 'staff.manage',
     desc: 'Who works in this console, and exactly what each role may do.',
+    badges: ['access'],
     tabs: [
       { id: 'accounts', label: 'Staff accounts', status: 'built', desc: 'The people with a sign-in, their role and when they last signed in.' },
+      { id: 'requests', label: 'Access requests', status: 'built',
+        desc: 'Members who asked for console access from the sign-in page: approve with a role, or decline.' },
       { id: 'roles', label: 'Roles and permissions', status: 'built', desc: 'The permission grid. Changing a tick here changes what the server allows.' },
       { id: 'effective', label: 'Effective permissions', status: 'planned', from: 'Staff → Effective permissions', desc: 'What one person actually holds, after role and overrides.' },
       { id: 'coverage', label: 'Authorisation coverage', status: 'built', desc: 'Every endpoint and the permission guarding it.' },

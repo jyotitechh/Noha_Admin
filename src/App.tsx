@@ -64,6 +64,7 @@ const SCREENS: Record<string, ComponentType> = {
   'subs/dunning': lazy(() => import('@/modules/subs/Dunning')),
 
   'staff/accounts': lazy(() => import('@/modules/staff/Accounts')),
+  'staff/requests': lazy(() => import('@/modules/staff/Requests')),
   'staff/roles': lazy(() => import('@/modules/staff/Roles')),
   'staff/coverage': lazy(() => import('@/modules/staff/Coverage')),
 

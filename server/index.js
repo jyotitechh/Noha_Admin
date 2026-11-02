@@ -18,6 +18,7 @@ import { channels } from './deliver.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { demoMode, DEMO_MOBILE } from './demo.js';
+import { handleAccessRequest } from './access-requests.js';
 import { live, source, schema, surveyTables, listRegistrations, listMembers, listAudit, TABLES } from './store.js';
 import { check, explainCatalyst, usage, ENVIRONMENT, PROJECT_ID } from './catalyst.js';
 import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from './noah-schema.js';
@@ -230,6 +231,19 @@ app.post('/api/auth/request-code', async (req, res) => {
     const { status, ...body } = r;
     if (r.retryAfter) res.set('Retry-After', String(r.retryAfter));
     res.status(status || (r.ok ? 200 : 400)).json(body);
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
+/* Someone who is not staff asks a super administrator for access. Public, so it answers every request the same
+   way and is rate-limited (server/access-requests.js); the office passphrase, if one is set, applies here as well. */
+app.post('/api/auth/request-access', async (req, res) => {
+  try {
+    const gate = checkPassphrase(req.body?.passphrase, req.ip);
+    if (!gate.ok) return res.status(gate.status || 401).json({ ok: false, error: gate.error, needsPassphrase: true });
+    const { status, body } = await handleAccessRequest({ mobile: req.body?.mobile, note: req.body?.note }, req.ip);
+    res.status(status).json(body);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
   }

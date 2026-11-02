@@ -42,6 +42,13 @@ export default function SignIn() {
   /* Set only by a demo server (sample data, fixed code): the code is shown so a visitor can get in. */
   const [demo, setDemo] = useState<{ mobile: string; code: string } | null>(null);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
+  /* Asking a super administrator for access, for someone who registered in the app but is not staff. */
+  const [asking, setAsking] = useState(false);
+  const [askMobile, setAskMobile] = useState('');
+  const [askNote, setAskNote] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+  const [askAnswer, setAskAnswer] = useState('');
+  const [askError, setAskError] = useState('');
 
   /* A 403 here is the deployed API declining to publish the staff list. That
      is the intended answer, not a failure, so it is simply left empty. */
@@ -110,6 +117,19 @@ export default function SignIn() {
   }
 
   const pick = (m: Mode) => { setMode(m); setError(''); };
+
+  async function askForAccess() {
+    setAskBusy(true);
+    setAskError('');
+    try {
+      const r = await api.post<{ message: string }>('/auth/request-access', { mobile: askMobile.trim(), note: askNote.trim(), passphrase });
+      setAskAnswer(r.message);
+    } catch (e) {
+      setAskError((e as Error).message);
+    } finally {
+      setAskBusy(false);
+    }
+  }
   const asked = who?.email ?? who?.mobile ?? '';
   const how = sent?.via === 'sms' ? 'texted' : sent?.via === 'email' ? 'emailed' : '';
 
@@ -225,6 +245,31 @@ export default function SignIn() {
                 {busy ? 'Sending…' : 'Send the code'}
               </button>
             </form>
+
+            {/* Not staff yet? A member of the church can ask a super administrator for access. */}
+            <div className="mt16">
+              {!asking ? (
+                <button type="button" className="linkish small" onClick={() => { setAsking(true); setAskMobile(mode === 'mobile' ? mobile : ''); }}>
+                  Do not have access yet? Ask a super administrator
+                </button>
+              ) : askAnswer ? (
+                <Note tone="ok" icon="check">{askAnswer}</Note>
+              ) : (
+                <div className="card pad stack" style={{ gap: 8 }}>
+                  <b className="small">Ask for access</b>
+                  <span className="xs muted">For members of the church who registered in the Noah app. A super administrator will see your request.</span>
+                  <input className="inp" type="tel" inputMode="tel" value={askMobile} placeholder="The mobile number you registered with"
+                    aria-label="Your mobile number" onChange={(e) => { setAskMobile(e.target.value); setAskError(''); }} />
+                  <input className="inp" value={askNote} maxLength={100} placeholder="Who are you, and why do you need it? (optional)"
+                    aria-label="A note for the super administrator" onChange={(e) => setAskNote(e.target.value)} />
+                  {askError && <div className="small" role="alert" style={{ color: 'var(--bad)', fontWeight: 600 }}>{askError}</div>}
+                  <div className="row" style={{ gap: 8 }}>
+                    <button type="button" className="btn pri" disabled={askBusy || !askMobile.trim() || (needsPassphrase && !passphrase)} onClick={askForAccess}>{askBusy ? 'Sending…' : 'Send the request'}</button>
+                    <button type="button" className="btn" onClick={() => { setAsking(false); setAskError(''); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Test accounts only: one fixed number per role, so each can be tried
                 without a real person. Never real staff: a sign-in page that

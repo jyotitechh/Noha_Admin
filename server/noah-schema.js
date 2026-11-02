@@ -1313,6 +1313,90 @@ export async function updateConsoleStaff(rowId, patch) {
   clearCache();
 }
 
+/* ---------- asking for access ----------
+
+   A member who is not staff can ask for a console role; a super administrator then approves (choosing the
+   role) or declines. The request is kept on the same row as the role, with a status of its own, so it needs no
+   new table or column:
+
+     status 'Requested'   the member asked; role is empty; title holds their note; grantedAt is when they asked
+     status 'Declined'    a super administrator said no; they may ask again
+     (approving is the ordinary grant: status 'Active' and the chosen role)
+
+   An empty role means the row is not a staff member, so a request never lets anyone in by itself. */
+
+export const ACCESS_REQUESTED = 'Requested';
+
+/** The row (in either storage style) for a member, as { rowId, role, status } or null. */
+async function consoleRowOf(memberRowId) {
+  if (staffBackend() === 'table') {
+    const r = (await io.getRows(T.consoleStaff)).find((x) => same(x.memberRowId, memberRowId));
+    return r ? { rowId: String(r.ROWID), role: String(r.role ?? '').trim(), status: r.status || '' } : null;
+  }
+  const { extras } = await snapshot();
+  const x = extras.find((e) => same(e.id, memberRowId));
+  return x ? { rowId: String(x.ROWID), role: String(x.consoleRole ?? '').trim(), status: x.consoleStatus || '' } : null;
+}
+
+/**
+ * Record that a member asks for console access. Returns 'requested', or why not:
+ * 'has_access' (they already have a role; they only need to sign in) or 'removed' (the office revoked them; that is not
+ * theirs to undo by asking). Asking again updates the note and the time.
+ */
+export async function requestConsoleAccess(memberRowId, note) {
+  await ensureStaffBackend();
+  if (!consoleStaffEnabled()) throw Object.assign(new Error('Nowhere to keep console roles yet: the console columns have not been added.'), { code: 'no_table' });
+
+  const have = await consoleRowOf(memberRowId);
+  if (have?.role) return have.status === 'Revoked' ? 'removed' : 'has_access';
+
+  const at = stamp();
+  const title = String(note || '').trim().slice(0, 100);
+  if (staffBackend() === 'columns') {
+    const extra = await ensureExtra(memberRowId);
+    await io.update(T.membersExtra, {
+      ROWID: String(extra.ROWID), consoleRole: '', consoleStatus: ACCESS_REQUESTED, consoleTitle: title, consoleGrantedBy: '', consoleGrantedAt: at,
+    });
+  } else if (have) {
+    await io.update(T.consoleStaff, { ROWID: have.rowId, role: '', title, status: ACCESS_REQUESTED, grantedBy: '', grantedAt: at });
+  } else {
+    await io.insert(T.consoleStaff, { memberRowId: String(memberRowId), role: '', title, status: ACCESS_REQUESTED, grantedBy: '', grantedAt: at });
+  }
+  clearCache();
+  return 'requested';
+}
+
+/** Open requests, oldest first: who asked, how to reach them, what they said and when. */
+export async function accessRequests() {
+  await ensureStaffBackend();
+  if (!consoleStaffEnabled()) return [];
+  const { members, users, extras } = await snapshot();
+  const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
+  const raw = staffBackend() === 'table'
+    ? (await io.getRows(T.consoleStaff)).filter((r) => r.status === ACCESS_REQUESTED).map((r) => ({ memberRowId: r.memberRowId, note: r.title, at: r.grantedAt }))
+    : extras.filter((x) => x.consoleStatus === ACCESS_REQUESTED && !String(x.consoleRole ?? '').trim()).map((x) => ({ memberRowId: x.id, note: x.consoleTitle, at: x.consoleGrantedAt }));
+  const out = [];
+  for (const r of raw) {
+    const m = memberById.get(String(r.memberRowId));
+    if (!m || asBool(m.archived)) continue;
+    const user = users.find((u) => same(u.ROWID, m.userId));
+    out.push({
+      memberRowId: String(m.ROWID), name: memberFullName(m), mobile: phoneOf(m, user), email: m.emailId1 || '',
+      note: r.note || '', at: utc(r.at),
+    });
+  }
+  return out.sort((a, b) => +(a.at ?? 0) - +(b.at ?? 0));
+}
+
+/** A super administrator said no. The row stays (so there is a record) with status Declined; they may ask again. */
+export async function declineAccessRequest(memberRowId) {
+  const have = await consoleRowOf(memberRowId);
+  if (!have || have.status !== ACCESS_REQUESTED) throw Object.assign(new Error('There is no open request from them.'), { code: 'not_found' });
+  if (staffBackend() === 'columns') await io.update(T.membersExtra, { ROWID: have.rowId, consoleStatus: 'Declined' });
+  else await io.update(T.consoleStaff, { ROWID: have.rowId, status: 'Declined' });
+  clearCache();
+}
+
 /** Stamp a sign-in on the row. Never worth failing a sign-in over. */
 export async function touchStaffSignIn(rowId) {
   if (!consoleStaffEnabled() || !rowId) return;

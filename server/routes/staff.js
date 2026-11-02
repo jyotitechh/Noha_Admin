@@ -24,6 +24,7 @@ import { live, isNoah, listMembers, writeAudit } from '../store.js';
 import { refreshSessions } from '../auth.js';
 import {
   loadStaffDirectory, staffCandidates, grantConsoleAccess, updateConsoleStaff, consoleStaffEnabled, ensureStaffBackend,
+  accessRequests, declineAccessRequest,
 } from '../noah-schema.js';
 
 const roleIds = () => db.ROLES.map((r) => r.id);
@@ -51,6 +52,56 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
       rows: await staffCandidates(roleIds(), req.query.q),
       tableReady: consoleStaffEnabled(),
     });
+  });
+
+  /* ---------- people asking for access ----------
+
+     A member who is not staff asks from the sign-in page (server/access-requests.js). Here a super administrator
+     sees who asked and either approves, choosing the role, or declines. Approving is the ordinary grant, with the same
+     rules: only a super administrator can make another one, and nobody changes their own access. */
+
+  app.get('/api/staff/requests', ...guard, async (_req, res) => {
+    if (!onCatalyst()) return res.json({ rows: [], needsCatalyst: true });
+    try {
+      res.json({ rows: await accessRequests(), tableReady: consoleStaffEnabled() });
+    } catch (err) {
+      res.status(502).json({ error: `Could not read the requests from Catalyst: ${err.message}` });
+    }
+  });
+
+  app.post('/api/staff/requests/:memberRowId/approve', ...guard, async (req, res) => {
+    if (!onCatalyst()) return res.status(409).json({ error: 'Approving needs the Catalyst connection.' });
+    const role = req.body?.role;
+    const title = String(req.body?.title || '').trim().slice(0, 100);
+    if (!roleIds().includes(role)) return res.status(400).json({ error: 'Pick the role to give them.' });
+    if (role === 'super' && req.session.role !== 'super') return res.status(403).json({ error: 'Only a super administrator can give that role.' });
+    if (String(req.params.memberRowId) === String(req.session.memberRowId)) return res.status(409).json({ error: 'You cannot change your own access.' });
+
+    const open = (await accessRequests()).find((r) => r.memberRowId === String(req.params.memberRowId));
+    if (!open) return res.status(404).json({ error: 'There is no open request from them. It may already have been decided.' });
+    const member = (await listMembers({})).find((m) => String(m.rowId) === open.memberRowId);
+    if (!member || !member.approved || member.blocked) return res.status(409).json({ error: 'That member is not approved or is archived, so they cannot be given access.' });
+
+    try {
+      await grantConsoleAccess({ memberRowId: member.rowId, role, by: req.user.name, title: title || roleById(role).name });
+      await record(req, `Approved an access request: ${roleById(role).name}`, member.name, { status: 'Requested', note: open.note }, { role, status: 'Active' });
+      res.status(201).json({ ok: true, name: member.name, role });
+    } catch (err) {
+      res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
+    }
+  });
+
+  app.post('/api/staff/requests/:memberRowId/decline', ...guard, async (req, res) => {
+    if (!onCatalyst()) return res.status(409).json({ error: 'Declining needs the Catalyst connection.' });
+    const open = (await accessRequests()).find((r) => r.memberRowId === String(req.params.memberRowId));
+    if (!open) return res.status(404).json({ error: 'There is no open request from them. It may already have been decided.' });
+    try {
+      await declineAccessRequest(open.memberRowId);
+      await record(req, 'Declined an access request', open.name, { status: 'Requested', note: open.note }, { status: 'Declined' }, String(req.body?.remark || ''));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(err.code === 'not_found' ? 404 : 502).json({ error: err.message });
+    }
   });
 
   /* ---------- give a member a role ---------- */

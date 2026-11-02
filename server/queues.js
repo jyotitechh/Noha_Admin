@@ -9,6 +9,7 @@
 import { db } from './db.js';
 import { live, listRegistrations } from './store.js';
 import { pendingPrayerRequests } from './prayer-requests.js';
+import { accessRequests } from './noah-schema.js';
 
 const minDate = (a) => (a.length ? new Date(Math.min(...a.map((d) => +d))) : null);
 const open = (coll, fn) => (db[coll] || []).filter(fn);
@@ -28,7 +29,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -57,6 +58,11 @@ export function queues() {
       id: 'prayer-inbox', l: 'App prayer requests to approve', area: 'Community', icon: 'flame',
       to: '/community/prayer-inbox', perm: 'community.moderate', owner: 'Community moderator', sla: 12,
       ...q('PRAYER_INBOX', (p) => p.state === 'Pending'),
+    },
+    {
+      id: 'access', l: 'Console access requests', area: 'Staff and permissions', icon: 'key',
+      to: '/staff/requests', perm: 'staff.manage', owner: 'Super administrator', sla: 24,
+      count: () => 0, oldest: () => null,   /* counted from Catalyst below; there are none in the sample data */
     },
     /* --- ported from the prototype --- */
     ...jodieStages,
@@ -106,6 +112,10 @@ export async function queuesFor(roleId, canFn) {
   if (live()) {
     try { real.registrations = tally((await listRegistrations({})).filter((r) => r.state === 'pending')); }
     catch { /* fall back to the seed count rather than failing the page */ }
+    if (rows.some((x) => x.id === 'access')) {
+      try { real.access = tally(await accessRequests()); }
+      catch { real.access = { count: 0, oldest: null }; }
+    }
     try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
     catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }
   }

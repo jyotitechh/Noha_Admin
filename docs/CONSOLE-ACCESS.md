@@ -197,3 +197,10 @@ here if the Catalyst developer exposes it as an admin endpoint.
   memory in production by design.
 - **Zoho single sign-on** is still not wired up. When it is, it replaces the
   number and code step; the staff table and roles stay as they are.
+
+## Asking for access (no super administrator needed to start it)
+
+A member who registered in the app and was approved, but is not staff, can ask from the sign-in page ("Do not
+have access yet? Ask a super administrator"). A super administrator sees it under Staff and permissions > Access
+requests, picks the role and approves, or declines. How it works, and the safeguards, are in
+docs/CLIENT-DEMO-FEATURES.md (section 2).
