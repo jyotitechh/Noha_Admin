@@ -15,7 +15,7 @@
    yet". And a role that may not see registrations is told there is one it cannot
    open, rather than being shown nothing. */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
@@ -27,6 +27,8 @@ import { EditPerson, type EditSpec } from '@/components/EditPerson';
 import type { Registration } from '@/lib/types';
 
 interface Link { rowId: string; name: string; mobile?: string }
+/* A cell leader as offered to the office: how far, how many members, and how many more they can take. */
+interface Leader extends Link { where?: string; distanceKm?: number; members?: number; capacity?: number; roomLeft?: number }
 
 interface Profile {
   member: {
@@ -41,9 +43,11 @@ interface Profile {
   earlier: { id: string; state: string; at: Date | null; remark: string }[];
   pastoral: { pastor: Link | null; cellLeader: Link | null; cell: string | null };
   /* Who may be picked, for someone who may edit members. */
-  pastoralChoices?: { pastors: Link[]; leaders: Link[] };
+  pastoralChoices?: { pastors: Link[]; leaders: Leader[]; here?: { where: string; shared: boolean } };
   partnership: { isPartner: boolean; expiresOn: Date | null };
-  family: { recorded: boolean; why?: string; rows: { rowId: string; name: string; rel?: string; age?: number; kid?: boolean }[] };
+  family: { recorded: boolean; why?: string; rows: { rowId: string; name: string; rel?: string; age?: number; kid?: boolean; member?: boolean }[] };
+  /* The relations the office can pick, for someone who may edit members. */
+  relationOptions?: { code: number; label: string }[];
   groups: { recorded: boolean; why?: string; rows: { rowId: string; name: string }[] };
 }
 
@@ -54,6 +58,16 @@ const STATE_CHIP: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute'; label: 
   pending: { tone: 'warn', label: 'Waiting for a decision' },
   draft: { tone: 'mute', label: 'Not submitted' },
 };
+
+/* How a cell leader reads in the list: "Ruth Mathew · Andheri · 3 km · 12 members, room for 8". */
+const optionText = (o: Leader) => [
+  o.name,
+  o.where,
+  o.distanceKm !== undefined ? `${o.distanceKm} km` : undefined,
+  o.members !== undefined
+    ? `${o.members} member${o.members === 1 ? '' : 's'}${o.roomLeft !== undefined ? (o.roomLeft > 0 ? `, room for ${o.roomLeft}` : ', full') : ''}`
+    : undefined,
+].filter(Boolean).join(' · ');
 
 const Missing = ({ why }: { why?: string }) => (
   <Note tone="mute" icon="info">
@@ -72,11 +86,27 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [editing, setEditing] = useState(false);
   const [telling, setTelling] = useState(false);
   const [savingCare, setSavingCare] = useState(false);
+  /* Adding a relative: the search box, what it found, who was picked, and the relation. */
+  const [relQ, setRelQ] = useState('');
+  const [relResults, setRelResults] = useState<{ rowId: string; name: string; where: string }[]>([]);
+  const [relPick, setRelPick] = useState<{ rowId: string; name: string } | null>(null);
+  const [relCode, setRelCode] = useState('');
+  const [savingRel, setSavingRel] = useState(false);
+
+  /* Look members up as the office types (after a short pause), unless one has already been picked. */
+  useEffect(() => {
+    if (relPick || relQ.trim().length < 2) { setRelResults([]); return; }
+    const t = setTimeout(() => {
+      api.get<{ rows: { rowId: string; name: string; where: string }[] }>(`/people/${memberRowId}/relation-candidates?q=${encodeURIComponent(relQ.trim())}`)
+        .then((r) => setRelResults(r.rows)).catch(() => setRelResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [relQ, relPick, memberRowId]);
 
   if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
   if (!q.data) return <Loading what="this person" />;
 
-  const { member, registration, pastoral, partnership, family, groups } = q.data;
+  const { member, registration, pastoral, partnership, family, groups, relationOptions } = q.data;
 
   /* Every reveal is written to the audit log, so it is a click and not a load. */
   async function reveal() {
@@ -103,6 +133,34 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       toast((e as Error).message, 'bad');
     } finally {
       setTelling(false);
+    }
+  }
+
+  async function addRelative() {
+    if (!relPick || !relCode) return;
+    setSavingRel(true);
+    try {
+      await api.post(`/people/${memberRowId}/relations`, { otherRowId: relPick.rowId, relation: Number(relCode) });
+      toast(`${relPick.name} was added to the family. They see this person on their side too.`);
+      setRelQ(''); setRelPick(null); setRelCode(''); setRelResults([]);
+      q.reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setSavingRel(false);
+    }
+  }
+
+  async function removeRelative(otherRowId: string, name: string) {
+    setSavingRel(true);
+    try {
+      await api.del(`/people/${memberRowId}/relations/${otherRowId}`);
+      toast(`${name} was taken off the family, on both sides.`);
+      q.reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setSavingRel(false);
     }
   }
 
@@ -254,11 +312,19 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                     onChange={(e) => assign(who, e.target.value)}
                   >
                     <option value="">Not assigned</option>
-                    {options.filter((o) => o.rowId !== memberRowId).map((o) => <option key={o.rowId} value={o.rowId}>{o.name}</option>)}
+                    {options.filter((o) => o.rowId !== memberRowId).map((o) => <option key={o.rowId} value={o.rowId}>{optionText(o as Leader)}</option>)}
                   </select>
                 )}
               </label>
             ))}
+            {q.data.pastoralChoices.here && (
+              <span className="xs muted">
+                {q.data.pastoralChoices.here.shared
+                  ? `Cell leaders are listed nearest first, from ${q.data.pastoralChoices.here.where || 'this member’s current location'}.`
+                  : 'This member has not shared their location in the app, so the leaders are not sorted by distance.'}
+                {' '}Distances are shown to staff who can edit members only.
+              </span>
+            )}
             <span className="xs muted">The Noah app reads this: the pastor is listed first in the member's messages, and the cell leader opens their cell chat.</span>
           </div>
         )}
@@ -290,9 +356,45 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                   <span className="t1">{f.name}</span>
                   <span className="t2">{[f.rel, f.age ? `${f.age} years` : '', f.kid ? 'child' : ''].filter(Boolean).join(' · ')}</span>
                 </span>
+                {relationOptions && f.member && !f.kid && (
+                  <Btn sm disabled={savingRel} onClick={() => removeRelative(f.rowId, f.name)}>Remove</Btn>
+                )}
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Relating another member to this one. One row carries both directions, so they see this person too. */}
+        {relationOptions && family.recorded && (
+          <div className="card pad mt8 stack" style={{ gap: 8 }}>
+            <b className="small">Add a relative</b>
+            <input className="inp" placeholder="Search a member by name" value={relQ}
+              onChange={(e) => { setRelQ(e.target.value); setRelPick(null); }} />
+            {!relPick && relResults.length > 0 && (
+              <ul className="list">
+                {relResults.map((c) => (
+                  <li key={c.rowId} className="click" onClick={() => { setRelPick(c); setRelQ(c.name); setRelResults([]); }}>
+                    <span className="grow"><span className="t1">{c.name}</span><span className="t2">{c.where || ' '}</span></span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {relPick && (
+              <label className="fld">
+                <span className="lbl">{relPick.name} is this person&rsquo;s…</span>
+                <select className="inp" value={relCode} onChange={(e) => setRelCode(e.target.value)}>
+                  <option value="">Pick a relation</option>
+                  {relationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                </select>
+              </label>
+            )}
+            <div>
+              <Btn icon="plus" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>{savingRel ? 'Saving…' : 'Add relation'}</Btn>
+              <span className="xs muted" style={{ marginLeft: 8 }}>
+                Both people must be in the app. The other person sees this one too, with the reverse relation, automatically.
+              </span>
+            </div>
+          </div>
         )}
       </section>
 

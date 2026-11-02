@@ -1221,6 +1221,55 @@ await withEnv({ ADMIN_PASSPHRASE: '   ' }, async () => {
 });
 
 /* ================================================================== */
+section('Cell leaders, nearest first');
+
+{
+  /* A member in Andheri East, three leaders around Mumbai (one 50 m away, one about 3 km, one far, one without a location). */
+  const memberUser = tables[T.users].find((u) => u.ROWID === tables[T.members].find((m) => m.ROWID === M.approved).userId);
+  const before = { lat: memberUser.latitude, lng: memberUser.longitude };
+  memberUser.latitude = 19.1136; memberUser.longitude = 72.8697;
+  const adds = [
+    ['L-FAR', 'Far', 19.2183, 72.9781], ['L-NEAR', 'Near', 19.1140, 72.8700],
+    ['L-MID', 'Mid', 19.1197, 72.8464], ['L-NONE', 'Nowhere', null, null],
+  ];
+  const startCounts = { users: tables[T.users].length, members: tables[T.members].length, extras: tables[T.membersExtra].length };
+  for (const [id, name, lat, lng] of adds) {
+    tables[T.users].push({ ROWID: 'U-' + id, number: '90000' + id.length, countryCode: '+91', archived: false, ...(lat !== null ? { latitude: lat, longitude: lng } : {}) });
+    tables[T.members].push({ ROWID: id, id, userId: 'U-' + id, firstName: name, lastName: 'Leader', archived: false, status: true, area: 'Area ' + name, city: 'Mumbai' });
+    tables[T.membersExtra].push({ ROWID: 'X-' + id, id, isLeader: true });
+  }
+  const xOf = (id) => tables[T.membersExtra].find((x) => x.id === id);
+  const wasLeader = xOf(M.approved).connectedLeader;
+  xOf(M.approved).connectedLeader = 'L-MID';            /* one member already led by Mid */
+  xOf(M.draft) && (xOf(M.draft).connectedLeader = 'L-MID');
+  process.env.LEADER_CAPACITY = '3';
+  S.clearCache();
+
+  const ch = await S.pastoralChoices(M.approved);
+  const names = ch.leaders.map((l) => l.name);
+  check('leaders come nearest first, and those with no location last', names.join() === 'Near Leader,Mid Leader,Far Leader,Nowhere Leader', names.join());
+  check('a leader 50 m away is shown as 1 km (never less)', ch.leaders[0].distanceKm === 1, JSON.stringify(ch.leaders[0]));
+  check('a leader about 3 km away is shown as that', ch.leaders[1].distanceKm >= 2 && ch.leaders[1].distanceKm <= 4, JSON.stringify(ch.leaders[1]));
+  check('a leader with no shared location has no distance', ch.leaders[3].distanceKm === undefined);
+  check('each leader says how many members they lead', ch.leaders.find((l) => l.name === 'Mid Leader').members >= 1 && ch.leaders.find((l) => l.name === 'Near Leader').members === 0);
+  check('...and, with a limit set, how many more they can take', ch.leaders.find((l) => l.name === 'Near Leader').roomLeft === 3 && ch.leaders.find((l) => l.name === 'Mid Leader').roomLeft === 3 - ch.leaders.find((l) => l.name === 'Mid Leader').members);
+  check('...and the area they are in', ch.leaders[0].where === 'Area Near, Mumbai');
+  check('the member says whether they shared a location', ch.here?.shared === true);
+  check('no coordinates are ever sent out', !JSON.stringify(ch).includes('19.11') && !JSON.stringify(ch).includes('72.8'));
+  delete process.env.LEADER_CAPACITY; S.clearCache();
+  check('without a limit there is no "room left"', (await S.pastoralChoices(M.approved)).leaders.every((l) => l.capacity === undefined));
+  const noLoc = await S.pastoralChoices(M.office);
+  check('for a member who has not shared a location nobody has a distance, and it says so', noLoc.here?.shared === false && noLoc.leaders.every((l) => l.distanceKm === undefined));
+
+  /* put it all back */
+  memberUser.latitude = before.lat; memberUser.longitude = before.lng;
+  if (before.lat === undefined) { delete memberUser.latitude; delete memberUser.longitude; }
+  xOf(M.approved).connectedLeader = wasLeader;
+  tables[T.users].length = startCounts.users; tables[T.members].length = startCounts.members; tables[T.membersExtra].length = startCounts.extras;
+  S.clearCache();
+}
+
+/* ================================================================== */
 section('Content: what the office authors');
 
 const C = await import('./content.js');
@@ -1229,9 +1278,10 @@ const FC = await import('./fake-catalyst.mjs');
 const manna = CT.typeById('manna');
 
 /* ---------- the definitions ---------- */
-check('there are twenty kinds of content across content, media, school and Bible study', CT.TYPES.length === 20
+check('there are twenty-one kinds of content across content, media, school and Bible study', CT.TYPES.length === 21
   && new Set(CT.TYPES.map((t) => t.section)).size === 4, `${CT.TYPES.length}`);
-check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 20 && CT.TYPES.every((t) => t.table));
+check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 21 && CT.TYPES.every((t) => t.table));
+check('the Bible has 66 books and 1,189 chapters, in the same order as the books', CT.BOOKS.length === 66 && CT.CHAPTERS.length === 66 && CT.CHAPTERS.reduce((a, b) => a + b, 0) === 1189 && CT.CHAPTERS[CT.BOOKS.indexOf('Exodus')] === 40 && CT.CHAPTERS[CT.BOOKS.indexOf('Psalms')] === 150 && CT.CHAPTERS[CT.BOOKS.indexOf('Jude')] === 1);
 check('every field a kind names as its title exists', CT.TYPES.every((t) => t.fields.some((f) => f.key === t.title)));
 check('every publish flag is a real toggle field', CT.TYPES.every((t) => !t.publish || t.fields.some((f) => f.key === t.publish && f.kind === 'toggle')));
 check('every ref points at a kind that exists', CT.TYPES.every((t) => t.fields.every((f) => f.kind !== 'ref' || CT.typeById(f.ref))));

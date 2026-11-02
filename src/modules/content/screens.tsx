@@ -8,6 +8,7 @@ export const Manna = () => <ContentManager types={['manna', 'mannaCategories']} 
 export const Prayers = () => <ContentManager types={['prayers']} />;
 export const Confessions = () => <ContentManager types={['confessions']} />;
 export const Dictionary = () => <ContentManager types={['dictionary', 'dictionaryCategories']} />;
+export const Commentary = () => <ContentManager types={['bibleCommentary']} />;
 export const Announce = () => <ContentManager types={['banners', 'announcements']} />;
 
 export const Noahgram = () => <ContentManager types={['noahgramPosts', 'noahgramCategories']} />;

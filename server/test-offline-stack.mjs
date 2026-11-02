@@ -377,7 +377,7 @@ const ET = editor.token;
 const FT = finance.token;
 
 const types = await call('GET', '/content/types', null, ET);
-check('the content editor can read what can be authored', types.status === 200 && types.body?.types?.length === 20, `${types.status}`);
+check('the content editor can read what can be authored', types.status === 200 && types.body?.types?.length === 21, `${types.status}`);
 check('...grouped into content, media, school and Bible study', Object.keys(types.body?.sections || {}).join() === 'content,media,school,study');
 check('...with seven languages on offer', types.body?.languages?.length === 7);
 check('...and each kind says which fields it has', types.body.types.every((t) => t.fields.length > 2 && t.table));
@@ -638,6 +638,21 @@ if (up.body?.url) {
   check('a prayer saves with the uploaded picture link in its picture field', withPic.status === 201, `${withPic.status} ${JSON.stringify(withPic.body)?.slice(0, 200)}`);
 }
 
+section('Bible commentary: a book, then one of its chapters');
+
+await fakeReady('bibleCommentary');
+const CM = { title: 'A commentary', content: '<p>Notes on the chapter.</p>', contentLanguage: '1' };
+const tooHigh = await call('POST', '/content/bibleCommentary', { ...CM, bibleBookId: '2', startChapter: '41' }, ET);
+check('Exodus has 40 chapters, so 41 is refused and says why', tooHigh.status === 400 && /Exodus has 40 chapters/.test(tooHigh.body?.errors?.startChapter || ''), tooHigh.text.slice(0, 160));
+check('...and Jude has one', (await call('POST', '/content/bibleCommentary', { ...CM, bibleBookId: '65', startChapter: '2' }, ET)).status === 400);
+check('...a chapter and a book are both needed', (await call('POST', '/content/bibleCommentary', { ...CM }, ET)).body?.errors?.startChapter !== undefined);
+check('...and the book must be one of the 66', (await call('POST', '/content/bibleCommentary', { ...CM, bibleBookId: '67', startChapter: '1' }, ET)).status === 400);
+const okCm = await call('POST', '/content/bibleCommentary', { ...CM, bibleBookId: '2', startChapter: '40' }, ET);
+check('chapter 40 of Exodus is accepted', okCm.status === 201, okCm.text.slice(0, 160));
+const cmRows = (await call('GET', '/content/bibleCommentary', null, ET)).body?.rows || [];
+check('...stored as the book number and chapter, with the last chapter equal to the first', cmRows.some((r) => String(r.bibleBookId) === '2' && String(r.startChapter) === '40'));
+check('the form is told how many chapters each book has', (await call('GET', '/content/types', null, ET)).body?.chapters?.[1] === 40);
+
 section('Telling the member about a decision (ADMIN_INTEGRATION.md)');
 
 if (!NO_KEY) {
@@ -662,6 +677,37 @@ check('telling a member needs the permission to edit members',
 check('...and a sign-in', (await call('POST', `/registrations/${APPROVED_REG}/notify`, {})).status === 401);
 const audited = await call('GET', '/data/AUD?limit=200', null, BT);
 if (!NO_KEY) check('telling the member is in the audit log', (audited.body?.rows || []).some((x) => /Told the member/.test(x.action || x.act || '')), JSON.stringify((audited.body?.rows || []).slice(0, 2)).slice(0, 200));
+
+section('Family: one row, both sides see each other');
+
+const OFFICE_ID = '27145000000126932', BLANK_ID = '27145000000146028';
+const famOf = async (id) => (await call('GET', '/people/' + id, null, BT)).body?.family?.rows || [];
+const found = await call('GET', '/people/' + ANAND_ID + '/relation-candidates?q=Thom', null, BT);
+check('members are searched by name, showing name and place only', found.status === 200 && found.body.rows.some((c) => c.name === 'Fr Thomas') && found.body.rows.every((c) => !('mobile' in c)), JSON.stringify(found.body));
+check('a search needs two letters', (await call('GET', '/people/' + ANAND_ID + '/relation-candidates?q=T', null, BT)).body?.rows?.length === 0);
+const THOMAS_ID = found.body.rows.find((c) => c.name === 'Fr Thomas').rowId;
+
+const addParent = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 1 }, BT);
+check('Fr Thomas is added as the parent of Anand', addParent.status === 201, addParent.text.slice(0, 160));
+check('...Anand sees him as Parent', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Parent'));
+check('...and Fr Thomas sees Anand as Child, with nothing added on his side', (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Child'));
+check('the same two people cannot be related twice (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 7 }, BT)).status === 400);
+check('...nor from the other side', (await call('POST', '/people/' + THOMAS_ID + '/relations', { otherRowId: ANAND_ID, relation: 2 }, BT)).status === 400);
+const gone = await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT);
+check('a relation can be removed, and it goes from both sides', gone.status === 200 && !(await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID) && !(await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID));
+check('removing what is not there is a 404', (await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT)).status === 404);
+
+const bro = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: BLANK_ID, relation: 7 }, BT);
+check('a brother can be added', bro.status === 201, bro.text.slice(0, 160));
+check('...Anand (a man) sees him as Brother', (await famOf(ANAND_ID)).some((r) => r.rowId === BLANK_ID && r.rel === 'Brother'));
+check('...and the other man sees Anand as Brother too, because Anand is male', (await famOf(BLANK_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Brother'));
+check('someone with no gender set cannot be given a brother or sister (400, says why)', await (async () => { const r = await call('POST', '/people/' + BLANK_ID + '/relations', { otherRowId: THOMAS_ID, relation: 8 }, BT); return r.status === 400 && /gender/i.test(r.body?.error || ''); })());
+check('a person cannot be related to themselves (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: ANAND_ID, relation: 7 }, BT)).status === 400);
+check('a relation that is not on offer is refused (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 99 }, BT)).status === 400);
+check('the form is told which relations exist', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.some((o) => o.label === 'Spouse'));
+check('adding a relation needs the permission to edit members (403)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 1 }, verifier.token)).status === 403);
+const famAud = await call('GET', '/data/AUD?limit=200', null, BT);
+check('adding and removing are in the audit log', ['Added a family relation', 'Removed a family relation'].every((a) => (famAud.body?.rows || []).some((x) => x.action === a)));
 
 section('Who looks after a member: pastor and cell leader');
 

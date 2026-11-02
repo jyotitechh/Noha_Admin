@@ -575,16 +575,100 @@ async function ensureExtra(memberRowId) {
    There is no API call for this: the console writes the columns and the app picks the
    change up within about 20 seconds. */
 
-/** Who can be chosen as a pastor, and who as a cell leader. */
-export async function pastoralChoices() {
-  const { members, extras } = await snapshot();
+/* ---------- where someone is ----------
+
+   The Noah app records a member's current location on their login (users.latitude and users.longitude),
+   and a place the member picked in members.currentLocationData (JSON from the map picker). Distance is
+   worked out from those, straight-line (haversine). A person who has not shared a location has no
+   distance, and is listed after those who have. */
+
+const num = (v) => {
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  return Number.isFinite(n) ? n : null;
+};
+
+/** { lat, lng } for a member, from their login or their picked place; null when neither is there. */
+export function coordsOf(member, user) {
+  const lat = num(user?.latitude), lng = num(user?.longitude);
+  if (lat !== null && lng !== null && !(lat === 0 && lng === 0) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  try {
+    const d = typeof member?.currentLocationData === 'string' ? JSON.parse(member.currentLocationData) : member?.currentLocationData;
+    const p = d?.geometry?.location || d?.location || d;
+    const la = num(p?.lat ?? p?.latitude), ln = num(p?.lng ?? p?.lon ?? p?.longitude);
+    if (la !== null && ln !== null && Math.abs(la) <= 90 && Math.abs(ln) <= 180) return { lat: la, lng: ln };
+  } catch { /* not JSON: no place */ }
+  return null;
+}
+
+/** Straight-line kilometres between two points. */
+export function kmBetween(a, b) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** How many members one cell leader can take, if the office has set a limit (LEADER_CAPACITY). Null: no limit. */
+const leaderCapacity = () => {
+  const n = parseInt(process.env.LEADER_CAPACITY || '', 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+/**
+ * Who can be chosen as a pastor, and who as a cell leader.
+ *
+ * With `forMember` the leaders come nearest first, each with how far they are from that member, how many
+ * members they already lead, and (when LEADER_CAPACITY is set) how many more they can take. Distance is the
+ * app-reported current location: it is only worked out for staff who may edit members, and the coordinates
+ * themselves never leave the server.
+ */
+export async function pastoralChoices(forMember) {
+  const { members, extras, users } = await snapshot();
   const extraOf = new Map(extras.map((x) => [String(x.id), x]));
+  const userOf = new Map(users.map((u) => [String(u.ROWID), u]));
   const live = (m) => !asBool(m.archived);
-  const pick = (m) => ({ rowId: String(m.ROWID), name: memberFullName(m) });
   const byName = (a, b) => a.name.localeCompare(b.name);
+  const placeOf = (m) => [m.area, m.city].map((s) => String(s || '').trim()).filter(Boolean).join(', ');
+
+  const me = forMember ? members.find((m) => same(m.ROWID, forMember)) : null;
+  const myCoords = me ? coordsOf(me, userOf.get(String(me.userId))) : null;
+
+  /* How many members each leader already has. */
+  const led = new Map();
+  for (const m of members) {
+    if (!live(m)) continue;
+    const x = extraOf.get(String(m.ROWID));
+    if (x?.connectedLeader) led.set(String(x.connectedLeader), (led.get(String(x.connectedLeader)) || 0) + 1);
+  }
+  const cap = leaderCapacity();
+
+  const pastors = members
+    .filter((m) => live(m) && String(m.memberType || '').toLowerCase() === 'pastor')
+    .map((m) => ({ rowId: String(m.ROWID), name: memberFullName(m) }))
+    .sort(byName);
+
+  const leaders = members
+    .filter((m) => live(m) && asBool(extraOf.get(String(m.ROWID))?.isLeader))
+    .map((m) => {
+      const here = coordsOf(m, userOf.get(String(m.userId)));
+      const km = myCoords && here ? kmBetween(myCoords, here) : null;
+      const count = led.get(String(m.ROWID)) || 0;
+      return {
+        rowId: String(m.ROWID), name: memberFullName(m), where: placeOf(m),
+        members: count,
+        ...(cap ? { capacity: cap, roomLeft: Math.max(0, cap - count) } : {}),
+        /* Like the app, never less than 1 km: a leader 100 m away is "1 km". */
+        ...(km !== null ? { distanceKm: Math.max(1, Math.round(km)) } : {}),
+        _km: km,
+      };
+    });
+  leaders.sort((a, b) => (a._km === null) - (b._km === null) || (a._km ?? 0) - (b._km ?? 0) || a.name.localeCompare(b.name));
+  for (const l of leaders) delete l._km;
+
   return {
-    pastors: members.filter((m) => live(m) && String(m.memberType || '').toLowerCase() === 'pastor').map(pick).sort(byName),
-    leaders: members.filter((m) => live(m) && asBool(extraOf.get(String(m.ROWID))?.isLeader)).map(pick).sort(byName),
+    pastors, leaders,
+    /* About the member being edited, so the screen can say why there is no distance. */
+    ...(me ? { here: { where: placeOf(me), shared: !!myCoords } } : {}),
   };
 }
 
@@ -1373,6 +1457,92 @@ async function familyAndGroups(memberRowId, memberByRow) {
     family: { recorded: true, rows },
     groups: { recorded: true, rows: groupRows.sort((x, y) => x.name.localeCompare(y.name)) },
   };
+}
+
+/* ---------- adding and removing a relation ----------
+
+   One row in membersRelations joins two members and carries BOTH directions: relationshipA2B is what B is
+   to A, and relationshipB2A is what A is to B. The person page reads every row that names the member on
+   either side and shows the other person with the code that faces the member, so one row is enough for
+   each of them to see the other, with the reverse relation, automatically. What matters when writing it is
+   that the second code is right:
+
+     Parent <-> Child, Grandparent <-> Grandchild, Uncle or aunt <-> Nephew or niece   (always each other's reverse)
+     Cousin, Spouse, In-law                                                            (the same word both ways)
+     Brother or Sister                                                                 (what A is to B depends on A's gender:
+                                                                                        a man is a Brother, a woman a Sister)
+
+   Both people must be members (people with the app): a relation links two member rows. */
+
+/** The relations the office can pick, as { code, label }, for the form. */
+export const RELATION_OPTIONS = Object.entries(RELATION).map(([code, label]) => ({ code: Number(code), label }));
+
+/** What the first person is to the second, given what the second is to the first. Null: needs the first person's gender. */
+function reverseRelation(code, firstGender) {
+  const fixed = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 9: 9, 10: 10, 11: 11 };
+  if (fixed[code]) return fixed[code];
+  if (code === 7 || code === 8) return Number(firstGender) === 1 ? 7 : Number(firstGender) === 2 ? 8 : null;
+  return undefined;
+}
+
+/**
+ * Relate `otherRowId` to `memberRowId`: the other person is the member's `code` (7 = Brother, 1 = Parent, ...).
+ * Throws { code: 'not_found' | 'self' | 'exists' | 'bad_relation' | 'need_gender' }.
+ */
+export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
+  const { members } = await snapshot();
+  const me = members.find((m) => same(m.ROWID, memberRowId));
+  const other = members.find((m) => same(m.ROWID, otherRowId));
+  if (!me || !other || asBool(me.archived) || asBool(other.archived)) throw Object.assign(new Error('Both people must be members in the register.'), { code: 'not_found' });
+  if (same(me.ROWID, other.ROWID)) throw Object.assign(new Error('A person cannot be related to themselves.'), { code: 'self' });
+
+  const asked = Number(code);
+  if (!RELATION[asked]) throw Object.assign(new Error('Pick one of the relations on offer.'), { code: 'bad_relation' });
+  const back = reverseRelation(asked, me.gender);
+  if (back === null) {
+    throw Object.assign(new Error(`${memberFullName(me)}'s gender is not set, and Brother or Sister depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });
+  }
+
+  const h = await householdRows();
+  const dup = h.relations.filter(isLiveRow).find((r) =>
+    (same(r.memberIdA, me.ROWID) && same(r.memberIdB, other.ROWID)) || (same(r.memberIdA, other.ROWID) && same(r.memberIdB, me.ROWID)));
+  if (dup) {
+    const was = same(dup.memberIdA, me.ROWID) ? dup.relationshipA2B : dup.relationshipB2A;
+    throw Object.assign(new Error(`${memberFullName(other)} is already on this person's family as ${(RELATION[Number(was)] || 'a relation').toLowerCase()}. Remove that first to change it.`), { code: 'exists' });
+  }
+
+  await io.insert(T.membersRelations, {
+    memberIdA: String(me.ROWID), memberIdB: String(other.ROWID),
+    relationshipA2B: asked, relationshipB2A: back,
+    created: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    isArchived: false,
+  });
+  clearCache();
+  return { me: memberFullName(me), other: memberFullName(other), is: RELATION[asked], backIs: RELATION[back] };
+}
+
+/** Take a relation away (it is archived, not deleted). Throws { code: 'not_found' }. */
+export async function removeRelation(memberRowId, otherRowId) {
+  const h = await householdRows();
+  const row = h.relations.filter(isLiveRow).find((r) =>
+    (same(r.memberIdA, memberRowId) && same(r.memberIdB, otherRowId)) || (same(r.memberIdA, otherRowId) && same(r.memberIdB, memberRowId)));
+  if (!row) throw Object.assign(new Error('They are not related on record.'), { code: 'not_found' });
+  await io.update(T.membersRelations, {
+    ROWID: String(row.ROWID), isArchived: true,
+    archivedOn: new Date().toISOString().slice(0, 19).replace('T', ' '),
+  });
+  clearCache();
+}
+
+/** Members whose name matches `q`, to pick a relative from. Name and place only: nothing private. */
+export async function relationCandidates(memberRowId, q) {
+  const { members } = await snapshot();
+  const needle = String(q || '').trim().toLowerCase();
+  if (needle.length < 2) return [];
+  return members
+    .filter((m) => !asBool(m.archived) && !same(m.ROWID, memberRowId) && memberFullName(m).toLowerCase().includes(needle))
+    .slice(0, 15)
+    .map((m) => ({ rowId: String(m.ROWID), name: memberFullName(m), where: [m.area, m.city].map((s) => String(s || '').trim()).filter(Boolean).join(', ') }));
 }
 
 /* ---------- editing a member from the console ----------

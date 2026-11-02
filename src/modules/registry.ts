@@ -156,6 +156,8 @@ export const MODULES: ModuleDef[] = [
       { id: 'prayers', label: 'Daily Prayers', status: 'built', desc: 'The prayer members are invited to pray with.' },
       { id: 'confessions', label: 'Confessions', status: 'built', desc: 'The daily confession of faith.' },
       { id: 'dictionary', label: 'Dream dictionary', status: 'built', desc: 'What a dream may mean, entry by entry.' },
+      { id: 'commentary', label: 'Bible commentary', status: 'built',
+        desc: 'A commentary on one chapter of the Bible: pick the book, then one of its chapters.' },
       { id: 'announce', label: 'Banners and announcements', status: 'built',
         desc: 'The carousel on the app’s home screen, and the notices above it.' },
     ],

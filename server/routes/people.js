@@ -21,7 +21,7 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields, pastoralChoices, setPastoral } from '../noah-schema.js';
+import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, RELATION_OPTIONS } from '../noah-schema.js';
 import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
 import { can, roleById } from '../db.js';
 import { explainCatalyst } from '../catalyst.js';
@@ -74,7 +74,10 @@ function shape(p, role) {
 /** The person, plus who the office may pick as their pastor and cell leader (editors only). */
 async function withChoices(p, role) {
   const out = shape(p, role);
-  if (live() && isNoah() && can(role, 'members.edit')) out.pastoralChoices = await pastoralChoices();
+  if (live() && isNoah() && can(role, 'members.edit')) {
+    out.pastoralChoices = await pastoralChoices(p.member.rowId);
+    out.relationOptions = RELATION_OPTIONS;
+  }
   return out;
 }
 
@@ -83,6 +86,49 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
     const p = await personProfile(req.params.id);
     if (!p) return res.status(404).json({ error: 'No such member.' });
     res.json(await withChoices(p, req.session.role));
+  });
+
+  /* Members to pick a relative from: matched by name, showing name and place only. */
+  app.get('/api/people/:id/relation-candidates', requireSession, requirePerm('members.edit'), async (req, res) => {
+    if (!(live() && isNoah())) return res.json({ rows: [] });
+    res.json({ rows: await relationCandidates(req.params.id, req.query.q) });
+  });
+
+  /* Relate another member to this one. One row in membersRelations carries both directions, so the other person
+     sees this one, with the reverse relation, on their own page and in the app. */
+  app.post('/api/people/:id/relations', requireSession, requirePerm('members.edit'), async (req, res) => {
+    if (!(live() && isNoah())) return res.status(409).json({ error: 'Adding a relation needs the Catalyst connection. The sample data cannot be saved.' });
+    try {
+      const r = await addRelation(req.params.id, req.body?.otherRowId, req.body?.relation);
+      await writeAudit({
+        actor: req.user.name, role: roleById(req.session.role).name,
+        action: 'Added a family relation', module: 'Membership', record: req.params.id,
+        before: null, after: { [r.me]: r.backIs, [r.other]: r.is }, remark: '', ip: req.ip || '',
+      });
+      res.status(201).json({ ok: true, person: await withChoices(await personProfile(req.params.id), req.session.role) });
+    } catch (err) {
+      if (['not_found', 'self', 'exists', 'bad_relation', 'need_gender'].includes(err.code)) return res.status(err.code === 'not_found' ? 404 : 400).json({ error: err.message, code: err.code });
+      const explained = explainCatalyst(err);
+      res.status(explained?.status ?? 502).json({ error: explained?.message ?? `Catalyst refused the change: ${err.message}` });
+    }
+  });
+
+  /* Take a relation away from both people. It is archived, not deleted. */
+  app.delete('/api/people/:id/relations/:otherRowId', requireSession, requirePerm('members.edit'), async (req, res) => {
+    if (!(live() && isNoah())) return res.status(409).json({ error: 'Removing a relation needs the Catalyst connection.' });
+    try {
+      await removeRelation(req.params.id, req.params.otherRowId);
+      await writeAudit({
+        actor: req.user.name, role: roleById(req.session.role).name,
+        action: 'Removed a family relation', module: 'Membership', record: req.params.id,
+        before: { with: req.params.otherRowId }, after: null, remark: '', ip: req.ip || '',
+      });
+      res.json({ ok: true, person: await withChoices(await personProfile(req.params.id), req.session.role) });
+    } catch (err) {
+      if (err.code === 'not_found') return res.status(404).json({ error: err.message });
+      const explained = explainCatalyst(err);
+      res.status(explained?.status ?? 502).json({ error: explained?.message ?? `Catalyst refused the change: ${err.message}` });
+    }
   });
 
   /* Assign a member's pastor and / or cell leader. Written to the columns the Noah app

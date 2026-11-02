@@ -99,6 +99,11 @@ const SEED = {
     { title: 'Volunteers needed', description: 'Help is wanted at the gate on event days. See the office.', isArchived: false },
   ],
 
+  bibleCommentary: [
+    { title: 'In the beginning', bibleBookId: 1, startChapter: 1, content: '<p>God creates the heavens and the earth, and calls it good.</p>', contentLanguage: '1', onlyForPartners: false, isPublished: true },
+    { title: 'Let my people go', bibleBookId: 2, startChapter: 5, content: '<p>Moses and Aaron stand before Pharaoh for the first time.</p>', contentLanguage: '1', onlyForPartners: false, isPublished: false },
+  ],
+
   bibleStudies: [
     { name: 'Walking with Jesus', description: 'A six-week study through the Gospel of John.', type: '1', status: true },
     { name: 'Foundations of prayer', description: 'How to pray, and why. For new believers.', type: '1', status: false },

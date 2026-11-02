@@ -19,7 +19,7 @@
 
 import { io } from './noah-schema.js';
 import { live, isNoah } from './store.js';
-import { TYPES, typeById, columnFor, BOOKS } from './content-types.js';
+import { TYPES, typeById, columnFor, BOOKS, CHAPTERS } from './content-types.js';
 import { sampleRows } from './content-seed.js';
 import { cleanHtml, plainText, wordCount } from './rich.js';
 
@@ -154,6 +154,18 @@ export function validate(def, body, { partial = false } = {}) {
         else value[f.key] = n;
         break;
       }
+      case 'chapter': {
+        /* A chapter of the book named in `bookKey`: a whole number from 1 to however many chapters that book
+           has (Exodus 40, Psalms 150, Jude 1). Without a book in the body, only a sane upper bound is checked. */
+        const book = Number(body[f.bookKey]);
+        const known = Number.isInteger(book) && book >= 1 && book <= CHAPTERS.length;
+        const most = known ? CHAPTERS[book - 1] : Math.max(...CHAPTERS);
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 1) errors[f.key] = `${f.label} must be a whole number, 1 or more.`;
+        else if (n > most) errors[f.key] = known ? `${BOOKS[book - 1]} has ${most} chapter${most === 1 ? '' : 's'}.` : `${f.label} is too high.`;
+        else value[f.key] = String(n);
+        break;
+      }
       case 'date': {
         const ok = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) && !Number.isNaN(+new Date(v + 'T00:00:00Z'));
         if (!ok) errors[f.key] = `${f.label} must be a date, like 2026-10-19.`;
@@ -256,6 +268,10 @@ const toCatalyst = (def, value, { creating = false } = {}) => {
       else if (f.store === 'datetime' && f.kind === 'date') v = `${v} 00:00:00`;
     }
     row[columnFor(f.key)] = v;
+  }
+  /* Columns whose value is another field's (a commentary's last chapter is its first). */
+  for (const [to, from] of Object.entries(def.derive || {})) {
+    if (from in value && value[from] !== null && value[from] !== undefined) row[columnFor(to)] = Number(value[from]);
   }
   /* The word count the Laravel backend kept, worked out from the message. */
   if (def.wordCount && typeof value.content === 'string') row[def.wordCount] = wordCount(value.content);

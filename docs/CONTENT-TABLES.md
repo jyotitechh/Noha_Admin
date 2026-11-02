@@ -250,6 +250,45 @@ Notices shown to members in the app.
 
 written on create: `createdOn`; on change: `updatedOn`. there is no draft state: an entry is simply there.
 
+### Bible commentary: table `bibleCommentary`
+
+A commentary on one chapter of the Bible. Pick the book, then the chapter: only the chapters that book has are offered.
+
+| Field | Column | Stored as | Notes |
+|---|---|---|---|
+| Title | `title` | varchar | required |
+| Book | `bibleBookId` | int | stored as its code number; required |
+| Chapter | `startChapter` | int | whole number; required |
+| Commentary | `content` | text | required |
+| Writer | `memberId` | bigint |  |
+| Language | `contentLanguage` | int | stored as its code number |
+| Only for partners | `onlyForPartners` | boolean |  |
+| Video (YouTube) | `youtubeId` | varchar |  |
+| Picture | `photo` | text |  |
+| Embed 01 | `embed01` | text |  |
+| Embed 02 | `embed02` | text |  |
+| Embed 03 | `embed03` | text |  |
+| Embed 04 | `embed04` | text |  |
+| Embed 05 | `embed05` | text |  |
+| Embed 06 | `embed06` | text |  |
+| Embed 07 | `embed07` | text |  |
+| Embed 08 | `embed08` | text |  |
+| Embed 09 | `embed09` | text |  |
+| Embed 10 | `embed10` | text |  |
+| Embed 11 | `embed11` | text |  |
+| Embed 12 | `embed12` | text |  |
+| Embed 13 | `embed13` | text |  |
+| Embed 14 | `embed14` | text |  |
+| Embed 15 | `embed15` | text |  |
+| Embed 16 | `embed16` | text |  |
+| Embed 17 | `embed17` | text |  |
+| Embed 18 | `embed18` | text |  |
+| Embed 19 | `embed19` | text |  |
+| Embed 20 | `embed20` | text |  |
+| Published | `isPublished` | boolean |  |
+
+written on create: `createdOn`; on change: `updatedOn`. always written: `isArchived = false`. "live" means `isPublished`.
+
 ---
 
 ## Media: Noahgram and Noah Tube.

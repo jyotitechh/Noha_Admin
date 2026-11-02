@@ -67,6 +67,32 @@ const STAMPS_ON = { created: 'createdOn', updated: 'updatedOn' };
     publish the column that means "live" (a toggle). Without it there is no
             publish step, and the entry is simply there. */
 
+/** The 66 books, in order. A verse is stored as "index,Book,startChapter,startVerse,endChapter,endVerse". */
+export const BOOKS = [
+  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
+  '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
+  'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
+  'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+  'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
+  'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy', '2 Timothy', 'Titus', 'Philemon',
+  'Hebrews', 'James', '1 Peter', '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation',
+];
+
+/** How many chapters each of those books has, in the same order (1,189 in all). The books and their chapters never
+    change, so this is fixed data and needs no third-party Bible service: Exodus offers 40, Psalms 150, Jude 1. */
+export const CHAPTERS = [
+  50, 40, 27, 36, 34, 24, 21, 4, 31, 24,
+  22, 25, 29, 36, 10, 13, 10, 42, 150, 31,
+  12, 8, 66, 52, 5, 48, 12, 14, 3, 9,
+  1, 4, 7, 3, 3, 3, 2, 14, 4,
+  28, 16, 24, 21, 28, 16, 16, 13, 6, 6,
+  4, 4, 5, 3, 6, 4, 3, 1,
+  13, 5, 5, 3, 5, 1, 1, 1, 22,
+];
+
+/** A book's number as it is stored (Genesis is 1, Revelation is 66): what bibleCommentary.bibleBookId holds. */
+export const bookOptions = () => BOOKS.map((b, i) => ({ v: String(i + 1), l: b }));
+
 export const TYPES = [
   /* ================= content ================= */
   {
@@ -393,18 +419,32 @@ export const TYPES = [
       { key: 'option4isAnswer', label: 'Option 4 is a valid answer', kind: 'toggle' },
     ],
   },
+
+  /* ================= Bible commentary ================= */
+  {
+    id: 'bibleCommentary', section: 'content', label: 'Bible commentary', singular: 'commentary', table: 'bibleCommentary',
+    title: 'title', dateKey: null, publish: 'isPublished', stamps: STAMPS_ON, constants: { isArchived: false },
+    /* The table keeps a first and a last chapter; a commentary here is one chapter, so the last is the first. */
+    derive: { endChapter: 'startChapter' },
+    columns: ['bibleBookId', 'startChapter'], sort: ['bibleBookId', 'startChapter'],
+    intro: 'A commentary on one chapter of the Bible. Pick the book, then the chapter: only the chapters that book has are offered.',
+    fields: [
+      { key: 'title', label: 'Title', kind: 'text', required: true },
+      { key: 'bibleBookId', label: 'Book', kind: 'select', options: bookOptions(), store: 'int', required: true, hint: 'The 66 books of the Bible. They are fixed.' },
+      { key: 'startChapter', label: 'Chapter', kind: 'chapter', bookKey: 'bibleBookId', store: 'int', required: true, hint: 'Only the chapters of the book above are offered.' },
+      rich('content', 'Commentary', { required: true }),
+      { key: 'memberId', label: 'Writer', kind: 'member', hint: 'The member credited as the author.' },
+      lang(),
+      { key: 'onlyForPartners', label: 'Only for partners', kind: 'toggle', hint: 'On means only covenant partners see it.' },
+      { key: 'youtubeId', label: 'Video (YouTube)', kind: 'text', hint: 'The YouTube video id or link, if there is a video.' },
+      image('photo', 'Picture'),
+      ...embeds(),
+      published('isPublished'),
+    ],
+  },
 ];
 
-/** The 66 books, in order. A verse is stored as "index,Book,startChapter,startVerse,endChapter,endVerse". */
-export const BOOKS = [
-  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
-  '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
-  'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
-  'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-  'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
-  'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy', '2 Timothy', 'Titus', 'Philemon',
-  'Hebrews', 'James', '1 Peter', '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation',
-];
+/* BOOKS and CHAPTERS are defined above TYPES, which uses them. */
 
 export const typeById = (id) => TYPES.find((t) => t.id === id);
 
@@ -418,6 +458,7 @@ export const typeById = (id) => TYPES.find((t) => t.id === id);
    console stops (or starts) warning the office. */
 export const APP_READS = {
   manna: true, mannaCategories: true, prayers: true, confessions: true,
+  bibleCommentary: false,
   dictionary: false, dictionaryCategories: false, banners: false, announcements: false,
   bibleStudies: false, bibleStudySteps: false, bibleStudyQuizzes: false,
 };

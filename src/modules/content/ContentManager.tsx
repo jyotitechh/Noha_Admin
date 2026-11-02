@@ -28,7 +28,9 @@ import { RichText } from './RichText';
 import { PictureInput } from './PictureInput';
 
 interface FieldDef {
-  key: string; label: string; kind: 'text' | 'textarea' | 'date' | 'select' | 'toggle' | 'number' | 'url' | 'color' | 'ref' | 'richtext' | 'member' | 'verses';
+  key: string; label: string; kind: 'text' | 'textarea' | 'date' | 'select' | 'toggle' | 'number' | 'url' | 'color' | 'ref' | 'richtext' | 'member' | 'verses' | 'chapter';
+  /** For a chapter: the key of the field that holds its book. */
+  bookKey?: string;
   default?: string | boolean;
   /** A picture: draws the drop box as well as the link box. */
   picture?: boolean;
@@ -240,7 +242,19 @@ function EmbedList({ title, members, values, errors, setValues }: {
   );
 }
 
-function Input({ f, v, set, error, parent }: { f: FieldDef; v: string | boolean; set: (v: string | boolean) => void; error?: string; parent?: string }) {
+/* The chapter of a book: only the chapters that book has (Exodus 1 to 40, Jude 1). */
+function ChapterSelect({ value, book, onChange, invalid }: { value: string; book?: string; onChange: (v: string) => void; invalid: boolean }) {
+  const defs = useQuery(() => api.get<{ chapters: number[] }>('/content/types'), []);
+  const count = book ? defs.data?.chapters?.[Number(book) - 1] ?? 0 : 0;
+  return (
+    <select className={'sel' + (invalid ? ' err' : '')} value={value} disabled={!count} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{count ? `Pick a chapter (1 to ${count})` : 'Pick the book first'}</option>
+      {Array.from({ length: count }, (_, i) => <option key={i + 1} value={String(i + 1)}>{i + 1}</option>)}
+    </select>
+  );
+}
+
+function Input({ f, v, set, error, parent, book }: { f: FieldDef; v: string | boolean; set: (v: string | boolean) => void; error?: string; parent?: string; book?: string }) {
   const text = typeof v === 'string' ? v : '';
   const invalid = error ? ' err' : '';
 
@@ -273,6 +287,8 @@ function Input({ f, v, set, error, parent }: { f: FieldDef; v: string | boolean;
         return <RefSelect field={f} value={text} onChange={set} parent={parent} />;
       case 'verses':
         return <VersesEditor value={text} onChange={set} error={error} />;
+      case 'chapter':
+        return <ChapterSelect value={text} book={book} onChange={set} invalid={!!error} />;
       case 'member':
         return <WriterPick value={text} onChange={set} />;
       case 'richtext':
@@ -411,10 +427,13 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
             const input = (g: FieldDef) => (
               <Input key={g.key} f={g} v={values[g.key]} error={errors[g.key]}
                 parent={g.refParent ? String(values[g.refParent.field] ?? '') : undefined}
+                book={g.bookKey ? String(values[g.bookKey] ?? '') : undefined}
                 set={(v) => setValues((s) => {
                   const next = { ...s, [g.key]: v };
                   /* Changing the study clears a step that belonged to the old one. */
                   for (const d of fields) if (d.refParent?.field === g.key) next[d.key] = '';
+                  /* Changing the book clears the chapter: the new book may not have it. */
+                  for (const d of fields) if (d.bookKey === g.key) next[d.key] = '';
                   return next;
                 })} />
             );
