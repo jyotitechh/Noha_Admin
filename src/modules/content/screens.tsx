@@ -15,5 +15,4 @@ export const Noahgram = () => <ContentManager types={['noahgramPosts', 'noahgram
 export const NoahTube = () => <ContentManager types={['tubeVideos', 'tubeCategories']} />;
 
 export const BibleSchool = () => <ContentManager types={['bibleSchools']} />;
-export const BibleStudy = () => <ContentManager types={['bibleStudies', 'bibleStudySteps', 'bibleStudyQuizzes']} />;
 export const Courses = () => <ContentManager types={['courses', 'courseCategories', 'courseSections', 'courseLessons']} />;

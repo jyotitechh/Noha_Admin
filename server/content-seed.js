@@ -103,25 +103,6 @@ const SEED = {
     { title: 'In the beginning', bibleBookId: 1, startChapter: 1, content: '<p>God creates the heavens and the earth, and calls it good.</p>', contentLanguage: '1', onlyForPartners: false, isPublished: true },
     { title: 'Let my people go', bibleBookId: 2, startChapter: 5, content: '<p>Moses and Aaron stand before Pharaoh for the first time.</p>', contentLanguage: '1', onlyForPartners: false, isPublished: false },
   ],
-
-  bibleStudies: [
-    { name: 'Walking with Jesus', description: 'A six-week study through the Gospel of John.', type: '1', status: true },
-    { name: 'Foundations of prayer', description: 'How to pray, and why. For new believers.', type: '1', status: false },
-  ],
-  bibleStudySteps: [
-    { bibleStudyId: 'bibleStudies-1', name: 'In the beginning was the Word', orderCol: 1, description: 'Read John 1 and notice who the Word is.' },
-    { bibleStudyId: 'bibleStudies-1', name: 'Born again', orderCol: 2, description: 'Nicodemus comes by night. Read John 3.' },
-  ],
-  bibleStudyQuizzes: [
-    {
-      bibleStudyPlanId: 'bibleStudies-1', bibleStudyStepId: 'bibleStudySteps-1', question: 'Who is the Word in John 1?',
-      option1: 'Jesus', option1isAnswer: true, option2: 'John the Baptist', option2isAnswer: false,
-    },
-    {
-      bibleStudyPlanId: 'bibleStudies-1', bibleStudyStepId: 'bibleStudySteps-2', question: 'Who came to Jesus by night?',
-      option1: 'Nicodemus', option1isAnswer: true, option2: 'Peter', option2isAnswer: false,
-    },
-  ],
 };
 
 export const sampleRows = (typeId) => (SEED[typeId] ?? []).map((r) => ({ ...r }));

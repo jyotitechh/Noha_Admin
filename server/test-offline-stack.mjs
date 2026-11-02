@@ -377,8 +377,8 @@ const ET = editor.token;
 const FT = finance.token;
 
 const types = await call('GET', '/content/types', null, ET);
-check('the content editor can read what can be authored', types.status === 200 && types.body?.types?.length === 21, `${types.status}`);
-check('...grouped into content, media, school and Bible study', Object.keys(types.body?.sections || {}).join() === 'content,media,school,study');
+check('the content editor can read what can be authored', types.status === 200 && types.body?.types?.length === 18, `${types.status}`);
+check('...grouped into content, media and school', Object.keys(types.body?.sections || {}).join() === 'content,media,school');
 check('...with seven languages on offer', types.body?.languages?.length === 7);
 check('...and each kind says which fields it has', types.body.types.every((t) => t.fields.length > 2 && t.table));
 check('finance cannot read it (403)', (await call('GET', '/content/types', null, FT)).status === 403);
@@ -629,7 +629,7 @@ const confessDef = ctypes.find((t) => t.id === 'confessions');
 check('Daily Prayers no longer asks about obituary notices', prayersDef && !prayersDef.fields.some((f) => f.key === 'showOnObituary'));
 check('Confessions no longer has a separate Prayer box', confessDef && !confessDef.fields.some((f) => f.key === 'prayer'));
 check('...but each still has its message, embeds and picture', ['content', 'embed01', 'image'].every((k) => prayersDef.fields.some((f) => f.key === k) && confessDef.fields.some((f) => f.key === k)));
-check('the console says which kinds the Noah app reads today', ['manna','prayers','confessions'].every((id) => ctypes.find((x) => x.id === id)?.inApp === true) && ['dictionary','banners','announcements','bibleStudies'].every((id) => ctypes.find((x) => x.id === id)?.inApp === false));
+check('the console says which kinds the Noah app reads today', ['manna','prayers','confessions'].every((id) => ctypes.find((x) => x.id === id)?.inApp === true) && ['dictionary','banners','announcements'].every((id) => ctypes.find((x) => x.id === id)?.inApp === false));
 check('every picture field offers the drop box', ctypes.every((t) => t.fields.filter((f) => f.key === 'image').every((f) => f.picture === true)));
 
 if (up.body?.url) {

@@ -39,7 +39,6 @@ export const SECTIONS = {
   content: { label: 'Content', desc: 'What the Noah app reads each day.' },
   media: { label: 'Media', desc: 'Noahgram and Noah Tube.' },
   school: { label: 'School', desc: 'The Bible school and its courses.' },
-  study: { label: 'Bible study', desc: 'Study plans, their steps and quiz questions.' },
 };
 
 const lang = (key = 'contentLanguage', label = 'Language') =>
@@ -359,67 +358,6 @@ export const TYPES = [
     ],
   },
 
-  /* ================= bible study ================= */
-  {
-    id: 'bibleStudies', section: 'study', label: 'Bible studies', singular: 'study', table: 'bibleStudy',
-    title: 'name', dateKey: null, publish: 'status', stamps: STAMPS_ON, columns: ['type', 'maxStepsPerDay'],
-    intro: 'A study plan members work through, a step at a time. Add its steps and quiz questions in the other tabs.',
-    fields: [
-      { key: 'name', label: 'Name', kind: 'text', required: true },
-      { key: 'description', label: 'Description', kind: 'textarea', rows: 4 },
-      {
-        key: 'type', label: 'Who can take it', kind: 'select', store: 'int', required: true, default: '1',
-        options: [{ v: '1', l: 'Free for all' }, { v: '2', l: 'Only partners' }, { v: '3', l: 'Only with a donation' }],
-        hint: 'Free for all, partners only, or a donation is asked for first.',
-      },
-      { key: 'donationAmount', label: 'Donation amount (INR)', kind: 'number', required: true, showIf: { key: 'type', in: ['3'] } },
-      { key: 'donationAmountUSD', label: 'Donation amount (USD)', kind: 'number', required: true, showIf: { key: 'type', in: ['3'] } },
-      { key: 'maxStepsPerDay', label: 'Only one step a day', kind: 'toggle', hint: 'Off means a member may take as many steps a day as they like.' },
-      image('photo', 'Picture'),
-      lang(),
-      published('status', 'Active'),
-    ],
-  },
-  {
-    id: 'bibleStudySteps', section: 'study', label: 'Steps', singular: 'step', table: 'bibleStudyConnect',
-    title: 'name', dateKey: null, publish: null, stamps: STAMPS, constants: { isArchived: false },
-    columns: ['bibleStudyId', 'orderCol'], sort: ['bibleStudyIdLabel', 'orderCol'],
-    intro: 'The steps of a study, in order. Each has verses to read, and may have a video, a picture and a quiz.',
-    fields: [
-      { key: 'bibleStudyId', label: 'Bible study', kind: 'ref', ref: 'bibleStudies', required: true },
-      { key: 'name', label: 'Name', kind: 'text', required: true },
-      { key: 'orderCol', label: 'Order', kind: 'number', store: 'int', required: true, default: '1', hint: 'Where it sits in the study; lowest first.' },
-      { key: 'description', label: 'Description', kind: 'textarea', rows: 4 },
-      { key: 'verses', label: 'Verses', kind: 'verses', hint: 'The passages to read in this step.' },
-      { key: 'youtubeId', label: 'Video (YouTube)', kind: 'text', hint: 'The YouTube link. Uploading a video from here is not available yet.' },
-      image('youtubeThumbnail', 'Video thumbnail link', 'Filled in from the YouTube link if you leave it empty.'),
-      image('photo', 'Photo'),
-      lang(),
-    ],
-  },
-  {
-    id: 'bibleStudyQuizzes', section: 'study', label: 'Quiz questions', singular: 'quiz question', table: 'bibleStudyStepQuiz',
-    title: 'question', dateKey: null, publish: null, stamps: STAMPS, constants: { isArchived: false },
-    columns: ['bibleStudyPlanId', 'bibleStudyStepId'], sort: ['bibleStudyPlanIdLabel', 'bibleStudyStepIdLabel'],
-    intro: 'A question at the end of a step, with up to four options. Tick each option that is a valid answer.',
-    fields: [
-      { key: 'bibleStudyPlanId', label: 'Bible study', kind: 'ref', ref: 'bibleStudies', required: true },
-      {
-        key: 'bibleStudyStepId', label: 'Step', kind: 'ref', ref: 'bibleStudySteps', required: true,
-        refParent: { field: 'bibleStudyPlanId', column: 'bibleStudyId' }, hint: 'Pick the study first; only its steps are offered.',
-      },
-      { key: 'question', label: 'Question', kind: 'textarea', rows: 3, required: true },
-      { key: 'option1', label: 'Option 1', kind: 'textarea', rows: 2 },
-      { key: 'option1isAnswer', label: 'Option 1 is a valid answer', kind: 'toggle' },
-      { key: 'option2', label: 'Option 2', kind: 'textarea', rows: 2 },
-      { key: 'option2isAnswer', label: 'Option 2 is a valid answer', kind: 'toggle' },
-      { key: 'option3', label: 'Option 3', kind: 'textarea', rows: 2 },
-      { key: 'option3isAnswer', label: 'Option 3 is a valid answer', kind: 'toggle' },
-      { key: 'option4', label: 'Option 4', kind: 'textarea', rows: 2 },
-      { key: 'option4isAnswer', label: 'Option 4 is a valid answer', kind: 'toggle' },
-    ],
-  },
-
   /* ================= Bible commentary ================= */
   {
     id: 'bibleCommentary', section: 'content', label: 'Bible commentary', singular: 'commentary', table: 'bibleCommentary',
@@ -453,14 +391,13 @@ export const typeById = (id) => TYPES.find((t) => t.id === id);
 
    Checked 2 Nov 2026 against the Noah API (GET /content/...): manna, its categories, prayers and
    confessions answer (they ask for a member sign-in); the dictionary, banners and announcements
-   answer "no such endpoint", and no route reads Bible study (docs/FLUTTER-CONTENT-INTEGRATION.md).
+   answer "no such endpoint". Bible study is not authored here: it runs in Zoho TrainerCentral (docs/CLIENT-DEMO-FEATURES.md).
    Media and school are left out: not checked. Change an entry here when a route appears, and the
    console stops (or starts) warning the office. */
 export const APP_READS = {
   manna: true, mannaCategories: true, prayers: true, confessions: true,
   bibleCommentary: false,
   dictionary: false, dictionaryCategories: false, banners: false, announcements: false,
-  bibleStudies: false, bibleStudySteps: false, bibleStudyQuizzes: false,
 };
 
 /* Catalyst refuses some column names outright, so the project's tables have them

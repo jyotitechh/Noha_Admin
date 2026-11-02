@@ -1278,9 +1278,9 @@ const FC = await import('./fake-catalyst.mjs');
 const manna = CT.typeById('manna');
 
 /* ---------- the definitions ---------- */
-check('there are twenty-one kinds of content across content, media, school and Bible study', CT.TYPES.length === 21
-  && new Set(CT.TYPES.map((t) => t.section)).size === 4, `${CT.TYPES.length}`);
-check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 21 && CT.TYPES.every((t) => t.table));
+check('there are eighteen kinds of content across content, media and school', CT.TYPES.length === 18
+  && new Set(CT.TYPES.map((t) => t.section)).size === 3, `${CT.TYPES.length}`);
+check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 18 && CT.TYPES.every((t) => t.table));
 check('the Bible has 66 books and 1,189 chapters, in the same order as the books', CT.BOOKS.length === 66 && CT.CHAPTERS.length === 66 && CT.CHAPTERS.reduce((a, b) => a + b, 0) === 1189 && CT.CHAPTERS[CT.BOOKS.indexOf('Exodus')] === 40 && CT.CHAPTERS[CT.BOOKS.indexOf('Psalms')] === 150 && CT.CHAPTERS[CT.BOOKS.indexOf('Jude')] === 1);
 check('every field a kind names as its title exists', CT.TYPES.every((t) => t.fields.some((f) => f.key === t.title)));
 check('every publish flag is a real toggle field', CT.TYPES.every((t) => !t.publish || t.fields.some((f) => f.key === t.publish && f.kind === 'toggle')));

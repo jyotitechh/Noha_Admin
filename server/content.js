@@ -81,31 +81,8 @@ export function parseVerses(text) {
   return out;
 }
 
-const HOOKS = {
-  bibleStudySteps(value) {
-    const errors = {};
-    if (value.youtubeId) {
-      const id = youtubeId(value.youtubeId);
-      if (!id) errors.youtubeId = 'That is not a YouTube link.';
-      else {
-        value.youtubeId = id;
-        if (!value.youtubeThumbnail) value.youtubeThumbnail = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
-      }
-    }
-    return errors;
-  },
-  bibleStudyQuizzes(value, { partial }) {
-    if (partial) return {};
-    const errors = {};
-    const filled = [1, 2, 3, 4].filter((n) => value['option' + n]);
-    if (filled.length < 2) errors.option2 = 'Give at least two options.';
-    for (const n of [1, 2, 3, 4]) {
-      if (value['option' + n + 'isAnswer'] && !value['option' + n]) errors['option' + n] = 'This is marked as a valid answer but has no text.';
-    }
-    if (!filled.some((n) => value['option' + n + 'isAnswer'])) errors.option1isAnswer = 'Tick at least one valid answer.';
-    return errors;
-  },
-};
+/* Checks a kind needs beyond its fields, by kind id. None at present (the Bible study kinds that had them were removed). */
+const HOOKS = {};
 
 /* ---------- checking what was sent ---------- */
 

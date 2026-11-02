@@ -409,18 +409,8 @@ edit it in the admin console under **Content**.
 
 ---
 
-## Bible study (plans, steps, quiz)
+## Bible study
 
-Written by the console in Catalyst. No Noah API route reads them yet; the Catalyst developer adds them.
-
-| Table | One row is | Columns the console writes |
-|---|---|---|
-| `bibleStudy` | a study plan | `name`, `description`, `type` (1 free for all, 2 only partners, 3 only with a donation), `donationAmount` (INR) and `donationAmountUSD` (only when `type` = 3, else empty), `maxStepsPerDay` (true = only one step a day), `photo`, `contentLanguage`, `status` (true = live), `createdOn`, `updatedOn` |
-| `bibleStudyConnect` | a step of a plan | `bibleStudyId` (the plan's ROWID), `name`, `orderCol`, `description`, `verses`, `youtubeId`, `youtubeThumbnail`, `photo`, `contentLanguage`, `isArchived` (false), `created`, `updated` |
-| `bibleStudyStepQuiz` | a quiz question of a step | `bibleStudyPlanId`, `bibleStudyStepId` (ROWIDs), `question`, `option1`..`option4`, `option1isAnswer`..`option4isAnswer` (true = valid answer, one or more), `isArchived` (false), `created`, `updated` |
-
-- Plans, steps and questions are joined on **ROWID**, not on the legacy `id` column.
-- `verses` is one text value: entries joined by `;`, each `bookIndex,Book,startChapter,startVerse,endChapter,endVerse` (book index 0 = Genesis, 65 = Revelation). Example: `2,Leviticus,1,2,2,3` is Leviticus 1:2 to 2:3.
-- `youtubeId` is the 11-character video id; the console fills `youtubeThumbnail` with `https://img.youtube.com/vi/<id>/hqdefault.jpg` when it is left empty.
-- Show a plan only when `status` is true; order steps by `orderCol`.
-- Open questions: confirm the `type` numbers, and whether `maxStepsPerDay` true means "only 1".
+The console no longer authors Bible study (plans, steps, quiz questions). The client chose to run Bible study, and the Bible
+school with it, in **Zoho TrainerCentral**; see docs/CLIENT-DEMO-FEATURES.md, section 7, for how it connects. The Catalyst
+tables (`bibleStudy`, `bibleStudyConnect`, `bibleStudyStepQuiz`) are left as they are and are not read or written by the console.

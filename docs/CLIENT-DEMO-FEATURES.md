@@ -1,7 +1,7 @@
 # Changes asked for in the client module demo
 
 What the client asked for in the module demo, what was built, the logic behind each, and where it lives.
-Six items; five are built, one (CRM contacts) needs the client's field list first.
+Six items; five are built, one (CRM contacts) needs the client's field list first. Section 7 covers Bible study, which the client moved to Zoho TrainerCentral (the custom screens were removed).
 
 | # | Ask | State |
 |---|---|---|
@@ -118,3 +118,46 @@ contact details stays one click and is audited, as on the person page today.
 
 **Needed from the client:** which fields their CRM holds and which of them they actually use, who in the office uses
 it, and whether it must stay in sync with Zoho CRM (a sync job exists in the prototype; none is built here).
+
+---
+
+## 7. Bible study (and Bible school): Zoho TrainerCentral instead of custom screens
+
+**What was undone.** The console had its own Bible study screens: study plans, their steps (verses, video, photo) and quiz
+questions, in a School > Bible study tab. They were removed: the three content kinds (`bibleStudies`, `bibleStudySteps`,
+`bibleStudyQuizzes`), the Bible study section and tab, their sample data and checks. Nothing was deleted from Catalyst: the
+tables (`bibleStudy`, `bibleStudyConnect`, `bibleStudyStepQuiz`) and the demo's test rows are still there, unused. The Bible
+school and Courses tabs were not part of this and are still in place (see the open questions below).
+
+**Why.** The client already runs courses, workshops and reading plans (30, 90 and 365 days, with the Bible built in) in
+TrainerCentral, with enrolment, fees and reports. They want one system for Bible school and Bible study, not two.
+
+**How it would connect.** TrainerCentral has an OAuth 2.0 REST API (`/api/v4/<orgId>/...`). The pieces:
+
+1. **Courses live in TrainerCentral.** Staff author and price them there. The console builds nothing for authoring.
+2. **The Noah API talks to TrainerCentral, never the app.** One server-side OAuth client (its secret kept on the server, like
+   the Catalyst key) lets the Noah API list courses and enrol people. The app only calls the Noah API.
+3. **Enrol from the app.** The member taps Enrol, the app asks "Are you sure?", and the Noah API enrols them with
+   `addCourseAttendee` (POST `/api/v4/<orgId>/addCourseAttendee.json`, scope `TrainerCentral.userapi.CREATE`), sending the
+   member's email and name from Catalyst plus the course id. They never retype their details. Access can be taken back with an
+   update on the attendee (scope `TrainerCentral.courseapi.UPDATE`).
+4. **Only enrolled members see a course.** The app shows the member's own enrolments; the rest of the catalogue shows an Enrol
+   button.
+5. **Learning happens in TrainerCentral's player**, opened inside the app. Reports (who enrolled, progress, completion) come
+   from TrainerCentral itself.
+6. **The console** could later show a read-only Learning view (enrolments per member). It is not needed to start.
+
+**Who does what.** Client: a TrainerCentral admin login, the organisation id, which courses to offer and their fees. Catalyst
+developer: the Noah API routes and the server-side OAuth client. Flutter developer: the screens. Console: nothing required.
+
+**Open questions to settle first**
+- **Email.** Enrolling needs the learner's email. Do all members have one on record? A member without one needs a fallback.
+- **Sign-in to TrainerCentral.** Can members open courses without a second sign-in (single sign-on), or do they sign in once
+  with their email? SSO was not confirmed from the documentation I could reach; ask TrainerCentral support or check the admin
+  settings.
+- **Fees.** Paid courses are expected to be paid through TrainerCentral's own checkout; confirm a payment gateway is set up
+  there and that the app does not need to take the payment itself.
+- **Bible school and Courses.** The client said both come from TrainerCentral. The console still has Bible school and Courses
+  screens (the `rowil*` tables). Decide whether to remove them too.
+- **Feasibility with Catalyst.** The client said they would check this on their side. The API is plain HTTPS with OAuth, which a
+  Catalyst function can call.
