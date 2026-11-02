@@ -89,6 +89,34 @@ const SEED = {
     { title: 'God is Spirit', groupId: 'courseSections-1', description: 'What it means that God is a spirit.', link: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', durationTime: 860, publishedDate: day(-10), published: true },
     { title: 'God is holy', groupId: 'courseSections-1', description: 'The holiness of God, and our response.', durationTime: 665, published: false },
   ],
+
+  banners: [
+    { caption: 'Join us this Sunday', url: 'https://example.org/sunday', expiryTime: day(14), orderCol: 1, contentLanguage: '1', hideFromPublic: false, isArchived: false },
+    { caption: 'Bible School enrolment is open', url: 'https://example.org/school', expiryTime: day(30), orderCol: 2, contentLanguage: '1', hideFromPublic: true, isArchived: false },
+  ],
+  announcements: [
+    { title: 'Service time change', description: 'The evening service now begins at 6:30 pm.', link: 'https://example.org/services', isArchived: false },
+    { title: 'Volunteers needed', description: 'Help is wanted at the gate on event days. See the office.', isArchived: false },
+  ],
+
+  bibleStudies: [
+    { name: 'Walking with Jesus', description: 'A six-week study through the Gospel of John.', type: '1', status: true },
+    { name: 'Foundations of prayer', description: 'How to pray, and why. For new believers.', type: '1', status: false },
+  ],
+  bibleStudySteps: [
+    { bibleStudyId: 'bibleStudies-1', name: 'In the beginning was the Word', orderCol: 1, description: 'Read John 1 and notice who the Word is.' },
+    { bibleStudyId: 'bibleStudies-1', name: 'Born again', orderCol: 2, description: 'Nicodemus comes by night. Read John 3.' },
+  ],
+  bibleStudyQuizzes: [
+    {
+      bibleStudyPlanId: 'bibleStudies-1', bibleStudyStepId: 'bibleStudySteps-1', question: 'Who is the Word in John 1?',
+      option1: 'Jesus', option1isAnswer: true, option2: 'John the Baptist', option2isAnswer: false,
+    },
+    {
+      bibleStudyPlanId: 'bibleStudies-1', bibleStudyStepId: 'bibleStudySteps-2', question: 'Who came to Jesus by night?',
+      option1: 'Nicodemus', option1isAnswer: true, option2: 'Peter', option2isAnswer: false,
+    },
+  ],
 };
 
 export const sampleRows = (typeId) => (SEED[typeId] ?? []).map((r) => ({ ...r }));

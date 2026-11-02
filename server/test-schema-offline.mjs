@@ -1229,9 +1229,9 @@ const FC = await import('./fake-catalyst.mjs');
 const manna = CT.typeById('manna');
 
 /* ---------- the definitions ---------- */
-check('there are fifteen kinds of content across content, media and school', CT.TYPES.length === 15
-  && new Set(CT.TYPES.map((t) => t.section)).size === 3, `${CT.TYPES.length}`);
-check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 15 && CT.TYPES.every((t) => t.table));
+check('there are twenty kinds of content across content, media, school and Bible study', CT.TYPES.length === 20
+  && new Set(CT.TYPES.map((t) => t.section)).size === 4, `${CT.TYPES.length}`);
+check('every kind has a unique id and a table name', new Set(CT.TYPES.map((t) => t.id)).size === 20 && CT.TYPES.every((t) => t.table));
 check('every field a kind names as its title exists', CT.TYPES.every((t) => t.fields.some((f) => f.key === t.title)));
 check('every publish flag is a real toggle field', CT.TYPES.every((t) => !t.publish || t.fields.some((f) => f.key === t.publish && f.kind === 'toggle')));
 check('every ref points at a kind that exists', CT.TYPES.every((t) => t.fields.every((f) => f.kind !== 'ref' || CT.typeById(f.ref))));
