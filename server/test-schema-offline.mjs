@@ -1027,7 +1027,7 @@ section('Changes the members ask for from the app');
 reset(seed());
 {
   const pending = await S.loadChangeRequests({ status: 'pending' });
-  check('the pending requests are listed, newest first', pending.length === 4 && pending[0].id === CR.badDate, pending.map((p) => p.fieldId).join());
+  check('the pending requests are listed, newest first', pending.length === 15 && pending[0].id === CR.firstName, pending.map((p) => p.fieldId).join());
   check('...each with who asked, the old value and the new', pending.find((p) => p.id === CR.name).memberName === 'Anand Rao' && pending.find((p) => p.id === CR.name).newValue === 'Anandan');
   check('...marking the ones the console can place', pending.find((p) => p.id === CR.name).known && pending.find((p) => p.id === CR.email).contact && !pending.find((p) => p.id === CR.unknown).known);
   check('a request already decided is not pending', (await S.loadChangeRequests({ status: 'approved' })).length === 1);
@@ -1063,6 +1063,83 @@ reset(seed());
   let failed = null;
   try { await S.decideChangeRequest({ id: CR.name, approve: true, canContact: true }); } catch (e) { failed = e; } finally { S.io.update = realUpdate; }
   check('if the member cannot be written, the request stays pending to retry', !!failed && tables[T.appChangeRequests].find((r) => r.ROWID === CR.name).status === 'pending');
+}
+
+/* ================================================================== */
+section('Change requests: the app\'s own field ids (ADMIN_INTEGRATION)');
+
+const CF = await import('./change-fields.js');
+reset(seed());
+{
+  const mem = (id = M.approved) => tables[T.members].find((m) => m.ROWID === id);
+  const list = await S.loadChangeRequests({ status: 'pending' });
+  const byId = (id) => list.find((p) => p.id === id);
+  const apply = (id) => S.decideChangeRequest({ id, approve: true, canContact: true });
+  const refuses = async (id, opts = { canContact: true }) => { try { await S.decideChangeRequest({ id, approve: true, ...opts }); return null; } catch (e) { return e; } };
+
+  check('a documented id is recognised and labelled (first_name)', byId(CR.firstName).known && byId(CR.firstName).fieldLabel === 'First name');
+  check('the sign-in number is known but never applied, and the reason is given', byId(CR.phone1).known === false && /signs in/.test(byId(CR.phone1).blocked || ''), String(byId(CR.phone1).blocked));
+  check('an address is shown split into address and area before anyone approves it',
+    byId(CR.address).saves?.map((s) => `${s.label}:${s.value}`).join('|') === 'Address:14 Church Road, Near the school|Area:Dadar', JSON.stringify(byId(CR.address).saves));
+  check('a location without a city, a state and a country is flagged before approving', /city, a state and a country/.test(byId(CR.locBad).problem || ''), String(byId(CR.locBad).problem));
+  check('a blood group that does not exist is flagged', /A\+ or O-/.test(byId(CR.bloodBad).problem || ''));
+  check('a plain value shows no breakdown', byId(CR.income).saves === null);
+
+  await apply(CR.address);
+  check('address: everything before the last comma is the address, the last part is the area', mem().address === '14 Church Road, Near the school' && mem().area === 'Dadar', `${mem().address} | ${mem().area}`);
+  await apply(CR.location);
+  check('location: city, state and country each go to their own column', mem().city === 'Pune' && mem().state === 'Maharashtra' && mem().country === 'India');
+  await apply(CR.smoking);
+  check('smoking: "no" is stored as false', mem().smoking === false);
+  await apply(CR.income);
+  check('income: stored as a number', mem().annualIncome === 500000);
+  await apply(CR.phone2);
+  check('phone2: the dial code and the number go to their own columns', mem().mobileNumber2 === '9811122233' && mem().mobileNumber2CountryCode === '+91');
+  await apply(CR.refPhone);
+  check('reference phone: only that part of referBy changes', mem().referBy === 'Fr. Thomas|+91|9000011222', mem().referBy);
+  await apply(CR.firstName);
+  check('first_name goes to firstName', mem().firstName === 'Anandan');
+  await apply(CR.deceased);
+  check('deceased: a datetime column gets the day at midnight', mem(M.office).deceasedDate === '2026-09-30 00:00:00', mem(M.office).deceasedDate);
+  check('...and every request applied is marked approved', [CR.address, CR.location, CR.smoking, CR.income, CR.phone2, CR.refPhone, CR.firstName, CR.deceased]
+    .every((id) => tables[T.appChangeRequests].find((r) => r.ROWID === id).status === 'approved'));
+
+  const loginErr = await refuses(CR.phone1);
+  check('the sign-in number cannot be approved, and the request stays pending', loginErr?.code === 'blocked_field' && mem().mobileNumber1 === '9000000779' && tables[T.appChangeRequests].find((r) => r.ROWID === CR.phone1).status === 'pending', loginErr?.message);
+  const locErr = await refuses(CR.locBad);
+  check('a location with one part is refused, and nothing is written', locErr?.code === 'invalid_value' && mem().city === 'Pune');
+  check('a blood group that does not exist is refused', (await refuses(CR.bloodBad))?.code === 'invalid_value' && !mem().bloodGroup);
+
+  /* the permission: contact details and ID numbers need it */
+  reset(seed());
+  tables[T.appChangeRequests].push({ ROWID: '27145000000160090', memberRowId: M.approved, fieldId: 'pan', oldValue: 'ABCDE1234F', newValue: 'ZZZZZ9999Z', status: 'pending', CREATEDTIME: '2026-10-22 09:00:00:000' });
+  tables[T.appChangeRequests].push({ ROWID: '27145000000160091', memberRowId: M.approved, fieldId: 'dob', oldValue: '1990-05-14', newValue: '1991-06-15', status: 'pending', CREATEDTIME: '2026-10-22 09:10:00:000' });
+  check('an ID number needs the permission to see contact details', (await refuses('27145000000160090', { canContact: false }))?.code === 'forbidden_field');
+  check('...and is applied with it', !!(await apply('27145000000160090')) && tables[T.members].find((m) => m.ROWID === M.approved).panNo === 'ZZZZZ9999Z');
+  check('a date of birth does not need it', !!(await S.decideChangeRequest({ id: '27145000000160091', approve: true, canContact: false })) && tables[T.members].find((m) => m.ROWID === M.approved).dateOfBirth === '1991-06-15');
+}
+
+{
+  const r = CF.resolveChange;
+  const v = (id, val, member) => r(id, val, member).parts?.map((p) => p.value);
+  check('gender: male, female and other are 1, 2 and 3', v('gender', 'male')[0] === 1 && v('gender', 'Female')[0] === 2 && v('gender', 'other')[0] === 3 && !!r('gender', 'x').error);
+  check('a date of birth in the future is refused', !!r('dob', '2999-01-01').error);
+  check('marital status is one of the six the app offers, in lower case', v('marital', 'Married')[0] === 'married' && !!r('marital', 'engaged').error);
+  check('diet and complexion are checked against their lists', v('diet', 'Vegan')[0] === 'vegan' && !!r('diet', 'keto').error && v('complexion', 'wheatish')[0] === 'wheatish' && !!r('complexion', 'pink').error);
+  check('income accepts a whole number, with commas, and nothing else', v('income', '1,00,000')[0] === 100000 && !!r('income', 'lots').error);
+  check('an optional detail can be cleared, a required one cannot', v('middle_name', '')[0] === null && !!r('first_name', '').error);
+  check('a phone is split into dial code and number', JSON.stringify(CF.splitPhone('+91 98765 43210')) === '{"dial":"+91","number":"9876543210"}' && CF.splitPhone('9876543210') === null && CF.splitPhone('+91 12') === null);
+  check('a phone without a dial code is refused', !!r('phone2', '9876543210').error);
+  check('the reference name changes only the name', v('reference', 'Fr Joseph', { referBy: 'Fr. Thomas|+91|9000011111' })[0] === 'Fr Joseph|+91|9000011111');
+  check('...and starts a reference when there was none', v('reference', 'Fr Joseph', {})[0] === 'Fr Joseph||');
+  check('...and a name cannot contain the separator', !!r('reference', 'a|b', {}).error);
+  check('a reference that would not fit the column is refused', !!r('reference', 'x'.repeat(120), {}).error);
+  check('four place names: the first two are the city', v('location', 'Navi, Mumbai, Maharashtra, India').join('|') === 'Navi, Mumbai|Maharashtra|India');
+  check('the postal address maps to the postal columns', r('corr_address', '5 Lane, Bandra').parts.map((p) => p.column).join() === 'corrAddress,corrArea' && r('corr_location', 'A, B, C').parts.map((p) => p.column).join() === 'corrCity,corrState,corrCountry');
+  check('a blood group is upper-cased and checked', v('blood_group', 'o-')[0] === 'O-' && !!r('blood_group', 'Q+').error);
+  check('an id the console does not know is refused, and so are names that only exist on every object', r('favouriteColour', 'x').code === 'unknown_field' && r('constructor', 'x').code === 'unknown_field' && r('__proto__', 'x').code === 'unknown_field');
+  check('an older spelling that names a console field still works', v('firstName', 'Asha')[0] === 'Asha' && r('emailId1', 'a@b.co').contact === true);
+  check('describing a field says what it is without applying it', CF.describeChangeField('pan').contact === true && CF.describeChangeField('nope').known === false && CF.describeChangeField('phone1').blocked !== null);
 }
 
 /* ================================================================== */

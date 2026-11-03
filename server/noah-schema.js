@@ -37,7 +37,8 @@
 import {
   getRows, getRow, update, insert, remove, listTables, listColumns,
 } from './catalyst.js';
-import { MEMBER_FIELDS, fieldByName, checkValue } from './member-fields.js';
+import { MEMBER_FIELDS } from './member-fields.js';
+import { describeChangeField, resolveChange } from './change-fields.js';
 
 /* ---------- finding the tables ----------
 
@@ -1688,6 +1689,28 @@ export async function updateMemberFields(memberRowId, values) {
   return { changed };
 }
 
+/**
+ * Write what a change request resolved to (server/change-fields.js) into the member's columns. Only a column whose value
+ * actually changes is written; `changed` is empty when the member already had it. The columns are named by that file's
+ * own table, never by the caller, so a request cannot reach a column it does not list.
+ */
+async function writeMemberColumns(member, plan) {
+  clearCache();
+  const write = {};
+  /* A date column comes back as 'YYYY-MM-DD', or as a datetime at midnight: compare the day. */
+  const norm = (v) => {
+    const s = v === undefined || v === null ? '' : String(v);
+    return /^\d{4}-\d{2}-\d{2}( 00:00:00(:000)?)?$/.test(s) ? s.slice(0, 10) : s;
+  };
+  for (const p of plan.parts) {
+    if (norm(member[p.column]) !== norm(p.value)) write[p.column] = p.value;
+  }
+  if (!Object.keys(write).length) return { changed: [] };
+  await io.update(T.members, { ROWID: String(member.ROWID), ...write });
+  clearCache();
+  return { changed: [{ label: plan.label, contact: plan.contact }] };
+}
+
 /* ---------- changes the app asks for ----------
 
    A member who wants a detail changed after approval files an
@@ -1696,10 +1719,9 @@ export async function updateMemberFields(memberRowId, values) {
    them yet, so the office applies one by writing `newValue` to the member's
    column and marking the request. That is what approving does here.
 
-   `fieldId` is not documented beyond its name. It is matched to an editable
-   field by key or column name, ignoring case and punctuation. A request this
-   cannot match is shown, can be rejected, and cannot be approved: guessing
-   which column a stranger's request means is how the wrong thing gets edited. */
+   `fieldId` and its columns are in ADMIN_INTEGRATION ("Profile change requests"); server/change-fields.js holds the map
+   and how each value is turned into what the column stores. A request it cannot match is shown, can be rejected, and
+   cannot be approved: guessing which column a stranger's request means is how the wrong thing gets edited. */
 
 let crSnap = null;
 let crAt = 0;
@@ -1720,16 +1742,27 @@ export async function loadChangeRequests({ status } = {}) {
     .filter((r) => !status || String(r.status || 'pending').toLowerCase() === status)
     .map((r) => {
       const m = byRow.get(String(r.memberRowId));
-      const field = fieldByName(r.fieldId);
+      const field = describeChangeField(r.fieldId);
+      const pending = String(r.status || 'pending').toLowerCase() === 'pending';
+      /* What approving would save, so a value that is split (an address, a phone) can be checked before it is. */
+      const plan = pending && field.known ? resolveChange(r.fieldId, r.newValue, m) : null;
       return {
         id: String(r.ROWID),
         memberRowId: r.memberRowId ? String(r.memberRowId) : null,
         memberName: m ? memberFullName(m) : '(unknown member)',
         fieldId: r.fieldId ?? '',
-        fieldLabel: field?.label || null,
+        fieldLabel: field.label,
         /* Can the console apply it? Contact fields need members.pii on top. */
-        known: !!field,
-        contact: !!field?.contact,
+        known: field.known,
+        contact: field.contact,
+        /* Known, but deliberately not applied from here: the reason, in words. */
+        blocked: field.blocked,
+        /* More than one column, or a value that is changed on the way in: what each will hold. */
+        saves: plan?.parts && (plan.parts.length > 1 || plan.parts[0].shown !== String(r.newValue ?? '').trim())
+          ? plan.parts.map((p) => ({ label: p.label, value: String(p.shown ?? '') }))
+          : null,
+        /* A value that cannot be applied as it stands, found now rather than when someone presses Approve. */
+        problem: plan?.error || null,
         oldValue: r.oldValue ?? '',
         newValue: r.newValue ?? '',
         status: String(r.status || 'pending').toLowerCase(),
@@ -1758,18 +1791,19 @@ export async function decideChangeRequest({ id, approve, note, byMemberRowId, ca
 
   let applied = null;
   if (approve) {
-    const field = fieldByName(row.fieldId);
-    if (!field) {
-      throw Object.assign(new Error(`The console does not know which detail "${row.fieldId}" is, so it cannot apply this. Reject it, or change the member's detail by hand.`), { code: 'unknown_field' });
+    const { members } = await snapshot();
+    const member = members.find((m) => same(m.ROWID, row.memberRowId));
+    if (!member) throw Object.assign(new Error('The member this request is about is not on the register.'), { code: 'not_found' });
+
+    const plan = resolveChange(row.fieldId, row.newValue, member);
+    if (plan.error) {
+      const code = plan.code === 'invalid_value' ? 'invalid_value' : plan.code;
+      throw Object.assign(new Error(code === 'invalid_value' ? `The requested value cannot be applied: ${plan.error}` : plan.error), { code });
     }
-    if (field.contact && !canContact) {
+    if (plan.contact && !canContact) {
       throw Object.assign(new Error('Applying a change to contact details needs permission to see them.'), { code: 'forbidden_field' });
     }
-    const checked = checkValue(field, row.newValue);
-    if (checked.error) {
-      throw Object.assign(new Error(`The requested value cannot be applied: ${checked.error}`), { code: 'invalid_value' });
-    }
-    applied = await updateMemberFields(row.memberRowId, { [field.column]: checked.value });
+    applied = await writeMemberColumns(member, plan);
   }
 
   await io.update(T.appChangeRequests, {

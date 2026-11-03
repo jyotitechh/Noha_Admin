@@ -7,7 +7,8 @@
 
    A request the console cannot place (a field it does not know) can be turned
    down but not approved: guessing which detail a stranger's request means is how
-   the wrong thing gets edited. */
+   the wrong thing gets edited. The mobile number the member signs in with is
+   known but never applied from here (server/change-fields.js says why). */
 
 import { useState } from 'react';
 import { api } from '@/lib/api';
@@ -19,7 +20,8 @@ import { fdt, since } from '@/lib/format';
 
 interface Request {
   id: string; memberRowId: string | null; memberName: string; fieldId: string; fieldLabel: string | null;
-  known: boolean; contact: boolean; oldValue: string; newValue: string; status: 'pending' | 'approved' | 'rejected';
+  known: boolean; contact: boolean; blocked: string | null; saves: { label: string; value: string }[] | null; problem: string | null;
+  oldValue: string; newValue: string; status: 'pending' | 'approved' | 'rejected';
   note: string; at: Date | null; decidedAt: Date | null; masked?: boolean;
 }
 type Show = 'pending' | 'approved' | 'rejected';
@@ -58,6 +60,11 @@ export default function ChangeRequests() {
 
   return (
     <div className="stack">
+      {/* The Noah API has no call for deciding these yet, so the member is not sent a push or an email. */}
+      <Note tone="mute" icon="info">
+        Deciding here updates the member's record and the app shows the new value, but <b>the member is not sent a notification</b> about
+        it yet (the Noah API has no call for it). Turn-down reasons are kept on the request.
+      </Note>
       <div className="row wrap gap8">
         <Seg<Show>
           value={show}
@@ -91,9 +98,22 @@ export default function ChangeRequests() {
                   {r.status !== 'pending' && r.decidedAt ? ` · decided ${fdt(r.decidedAt)}` : ''}
                   {r.note ? ` · “${r.note}”` : ''}
                 </span>
-                {!r.known && r.status === 'pending' && (
+                {r.status === 'pending' && r.saves && (
+                  <span className="t2" style={{ display: 'block' }}>
+                    Will be saved as: {r.saves.map((p, i) => <span key={p.label}>{i > 0 && ' · '}{p.label} <b>{p.value || 'empty'}</b></span>)}
+                  </span>
+                )}
+                {!r.known && !r.blocked && r.status === 'pending' && (
                   <span className="t2" style={{ display: 'block', color: 'var(--warn)' }}>
                     The console does not know which detail “{r.fieldId}” is, so it cannot apply this. It can be turned down.
+                  </span>
+                )}
+                {r.blocked && r.status === 'pending' && (
+                  <span className="t2" style={{ display: 'block', color: 'var(--warn)' }}>{r.blocked}</span>
+                )}
+                {r.problem && r.status === 'pending' && (
+                  <span className="t2" style={{ display: 'block', color: 'var(--warn)' }}>
+                    This cannot be applied as it stands: {r.problem}
                   </span>
                 )}
               </span>
@@ -102,7 +122,7 @@ export default function ChangeRequests() {
                   <Btn
                     sm
                     variant="pri"
-                    disabled={busy === r.id || !r.known || (r.contact && !can('members.pii'))}
+                    disabled={busy === r.id || !r.known || !!r.problem || (r.contact && !can('members.pii'))}
                     onClick={() => decide(r, true)}
                   >
                     Approve

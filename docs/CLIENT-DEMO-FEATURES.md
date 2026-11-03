@@ -190,3 +190,44 @@ developer: the Noah API routes and the server-side OAuth client. Flutter develop
   screens (the `rowil*` tables). Decide whether to remove them too.
 - **Feasibility with Catalyst.** The client said they would check this on their side. The API is plain HTTPS with OAuth, which a
   Catalyst function can call.
+
+## 8. Changes members ask for (Me > My information)
+
+A member cannot edit their details in the app. They type the new values and press one button, and the app files one row
+in `appChangeRequests` per changed detail. The office decides in **Membership > Changes asked for**.
+
+**Logic.** The Noah API has no call for these yet, so the console reads the table and, on approval, writes `newValue`
+into the member's own column or columns, then marks the request (`status`, `reviewedAt`, `reviewedByRowId`). The value
+is written first and the request marked second, so a failure leaves a request still pending, never one marked approved
+whose value was not saved. The map from the app's `fieldId` to the `members` columns is the developer's
+ADMIN_INTEGRATION note and lives in `server/change-fields.js`; each field also says how the app's text becomes what the
+column holds:
+
+| The app sends | The console stores |
+|---|---|
+| gender `male` / `female` / `other` | 1 / 2 / 3 |
+| smoking, drink `yes` / `no` | true / false |
+| `dob`, `anniversary` as YYYY-MM-DD | a date; `deceased` is a datetime column, so it gets 00:00:00 |
+| income, a number (the start of the range) | a whole number |
+| `phone2`, `landline` as `+91 9876543210` | the dial code and the number, in two columns |
+| `reference` and `reference_phone` | one text `name|+91|number`; each changes only its own part |
+| `address` as `12 Mill Road, Kurla` | address and area: the last comma-separated part is the area |
+| `location` as `Mumbai, Maharashtra, India` | city, state, country (all three are needed) |
+| `corr_address`, `corr_location`, `corr_pin` | the same, into the postal columns |
+
+**What is not applied.** `phone1` is the number the member signs in with (`users.number`). Writing it to `members` alone
+would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number,
+so the screen says why and offers Turn down only. A `fieldId` the console does not know can also only be turned down.
+
+**Checks.** A value that cannot be applied (a location without a state, a blood group that does not exist, a date in the
+future) is flagged on the row before anyone presses Approve, and refused with 422 if they do. Where a value is split or
+changed on the way in, the row shows "Will be saved as". Email, phones, addresses, pincodes and the ID numbers (PAN,
+Aadhaar, Emirates ID, passport, voter, driving licence) need the permission to see contact details (`members.pii`) to
+approve, and are masked in the list without it.
+
+**Not done, and why.** The member is not told about the decision: the developer's note says nothing sends a push yet, so
+the screen says so. When the API grows a call for it, it replaces the table write here.
+
+**Where.** `server/change-fields.js`, `server/noah-schema.js` (`loadChangeRequests`, `decideChangeRequest`),
+`server/routes/changes.js`, `src/modules/members/ChangeRequests.tsx`. Tests: "Change requests: the app's own field ids" in
+`server/test-schema-offline.mjs`, and the requests section of `server/test-offline-stack.mjs`.

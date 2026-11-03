@@ -531,7 +531,7 @@ section('Correcting a person, and what the app asks to have changed');
   /* ---------- the requests the app files ---------- */
   check('change requests need a sign-in and the permission', (await call('GET', '/change-requests')).status === 401 && (await call('GET', '/change-requests', null, FT)).status === 403);
   const pending = await call('GET', '/change-requests?status=pending', null, BT);
-  check('the pending requests are listed, with who asked and what changes', pending.status === 200 && pending.body?.rows?.length === 4 && pending.body.rows.some((r) => r.fieldId === 'firstName' && r.newValue === 'Anandan' && /Anand/.test(r.memberName)), pending.text.slice(0, 200));
+  check('the pending requests are listed, with who asked and what changes', pending.status === 200 && pending.body?.rows?.length === 15 && pending.body.rows.some((r) => r.fieldId === 'firstName' && r.newValue === 'Anandan' && /Anand/.test(r.memberName)), pending.text.slice(0, 200));
   check('...marking the one the console cannot place', pending.body.rows.find((r) => r.fieldId === 'favouriteColour')?.known === false);
 
   const nameReq = pending.body.rows.find((r) => r.fieldId === 'firstName');
@@ -556,8 +556,27 @@ section('Correcting a person, and what the app asks to have changed');
   check('...and the member now has the address the app asked for', (await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token)).body?.values?.email === 'anand.rao@example.com');
   check('...and it is in the audit log', ((await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || []).some((a) => /change asked for from the app/i.test(a.action)));
 
-  /* put the name back, so nothing later depends on this section */
-  await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anand', gender: 'male' } }, membership.token);
+  /* The app's own field ids (ADMIN_INTEGRATION, "Profile change requests"). */
+  const fresh = (await call('GET', '/change-requests?status=pending', null, BT)).body?.rows || [];
+  const byField = (f) => fresh.find((r) => r.fieldId === f);
+  check('a documented id is labelled for the office (first_name is "First name")', byField('first_name')?.fieldLabel === 'First name' && byField('first_name')?.known === true);
+  check('the sign-in number is listed with the reason it cannot be applied', byField('phone1')?.known === false && /signs in/.test(byField('phone1')?.blocked || ''), JSON.stringify(byField('phone1')));
+  check('an address request shows how it will be split, before approving', byField('address')?.saves?.length === 2 && byField('address').saves[1].value === 'Dadar', JSON.stringify(byField('address')?.saves));
+  check('a location that cannot be split is flagged in the list', fresh.some((r) => r.fieldId === 'location' && /city, a state and a country/.test(r.problem || '')));
+  const phoneReq = byField('phone1');
+  const blocked = await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, BT);
+  check('approving the sign-in number is refused (409, blocked_field)', blocked.status === 409 && blocked.body?.code === 'blocked_field', blocked.text.slice(0, 160));
+  const badLoc = fresh.find((r) => r.fieldId === 'location' && r.problem);
+  check('a location that cannot be split is refused when approved (422)', (await call('POST', `/change-requests/${badLoc.id}/decide`, { approve: true }, BT)).status === 422);
+  const addr = await call('POST', `/change-requests/${byField('address').id}/decide`, { approve: true }, BT);
+  check('an address request is applied', addr.status === 200 && addr.body?.applied?.join() === 'Address', addr.text.slice(0, 160));
+  const afterAddr = (await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token)).body?.values || {};
+  check('...the last part is now the area, the rest the address', afterAddr.address === '14 Church Road, Near the school' && afterAddr.area === 'Dadar', JSON.stringify([afterAddr.address, afterAddr.area]));
+  const noPii = (await call('GET', '/change-requests?status=pending', null, FT)).status;
+  check('finance still cannot even list them (403)', noPii === 403);
+
+  /* put the name and address back, so nothing later depends on this section */
+  await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anand', gender: 'male', address: '12 Mill Road', area: 'Kurla' } }, membership.token);
 }
 
 /* ================================================================== */

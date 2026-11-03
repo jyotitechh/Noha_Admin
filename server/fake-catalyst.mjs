@@ -57,7 +57,11 @@ export { tables, writes, reset };
 
 export const U = { otp: '27145000000117981', draft: '27145000000126927', office: '27145000000141595', pastor: '27145000000138578', bare: '27145000000141592', boss: '27145000000151001' };
 /* Requests the app has filed for a change to a member's details. */
-export const CR = { name: '27145000000160001', email: '27145000000160002', unknown: '27145000000160003', done: '27145000000160004', badDate: '27145000000160005' };
+export const CR = { name: '27145000000160001', email: '27145000000160002', unknown: '27145000000160003', done: '27145000000160004', badDate: '27145000000160005',
+  /* The app's own field ids (ADMIN_INTEGRATION, "Profile change requests"). */
+  phone1: '27145000000160006', phone2: '27145000000160007', address: '27145000000160008', location: '27145000000160009',
+  locBad: '27145000000160010', smoking: '27145000000160011', income: '27145000000160012', refPhone: '27145000000160013',
+  deceased: '27145000000160014', bloodBad: '27145000000160015', firstName: '27145000000160016' };
 /* Family and groups. */
 export const HH = { rel: '27145000000170001', relOld: '27145000000170002', kid: '27145000000171001', kidLink: '27145000000172001', g1: '27145000000173001', g2: '27145000000173002', gOld: '27145000000173003' };
 export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028', boss: '27145000000151002' };
@@ -154,6 +158,17 @@ export const seed = () => ({
     { ROWID: CR.unknown, memberRowId: M.approved, fieldId: 'favouriteColour', oldValue: 'red', newValue: 'blue', status: 'pending', CREATEDTIME: '2026-10-20 11:00:00:000' },
     { ROWID: CR.done, memberRowId: M.approved, fieldId: 'city', oldValue: 'Pune', newValue: 'Mumbai', status: 'approved', reviewedAt: '2026-10-19 20:00:00', CREATEDTIME: '2026-10-19 19:00:00:000' },
     { ROWID: CR.badDate, memberRowId: M.approved, fieldId: 'dateOfBirth', oldValue: '1990-05-14', newValue: 'last tuesday', status: 'pending', CREATEDTIME: '2026-10-20 12:00:00:000' },
+    { ROWID: CR.phone1, memberRowId: M.approved, fieldId: 'phone1', oldValue: '+91 9000000779', newValue: '+91 9876500000', status: 'pending', CREATEDTIME: '2026-10-21 09:00:00:000' },
+    { ROWID: CR.phone2, memberRowId: M.approved, fieldId: 'phone2', oldValue: '', newValue: '+91 9811122233', status: 'pending', CREATEDTIME: '2026-10-21 09:10:00:000' },
+    { ROWID: CR.address, memberRowId: M.approved, fieldId: 'address', oldValue: '12 Mill Road, Kurla', newValue: '14 Church Road, Near the school, Dadar', status: 'pending', CREATEDTIME: '2026-10-21 09:20:00:000' },
+    { ROWID: CR.location, memberRowId: M.approved, fieldId: 'location', oldValue: 'Mumbai, Maharashtra, India', newValue: 'Pune, Maharashtra, India', status: 'pending', CREATEDTIME: '2026-10-21 09:30:00:000' },
+    { ROWID: CR.locBad, memberRowId: M.approved, fieldId: 'location', oldValue: 'Mumbai, Maharashtra, India', newValue: 'Pune', status: 'pending', CREATEDTIME: '2026-10-21 09:40:00:000' },
+    { ROWID: CR.smoking, memberRowId: M.approved, fieldId: 'smoking', oldValue: 'yes', newValue: 'no', status: 'pending', CREATEDTIME: '2026-10-21 09:50:00:000' },
+    { ROWID: CR.income, memberRowId: M.approved, fieldId: 'income', oldValue: '300000', newValue: '500000', status: 'pending', CREATEDTIME: '2026-10-21 10:00:00:000' },
+    { ROWID: CR.refPhone, memberRowId: M.approved, fieldId: 'reference_phone', oldValue: '+91 9000011111', newValue: '+91 9000011222', status: 'pending', CREATEDTIME: '2026-10-21 10:10:00:000' },
+    { ROWID: CR.deceased, memberRowId: M.office, fieldId: 'deceased', oldValue: '', newValue: '2026-09-30', status: 'pending', CREATEDTIME: '2026-10-21 10:20:00:000' },
+    { ROWID: CR.bloodBad, memberRowId: M.approved, fieldId: 'blood_group', oldValue: '', newValue: 'Z+', status: 'pending', CREATEDTIME: '2026-10-21 10:30:00:000' },
+    { ROWID: CR.firstName, memberRowId: M.approved, fieldId: 'first_name', oldValue: 'Anand', newValue: 'Anandan', status: 'pending', CREATEDTIME: '2026-10-21 10:40:00:000' },
   ],
 });
 

@@ -25,7 +25,7 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
       /* A contact detail's old and new value are shown only to someone who may
          see contact details. */
       const pii = can(req.session.role, 'members.pii');
-      const rows = all.map((r) => (r.contact && !pii ? { ...r, oldValue: '••••••', newValue: '••••••', masked: true } : r));
+      const rows = all.map((r) => (r.contact && !pii ? { ...r, oldValue: '••••••', newValue: '••••••', saves: null, problem: null, masked: true } : r));
       res.json({ rows, total: rows.length });
     } catch (err) {
       const explained = explainCatalyst(err);
@@ -59,7 +59,7 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
       });
       res.json({ ok: true, status: r.status, applied: r.applied.map((c) => c.label) });
     } catch (err) {
-      const status = { not_found: 404, not_pending: 409, unknown_field: 409, forbidden_field: 403, invalid_value: 422 }[err.code];
+      const status = { not_found: 404, not_pending: 409, unknown_field: 409, blocked_field: 409, forbidden_field: 403, invalid_value: 422 }[err.code];
       if (status) return res.status(status).json({ error: err.message, code: err.code });
       const explained = explainCatalyst(err);
       res.status(explained?.status ?? 502).json({
