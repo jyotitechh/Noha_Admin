@@ -468,7 +468,7 @@ check('...and the ids of their photo, ID and video', !!person.body?.registration
 check('...who their pastor is', person.body?.pastoral?.pastor?.name === 'Fr Thomas', JSON.stringify(person.body?.pastoral));
 check('...whether they are a partner', person.body?.partnership?.isPartner === true);
 check('...and their family and groups, read from Catalyst',
-  person.body?.family?.recorded === true && person.body.family.rows.some((r) => r.rel === 'Spouse') && person.body.family.rows.some((r) => r.kid)
+  person.body?.family?.recorded === true && person.body.family.rows.some((r) => r.rel === 'Husband') && person.body.family.rows.some((r) => r.kid)
   && person.body?.groups?.recorded === true && person.body.groups.rows.length === 2, JSON.stringify([person.body?.family, person.body?.groups]).slice(0, 260));
 
 check('their phone, email and address are masked until revealed',
@@ -771,9 +771,14 @@ check('a brother can be added', bro.status === 201, bro.text.slice(0, 160));
 check('...Anand (a man) sees him as Brother', (await famOf(ANAND_ID)).some((r) => r.rowId === BLANK_ID && r.rel === 'Brother'));
 check('...and the other man sees Anand as Brother too, because Anand is male', (await famOf(BLANK_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Brother'));
 check('someone with no gender set cannot be given a brother or sister (400, says why)', await (async () => { const r = await call('POST', '/people/' + BLANK_ID + '/relations', { otherRowId: THOMAS_ID, relation: 7 }, BT); return r.status === 400 && /gender/i.test(r.body?.error || ''); })());
+const uncle = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 12 }, BT);
+check('an uncle can be added', uncle.status === 201, uncle.text.slice(0, 160));
+check('...Anand sees him as Uncle, and he sees Anand as Nephew (Anand is a man), automatically', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Uncle') && (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Nephew'));
+check('the form offers uncle and aunt, with the console-only ones marked', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.filter((o) => o.extra).map((o) => o.label).join() === 'Uncle,Aunt,Nephew,Niece');
+await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT);
 check('a person cannot be related to themselves (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: ANAND_ID, relation: 7 }, BT)).status === 400);
 check('a relation that is not on offer is refused (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 99 }, BT)).status === 400);
-check('the form is told which relations exist', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.some((o) => o.label === 'Spouse'));
+check('the form is told which relations exist', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.some((o) => o.code === 1 && /Spouse/.test(o.label)));
 check('adding a relation needs the permission to edit members (403)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 1 }, verifier.token)).status === 403);
 const famAud = await call('GET', '/data/AUD?limit=200', null, BT);
 check('adding and removing are in the audit log', ['Added a family relation', 'Removed a family relation'].every((a) => (famAud.body?.rows || []).some((x) => x.action === a)));

@@ -39,6 +39,7 @@ import {
 } from './catalyst.js';
 import { MEMBER_FIELDS } from './member-fields.js';
 import { describeChangeField, resolveChange } from './change-fields.js';
+import { kidLabel, relationLabel, reverseRelation, isOffered } from './relations.js';
 
 /* ---------- finding the tables ----------
 
@@ -1462,16 +1463,8 @@ export async function loadPerson(memberRowId) {
      kids + kidsConnect  children who have no login of their own, and whose they are
      groupsConnect + groups  which groups a member is in
 
-   The relationship codes are the Noah API's (ADMIN_INTEGRATION.md, family requests). On a relation of members A and
+   The relationship codes, their names and the reverse of each are in server/relations.js. On a relation of members A and
    B, A2B is what B is to A, and B2A is what A is to B. Archived rows are history and are skipped. */
-
-const RELATION = {
-  1: 'Spouse', 2: 'Son', 3: 'Daughter', 4: 'Father', 5: 'Mother', 6: 'Brother', 7: 'Sister', 8: 'Other',
-  9: 'Parent', 10: 'Child', 11: 'Sibling',
-};
-
-/** What a child is called on a parent's page: by the child's gender, else just Child. */
-const kidLabel = (k) => (Number(k?.gender) === 1 ? 'Son' : Number(k?.gender) === 2 ? 'Daughter' : 'Child');
 
 let household = null;
 let householdAt = 0;
@@ -1509,7 +1502,7 @@ async function familyAndGroups(memberRowId, memberByRow) {
     const dob = utc(o?.dateOfBirth);
     rows.push({
       rowId: other, name: o ? memberFullName(o) : '(a member who is no longer in the register)',
-      rel: RELATION[code] || (code ? `Relation ${code}` : ''), age: ageOf(dob), kid: false, member: !!o,
+      rel: relationLabel(code, o?.gender), age: ageOf(dob), kid: false, member: !!o,
     });
   }
 
@@ -1549,32 +1542,9 @@ async function familyAndGroups(memberRowId, memberByRow) {
    to A, and relationshipB2A is what A is to B. The person page reads every row that names the member on
    either side and shows the other person with the code that faces the member, so one row is enough for
    each of them to see the other, with the reverse relation, automatically. What matters when writing it is
-   that the second code is right:
-
-     Spouse, Other, Sibling                       (the same word both ways)
-     Parent <-> Child                             (each other's reverse)
-     Son or Daughter <-> Father or Mother         (what A is to B depends on A's gender: a man is the Father, a woman the Mother,
-     Father or Mother <-> Son or Daughter          and likewise Son and Daughter)
-     Brother or Sister                            (a man is a Brother, a woman a Sister)
+   that the second code is right, which server/relations.js works out (Father <-> Son or Daughter, Uncle <-> Nephew or Niece, and so on).
 
    Both people must be members (people with the app): a relation links two member rows. */
-
-/** The relations the office can pick, as { code, label }, for the form. */
-export const RELATION_OPTIONS = Object.entries(RELATION).map(([code, label]) => ({ code: Number(code), label }));
-
-/** What the first person is to the second, given what the second is to the first. Null: needs the first person's gender. */
-function reverseRelation(code, firstGender) {
-  const same = { 1: 1, 8: 8, 11: 11 };
-  if (same[code]) return same[code];
-  if (code === 9) return 10;
-  if (code === 10) return 9;
-  const male = Number(firstGender) === 1, female = Number(firstGender) === 2;
-  const pick = (m, f) => (male ? m : female ? f : null);
-  if (code === 2 || code === 3) return pick(4, 5);   /* B is A's son or daughter, so A is B's father or mother */
-  if (code === 4 || code === 5) return pick(2, 3);   /* B is A's father or mother, so A is B's son or daughter */
-  if (code === 6 || code === 7) return pick(6, 7);   /* siblings: a man is a Brother, a woman a Sister */
-  return undefined;
-}
 
 /**
  * Relate `otherRowId` to `memberRowId`: the other person is the member's `code` (7 = Brother, 1 = Parent, ...).
@@ -1588,7 +1558,7 @@ export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
   if (same(me.ROWID, other.ROWID)) throw Object.assign(new Error('A person cannot be related to themselves.'), { code: 'self' });
 
   const asked = Number(code);
-  if (!RELATION[asked]) throw Object.assign(new Error('Pick one of the relations on offer.'), { code: 'bad_relation' });
+  if (!isOffered(asked)) throw Object.assign(new Error('Pick one of the relations on offer.'), { code: 'bad_relation' });
   const back = reverseRelation(asked, me.gender);
   if (back === null) {
     throw Object.assign(new Error(`${memberFullName(me)}'s gender is not set, and that relation depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });
@@ -1599,7 +1569,7 @@ export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
     (same(r.memberIdA, me.ROWID) && same(r.memberIdB, other.ROWID)) || (same(r.memberIdA, other.ROWID) && same(r.memberIdB, me.ROWID)));
   if (dup) {
     const was = same(dup.memberIdA, me.ROWID) ? dup.relationshipA2B : dup.relationshipB2A;
-    throw Object.assign(new Error(`${memberFullName(other)} is already on this person's family as ${(RELATION[Number(was)] || 'a relation').toLowerCase()}. Remove that first to change it.`), { code: 'exists' });
+    throw Object.assign(new Error(`${memberFullName(other)} is already on this person's family as ${(relationLabel(was, other.gender) || 'a relation').toLowerCase()}. Remove that first to change it.`), { code: 'exists' });
   }
 
   await io.insert(T.membersRelations, {
@@ -1609,7 +1579,7 @@ export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
     isArchived: false,
   });
   clearCache();
-  return { me: memberFullName(me), other: memberFullName(other), is: RELATION[asked], backIs: RELATION[back] };
+  return { me: memberFullName(me), other: memberFullName(other), is: relationLabel(asked, other.gender), backIs: relationLabel(back, me.gender) };
 }
 
 /** Take a relation away (it is archived, not deleted). Throws { code: 'not_found' }. */

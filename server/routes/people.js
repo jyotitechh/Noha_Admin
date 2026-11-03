@@ -21,7 +21,8 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, RELATION_OPTIONS } from '../noah-schema.js';
+import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates } from '../noah-schema.js';
+import { relationOptions } from '../relations.js';
 import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
 import { can, roleById } from '../db.js';
 import { explainCatalyst } from '../catalyst.js';
@@ -76,7 +77,7 @@ async function withChoices(p, role) {
   const out = shape(p, role);
   if (live() && isNoah() && can(role, 'members.edit')) {
     out.pastoralChoices = await pastoralChoices(p.member.rowId);
-    out.relationOptions = RELATION_OPTIONS;
+    out.relationOptions = relationOptions();
   }
   return out;
 }

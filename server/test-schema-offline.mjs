@@ -989,7 +989,7 @@ reset(seed());
   const fam = p.family;
   check('family and groups are really read now, not "not recorded"', fam.recorded === true && p.groups.recorded === true);
   const spouse = fam.rows.find((r) => r.rowId === M.office);
-  check('a spouse is listed, by name, with the relationship in words', spouse?.name === 'Old Member' && spouse.rel === 'Spouse' && spouse.kid === false, JSON.stringify(fam.rows));
+  check('a spouse is listed, by name, as Husband (the other person is a man)', spouse?.name === 'Old Member' && spouse.rel === 'Husband' && spouse.kid === false, JSON.stringify(fam.rows));
   check('an archived relation is history and is skipped', !fam.rows.some((r) => r.rowId === M.pastor));
   const child = fam.rows.find((r) => r.kid);
   check('a child is listed, with their age, and as the other side of the link (a daughter, by her gender)',
@@ -1003,7 +1003,7 @@ reset(seed());
 
   /* the other direction of a relation: Old Member is B of the row, so what Anand is to them */
   const back = (await S.loadPerson(M.office)).family.rows.find((r) => r.rowId === M.approved);
-  check('seen from the other member, the same link names the first one', back?.name === 'Anand Rao' && back.rel === 'Spouse');
+  check('seen from the other member, the same link names the first one', back?.name === 'Anand Rao' && back.rel === 'Husband');
 
   /* directional codes: A2B is what B is to A */
   tables[T.membersRelations].push({ ROWID: '27145000000170009', memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 9, relationshipB2A: 10, isArchived: false });
@@ -1063,6 +1063,57 @@ reset(seed());
   let failed = null;
   try { await S.decideChangeRequest({ id: CR.name, approve: true, canContact: true }); } catch (e) { failed = e; } finally { S.io.update = realUpdate; }
   check('if the member cannot be written, the request stays pending to retry', !!failed && tables[T.appChangeRequests].find((r) => r.ROWID === CR.name).status === 'pending');
+}
+
+/* ================================================================== */
+section('Family relations: what the office can assign, and both sides of each');
+
+const REL = await import('./relations.js');
+{
+  const rev = REL.reverseRelation;
+  check('father or mother: the other side is son or daughter, by the first person\'s gender', rev(4, 1) === 2 && rev(4, 2) === 3 && rev(5, 1) === 2 && rev(5, 2) === 3);
+  check('son or daughter: the other side is father or mother', rev(2, 1) === 4 && rev(2, 2) === 5 && rev(3, 1) === 4 && rev(3, 2) === 5);
+  check('uncle or aunt: the other side is nephew or niece', rev(12, 1) === 14 && rev(12, 2) === 15 && rev(13, 1) === 14 && rev(13, 2) === 15);
+  check('nephew or niece: the other side is uncle or aunt', rev(14, 1) === 12 && rev(14, 2) === 13 && rev(15, 1) === 12 && rev(15, 2) === 13);
+  check('brother or sister follow the first person\'s gender', rev(6, 1) === 6 && rev(6, 2) === 7 && rev(7, 1) === 6 && rev(7, 2) === 7);
+  check('spouse, other and sibling read the same both ways; parent and child swap', rev(1) === 1 && rev(8) === 8 && rev(11) === 11 && rev(9) === 10 && rev(10) === 9);
+  check('a gendered relation with no gender set says so (null), an unknown code is undefined', rev(4) === null && rev(12, undefined) === null && rev(99, 1) === undefined);
+  check('a spouse reads as Husband or Wife by the other person\'s gender, else Spouse', REL.relationLabel(1, 1) === 'Husband' && REL.relationLabel(1, 2) === 'Wife' && REL.relationLabel(1) === 'Spouse');
+  check('the form offers father, mother, son, daughter, spouse, uncle and aunt, closest family first',
+    REL.relationOptions().map((o) => o.label).slice(0, 5).join() === 'Father,Mother,Son,Daughter,Spouse (husband or wife)'
+    && ['Uncle', 'Aunt', 'Nephew', 'Niece'].every((l) => REL.relationOptions().some((o) => o.label === l && o.extra === true)));
+
+  process.env.FAMILY_EXTRA_RELATIONS = 'off';
+  check('uncle and aunt can be switched off (FAMILY_EXTRA_RELATIONS=off)', !REL.isOffered(12) && !REL.relationOptions().some((o) => o.extra) && REL.isOffered(4));
+  delete process.env.FAMILY_EXTRA_RELATIONS;
+  check('...and are on again without it', REL.isOffered(12) && REL.isOffered(15));
+}
+
+reset(seed());
+{
+  const famOf = async (id) => (await S.loadPerson(id)).family.rows;
+  /* Anitha (a woman) adds Anand (a man) as her nephew... */
+  const nephew = await S.addRelation(M.boss, M.approved, 14);
+  check('adding a nephew says both sides, in words', nephew.is === 'Nephew' && nephew.backIs === 'Aunt', JSON.stringify(nephew));
+  check('...she sees him as Nephew', (await famOf(M.boss)).find((r) => r.rowId === M.approved)?.rel === 'Nephew');
+  check('...and he sees her as Aunt, with nothing added on his side', (await famOf(M.approved)).find((r) => r.rowId === M.boss)?.rel === 'Aunt');
+  check('...it is one row that carries both directions (nephew and aunt)', tables[T.membersRelations].filter((r) => r.memberIdA === M.boss && r.memberIdB === M.approved).length === 1);
+
+  /* Fr Thomas is added as Anitha's uncle: she is a woman, so he sees her as his Niece. */
+  await S.addRelation(M.boss, M.pastor, 12);
+  check('an uncle is seen back as Niece when the first person is a woman', (await famOf(M.pastor)).find((r) => r.rowId === M.boss)?.rel === 'Niece' && (await famOf(M.boss)).find((r) => r.rowId === M.pastor)?.rel === 'Uncle');
+
+  /* Spouses: Husband and Wife. */
+  await S.addRelation(M.draft, M.pastor, 1);
+  check('a spouse is Husband to her and Wife to him, from one "Spouse" row', (await famOf(M.draft)).find((r) => r.rowId === M.pastor)?.rel === 'Husband' && (await famOf(M.pastor)).find((r) => r.rowId === M.draft)?.rel === 'Wife');
+
+  let noGender = null; try { await S.addRelation(M.blank, M.pastor, 12); } catch (e) { noGender = e; }
+  check('an uncle cannot be added to someone with no gender set', noGender?.code === 'need_gender');
+
+  process.env.FAMILY_EXTRA_RELATIONS = 'off';
+  let off = null; try { await S.addRelation(M.pastor, M.office, 13); } catch (e) { off = e; }
+  delete process.env.FAMILY_EXTRA_RELATIONS;
+  check('with uncle and aunt switched off they are refused (bad_relation)', off?.code === 'bad_relation');
 }
 
 /* ================================================================== */

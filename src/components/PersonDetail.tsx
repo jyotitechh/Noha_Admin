@@ -47,7 +47,7 @@ interface Profile {
   partnership: { isPartner: boolean; expiresOn: Date | null };
   family: { recorded: boolean; why?: string; rows: { rowId: string; name: string; rel?: string; age?: number; kid?: boolean; member?: boolean }[] };
   /* The relations the office can pick, for someone who may edit members. */
-  relationOptions?: { code: number; label: string }[];
+  relationOptions?: { code: number; label: string; extra?: boolean }[];
   groups: { recorded: boolean; why?: string; rows: { rowId: string; name: string }[] };
 }
 
@@ -386,6 +386,11 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                   <option value="">Pick a relation</option>
                   {relationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
                 </select>
+                {relationOptions.find((o) => String(o.code) === relCode)?.extra && (
+                  <span className="xs muted">
+                    Uncle, aunt, nephew and niece are kept by the console. Check the Noah app shows them before using them for real members.
+                  </span>
+                )}
               </label>
             )}
             <div>
