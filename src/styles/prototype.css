@@ -200,6 +200,9 @@ svg.i{width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:
 .note.brand{border-color:var(--brand-line);background:var(--brand-soft);color:#6A0F83}
 .note.mute{border-color:var(--line);background:var(--wash);color:var(--ink-2)}
 .note b{font-weight:700}
+/* `.brand b` (the sidebar logo) is white and block, and a note in the brand tone has the class `brand` too, so its
+   bold text came out white on pale pink. Put it back to a dark, inline bold. */
+.note.brand b{display:inline;font-size:inherit;letter-spacing:normal;color:#4A0A5C}
 
 /* KPI tiles */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
