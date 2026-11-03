@@ -31,8 +31,8 @@ import { credentialProblems, clean } from './catalyst.js';
 import { passphraseLooksCopied } from './auth.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROJECT = process.env.SLATE_PROJECT_ID || '73626000000028001';
-const ORG = process.env.SLATE_ORG_ID || '60088815946';
+const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003';
+const ORG = process.env.SLATE_ORG_ID || '60093443705';
 const NAME = process.env.APPSAIL_NAME || 'karuna-api';
 const DC = process.env.SLATE_DC || 'in';
 const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-eayoyuuw.onslate.in';

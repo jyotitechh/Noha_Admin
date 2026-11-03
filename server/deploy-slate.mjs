@@ -21,8 +21,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROJECT = process.env.SLATE_PROJECT_ID || '73626000000028001'; /* noah */
-const ORG = process.env.SLATE_ORG_ID || '60088815946';
+const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003'; /* noah */
+const ORG = process.env.SLATE_ORG_ID || '60093443705';
 const NAME = process.env.SLATE_APP_NAME || 'karuna-admin';
 const DC = process.env.SLATE_DC || 'in';
 
