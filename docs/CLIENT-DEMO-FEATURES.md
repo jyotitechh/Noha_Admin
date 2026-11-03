@@ -9,7 +9,7 @@ Six items; five are built, one (CRM contacts) needs the client's field list firs
 | 2 | Request access, a super administrator approves | Done |
 | 3 | Bible commentary: book, then a chapter of that book | Done |
 | 4 | Leaders by location: distance, members, room left | Done (capacity is one setting, not per leader) |
-| 5 | Family: the reverse relation shows automatically | Done in the console; subscriptions for a relative are an app job |
+| 5 | Family: the reverse relation shows automatically, and family requests from the app | Done (person page, and the Family requests inbox); subscriptions for a relative are an app job |
 | 6 | CRM / contacts | Proposal below; needs the client's CRM fields |
 
 ---
@@ -90,6 +90,35 @@ Parent and Child, Grandparent and Grandchild, Uncle or aunt and Nephew or niece 
 Cousin, Spouse and In-law are the same both ways; Brother or Sister depends on the gender of the person adding it
 (a man is a Brother, a woman a Sister), so a person with no gender set is asked to set it first. Both people must be
 members. The same two people cannot be related twice; removing archives the row, which removes it for both.
+
+**The codes** (from the Noah API's ADMIN_INTEGRATION note, "Family requests"): 1 Spouse, 2 Son, 3 Daughter, 4 Father,
+5 Mother, 6 Brother, 7 Sister, 8 Other, 9 Parent, 10 Child, 11 Sibling. Spouse, Other and Sibling are the same both ways;
+Parent and Child are each other's reverse. Son, Daughter, Father, Mother, Brother and Sister are the gendered ones, so
+the reverse depends on the gender of the person adding it (a man adding "Daughter" is her Father). A child under 18
+(a `kids` record) is shown as Son, Daughter or Child by the child's gender.
+
+### Family requests from the app
+
+A member asks, from Me > Family in the app, to add a spouse, child, parent, brother, sister or anyone else. The office
+decides in **Membership > Family requests** (permission `members.edit`; a badge on Membership and a row in Work queues
+show how many wait).
+
+**Logic.** The Noah API owns the requests (the `familyRequests` table) and does the work, so the console never writes
+those tables. It calls `GET /admin/family-requests?state=` for the list and `POST /admin/family-requests/:id/decide`
+with `Approved` or `Rejected`. Approving links both accounts and pushes both people, so each sees the other. A child
+under 18 has no account: approving adds the child record and links it to the member (and to the member's spouse if one is
+linked). A grown-up is matched by the number the member typed; if that person has not joined yet the request is still
+approved and the two are linked when they join. If the typed number belongs to someone else, the office picks the right
+member in the drawer ("link a different member") and that id is sent as `memberId`.
+
+**Rules.** Rejecting needs a reason, because the member reads it. A request already decided (here or elsewhere) is
+refused with 409 and the list is refreshed. A member can only be picked for a grown-up, only when approving, and never
+the member who asked. Mobile numbers are masked in every reply. Each decision is written to the audit log. Without
+`NOAH_ADMIN_API_KEY` the inbox says so and nothing can be decided, because nobody would be told.
+
+**Where.** `server/noah-api.js` (`listFamilyRequests`, `decideFamilyRequest`), `server/family-requests.js`,
+`server/routes/family.js`, `server/queues.js`, `src/modules/members/FamilyRequests.tsx`. The offline fake of the API
+is in `server/dev-offline.mjs`; tests are the "Family requests from the app" section of `server/test-offline-stack.mjs`.
 
 **Where.** `server/noah-schema.js` (`addRelation`, `removeRelation`, `relationCandidates`), `server/routes/people.js`,
 person page > Family > Add a relative.

@@ -68,12 +68,14 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'members', title: 'Membership', group: 'noah', icon: 'users', sec: '5.1', perm: 'members.view',
     desc: 'The member register and the registrations coming in from the app. Open anyone to see all of them: their video, family, groups, pastor and partnership.',
-    badges: ['registrations', 'dupes'],
+    badges: ['registrations', 'family', 'dupes'],
     tabs: [
       { id: 'registrations', label: 'App registrations', perm: 'members.edit', status: 'built',
         desc: 'New members who finished the six-step registration in the Noah app. Nothing opens for them until you approve it here.' },
       { id: 'approved', label: 'Approved and history', perm: 'members.edit', status: 'built',
         desc: 'Everyone the office has decided on. Open a person to see everything about them, with their photograph, ID and video.' },
+      { id: 'family', label: 'Family requests', perm: 'members.edit', status: 'built',
+        desc: 'Relatives members ask to add from Me > Family in the app: a spouse, child, parent, brother, sister or anyone else. Approve one and both accounts show each other.' },
       { id: 'changes', label: 'Changes asked for', perm: 'members.edit', status: 'built',
         desc: 'Details members ask the app to change after they were approved. Approve one and it is written to their record.' },
       { id: 'register', label: 'Member register', status: 'built',

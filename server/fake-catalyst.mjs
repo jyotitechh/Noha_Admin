@@ -126,14 +126,14 @@ export const seed = () => ({
   ],
   /* Anand and Old Member are spouses (an older, archived link is history). */
   membersRelations: [
-    { ROWID: HH.rel, id: HH.rel, memberIdA: M.approved, memberIdB: M.office, relationshipA2B: 10, relationshipB2A: 10, isArchived: false },
-    { ROWID: HH.relOld, id: HH.relOld, memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 7, relationshipB2A: 7, isArchived: true },
+    { ROWID: HH.rel, id: HH.rel, memberIdA: M.approved, memberIdB: M.office, relationshipA2B: 1, relationshipB2A: 1, isArchived: false },
+    { ROWID: HH.relOld, id: HH.relOld, memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 6, relationshipB2A: 6, isArchived: true },
   ],
   kids: [
     { ROWID: HH.kid, id: HH.kid, firstName: 'Asha', lastName: 'Rao', gender: 2, dateOfBirth: '2018-04-02 00:00:00', archived: false },
   ],
   kidsConnect: [
-    { ROWID: HH.kidLink, id: HH.kidLink, kidId: HH.kid, memberId: M.approved, relationship: 1, isArchived: false },
+    { ROWID: HH.kidLink, id: HH.kidLink, kidId: HH.kid, memberId: M.approved, relationship: 9, isArchived: false },
   ],
   groups: [
     { ROWID: HH.g1, id: HH.g1, name: 'Cell Mumbai 1', archived: false },

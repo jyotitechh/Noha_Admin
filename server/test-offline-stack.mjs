@@ -737,27 +737,112 @@ check('members are searched by name, showing name and place only', found.status 
 check('a search needs two letters', (await call('GET', '/people/' + ANAND_ID + '/relation-candidates?q=T', null, BT)).body?.rows?.length === 0);
 const THOMAS_ID = found.body.rows.find((c) => c.name === 'Fr Thomas').rowId;
 
-const addParent = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 1 }, BT);
-check('Fr Thomas is added as the parent of Anand', addParent.status === 201, addParent.text.slice(0, 160));
-check('...Anand sees him as Parent', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Parent'));
-check('...and Fr Thomas sees Anand as Child, with nothing added on his side', (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Child'));
+const addParent = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 4 }, BT);
+check('Fr Thomas is added as the father of Anand', addParent.status === 201, addParent.text.slice(0, 160));
+check('...Anand sees him as Father', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Father'));
+check('...and Fr Thomas sees Anand as Son (Anand is male), with nothing added on his side', (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Son'));
 check('the same two people cannot be related twice (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 7 }, BT)).status === 400);
 check('...nor from the other side', (await call('POST', '/people/' + THOMAS_ID + '/relations', { otherRowId: ANAND_ID, relation: 2 }, BT)).status === 400);
 const gone = await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT);
 check('a relation can be removed, and it goes from both sides', gone.status === 200 && !(await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID) && !(await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID));
 check('removing what is not there is a 404', (await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT)).status === 404);
 
-const bro = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: BLANK_ID, relation: 7 }, BT);
+const bro = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: BLANK_ID, relation: 6 }, BT);
 check('a brother can be added', bro.status === 201, bro.text.slice(0, 160));
 check('...Anand (a man) sees him as Brother', (await famOf(ANAND_ID)).some((r) => r.rowId === BLANK_ID && r.rel === 'Brother'));
 check('...and the other man sees Anand as Brother too, because Anand is male', (await famOf(BLANK_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Brother'));
-check('someone with no gender set cannot be given a brother or sister (400, says why)', await (async () => { const r = await call('POST', '/people/' + BLANK_ID + '/relations', { otherRowId: THOMAS_ID, relation: 8 }, BT); return r.status === 400 && /gender/i.test(r.body?.error || ''); })());
+check('someone with no gender set cannot be given a brother or sister (400, says why)', await (async () => { const r = await call('POST', '/people/' + BLANK_ID + '/relations', { otherRowId: THOMAS_ID, relation: 7 }, BT); return r.status === 400 && /gender/i.test(r.body?.error || ''); })());
 check('a person cannot be related to themselves (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: ANAND_ID, relation: 7 }, BT)).status === 400);
 check('a relation that is not on offer is refused (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 99 }, BT)).status === 400);
 check('the form is told which relations exist', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.some((o) => o.label === 'Spouse'));
 check('adding a relation needs the permission to edit members (403)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 1 }, verifier.token)).status === 403);
 const famAud = await call('GET', '/data/AUD?limit=200', null, BT);
 check('adding and removing are in the audit log', ['Added a family relation', 'Removed a family relation'].every((a) => (famAud.body?.rows || []).some((x) => x.action === a)));
+
+section('Family requests from the app (Me > Family)');
+
+const BOSS_ID = '27145000000151002';
+const FR = { kid: '100596000000071001', brother: '100596000000071002', sister: '100596000000071003', mother: '100596000000071006', done: '100596000000071004' };
+const queueCount = async (id) => {
+  const b = (await call('GET', '/queues', null, BT)).body;
+  return (b?.rows || b || []).find((x) => x.id === id)?.count;
+};
+
+if (NO_KEY) {
+  const noKey = await call('GET', '/family-requests', null, BT);
+  check('without the admin key the inbox says so instead of an empty list', noKey.status === 200 && noKey.body?.needsAdminKey === true && noKey.body?.rows?.length === 0, noKey.text.slice(0, 120));
+  const noKeyDecide = await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Approved' }, BT);
+  check('...and a decision is refused, because nobody would be told', noKeyDecide.status === 409 && noKeyDecide.body?.needsAdminKey === true, noKeyDecide.text.slice(0, 120));
+} else {
+  const inbox = await call('GET', '/family-requests', null, BT);
+  const rows = inbox.body?.rows || [];
+  check('the inbox lists the requests waiting, oldest first', inbox.status === 200 && rows.length === 4
+    && rows.every((r, i) => !i || +new Date(rows[i - 1].at) <= +new Date(r.at)), `${inbox.status} ${inbox.text.slice(0, 200)}`);
+  const kidRow = rows.find((r) => r.id === FR.kid);
+  check('a child under 18 is marked as one, with an age worked out from the date of birth',
+    kidRow?.kid === true && kidRow.relationLabel === 'Daughter' && Number.isInteger(kidRow.age) && kidRow.age >= 0 && kidRow.age < 18, JSON.stringify(kidRow));
+  const broRow = rows.find((r) => r.id === FR.brother);
+  check('a grown-up shows the member their number belongs to', broRow?.kid === false && broRow.existingMemberName === 'Fr Thomas' && broRow.relationLabel === 'Brother', JSON.stringify(broRow));
+  check('...and one who has not joined yet shows none', rows.find((r) => r.id === FR.sister)?.existingMemberName === null);
+  check('who asked is named, with the number masked', broRow?.requesterName === 'Anand Rao' && /•/.test(broRow.requesterMobile) && !/9000000779/.test(inbox.text), broRow?.requesterMobile);
+  check('the number they typed is masked too', /•/.test(broRow?.mobile || '') && !/9000000100/.test(inbox.text), broRow?.mobile);
+
+  const approvedList = await call('GET', '/family-requests?state=Approved', null, BT);
+  check('the Approved list holds only what was approved', approvedList.body?.rows?.length === 1 && approvedList.body.rows[0].id === FR.done, approvedList.text.slice(0, 160));
+  const cancelledList = await call('GET', '/family-requests?state=Cancelled', null, BT);
+  check('a request the member withdrew is in Cancelled', cancelledList.body?.rows?.length === 1 && cancelledList.body.rows[0].state === 'Cancelled');
+  check('a status that does not exist falls back to Waiting', (await call('GET', '/family-requests?state=Nonsense', null, BT)).body?.rows?.length === 4);
+
+  check('listing needs the permission to edit members (403)', (await call('GET', '/family-requests', null, verifier.token)).status === 403);
+  check('deciding needs it too (403)', (await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Approved' }, verifier.token)).status === 403);
+  check('nothing is listed without signing in (401)', (await call('GET', '/family-requests')).status === 401);
+
+  check('a decision that is not Approved or Rejected is refused (400)', (await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Maybe' }, BT)).status === 400);
+  const noWhy = await call('POST', `/family-requests/${FR.mother}/decide`, { decision: 'Rejected' }, BT);
+  check('a rejection needs a reason, because the member reads it (400)', noWhy.status === 400 && /why/i.test(noWhy.body?.error || ''), noWhy.text.slice(0, 120));
+  check('a request that is not waiting cannot be decided again (409)', (await call('POST', `/family-requests/${FR.done}/decide`, { decision: 'Approved' }, BT)).status === 409);
+  check('...nor one that does not exist (409)', (await call('POST', '/family-requests/1/decide', { decision: 'Approved' }, BT)).status === 409);
+  check('a child has no account to pick (400)', (await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Approved', memberId: OLD_ID }, BT)).status === 400);
+  check('the member who asked cannot be picked as their own relative (400)', (await call('POST', `/family-requests/${FR.brother}/decide`, { decision: 'Approved', memberId: ANAND_ID }, BT)).status === 400);
+  check('a member who is not on the register cannot be picked (400)', (await call('POST', `/family-requests/${FR.brother}/decide`, { decision: 'Approved', memberId: '999' }, BT)).status === 400);
+  check('a member can only be picked when approving (400)', (await call('POST', `/family-requests/${FR.mother}/decide`, { decision: 'Rejected', remark: 'No', memberId: OLD_ID }, BT)).status === 400);
+  check('none of those refusals decided anything', (await call('GET', '/family-requests', null, BT)).body?.rows?.length === 4);
+
+  check('the work queue counts them', await queueCount('family') === 4, String(await queueCount('family')));
+
+  /* A child under 18: the child is added and linked to the member. */
+  const okKid = await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Approved' }, BT);
+  check('a child under 18 can be approved', okKid.status === 200 && okKid.body?.ok === true && okKid.body?.result?.notified?.pushed === 2, okKid.text.slice(0, 200));
+  check('...and appears in the member family as a Daughter, with no account behind it',
+    (await famOf(ANAND_ID)).some((r) => /Hannah/.test(r.name || '') && r.rel === 'Daughter'), JSON.stringify((await famOf(ANAND_ID)).map((r) => [r.name, r.rel])));
+
+  /* A grown-up who is already a member: both accounts show each other. */
+  const okBro = await call('POST', `/family-requests/${FR.brother}/decide`, { decision: 'Approved' }, BT);
+  check('a grown-up who is a member can be approved', okBro.status === 200, okBro.text.slice(0, 200));
+  check('...the member sees him as Brother', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Brother'));
+  check('...and he sees the member as Brother, so both accounts show each other', (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Brother'));
+
+  /* The number was not theirs: the office picks the right member. */
+  const okPick = await call('POST', `/family-requests/${FR.sister}/decide`, { decision: 'Approved', memberId: OLD_ID }, BT);
+  check('the office can link a member they picked when the typed number was wrong', okPick.status === 200, okPick.text.slice(0, 200));
+  check('...the picked member is the one linked', (await famOf(BOSS_ID)).some((r) => r.rowId === OLD_ID && r.rel === 'Sister'), JSON.stringify((await famOf(BOSS_ID)).map((r) => [r.rowId, r.rel])));
+
+  /* Rejecting. */
+  const rej = await call('POST', `/family-requests/${FR.mother}/decide`, { decision: 'Rejected', remark: 'We could not find a member with that number.' }, BT);
+  check('a request can be rejected with a reason', rej.status === 200 && rej.body?.request?.state === 'Rejected', rej.text.slice(0, 200));
+  const rejList = await call('GET', '/family-requests?state=Rejected', null, BT);
+  check('...which the member can read back, and the list shows', rejList.body?.rows?.length === 1 && /could not find/.test(rejList.body.rows[0].remark), rejList.text.slice(0, 200));
+  check('...nothing was linked by a rejection', !(await famOf(OLD_ID)).some((r) => /Grace/.test(r.name || '')));
+
+  check('deciding twice is refused (409, not_pending)', await (async () => { const r = await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Rejected', remark: 'x' }, BT); return r.status === 409 && r.body?.code === 'not_pending'; })());
+  check('nothing is waiting any more', (await call('GET', '/family-requests', null, BT)).body?.rows?.length === 0);
+  check('...and the work queue says so', await queueCount('family') === 0, String(await queueCount('family')));
+
+  const famDecided = await call('GET', '/data/AUD?limit=300', null, BT);
+  check('approving and rejecting are in the audit log, with the reason',
+    (famDecided.body?.rows || []).some((x) => x.action === 'Approved a family request')
+    && (famDecided.body?.rows || []).some((x) => x.action === 'Rejected a family request' && /could not find/.test(x.remark || '')));
+}
 
 section('Who looks after a member: pastor and cell leader');
 

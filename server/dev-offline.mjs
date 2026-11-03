@@ -23,6 +23,8 @@
    mistake here cannot reach the real project or send a member an email. */
 
 import http from 'node:http';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 
 const PORT = process.env.PORT || '4300';
 const NOAH_PORT = process.env.NOAH_PORT || '4301';
@@ -31,8 +33,10 @@ const KEY = 'offline-admin-key';
 
 /* Set BEFORE anything imports catalyst.js, which reads the environment once.
    The real credentials in .env.local are overridden so nothing is ever signed
-   with them. */
+   with them. Values set here win, but one left empty (the no-key run) would be filled in from .env.local, so the file is
+   pointed at nothing: offline never reads the real one. */
 Object.assign(process.env, {
+  CATALYST_ENV_FILE: resolve(tmpdir(), 'ksm-offline-no-env-file'),
   PORT,
   CATALYST_SCHEMA: 'noah',
   CATALYST_PROJECT_ID: 'offline',
@@ -69,6 +73,20 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 /* ---------- a stand-in for the Noah API, from ADMIN_INTEGRATION.md ---------- */
 
 const find = (id) => tables[T.appRegistrations].find((r) => r.ROWID === id);
+
+/* Requests members have filed from Me > Family. Four pending: a child under 18 and a brother who is a member (both for
+   Anand), a sister and a mother who have not joined yet; plus two already decided, so the status filter has something to show. */
+const { M } = await import('./fake-catalyst.mjs');
+let idSeq = 27145000000190000;
+const nextId = () => String(++idSeq);
+const familyRequests = [
+  { id: '100596000000071001', state: 'Pending', relation: 'daughter', kid: true, name: 'Hannah Rao', gender: 'female', dob: '2018-03-09', mobile: null, note: '', requesterId: M.approved, existingMemberId: null, at: '2026-11-01T10:00:00.000Z' },
+  { id: '100596000000071002', state: 'Pending', relation: 'brother', kid: false, name: 'Fr Thomas', gender: 'male', dob: null, mobile: '+919000000100', note: 'My younger brother', requesterId: M.approved, existingMemberId: M.pastor, at: '2026-11-02T08:30:00.000Z' },
+  { id: '100596000000071003', state: 'Pending', relation: 'sister', kid: false, name: 'Maria Varghese', gender: 'female', dob: null, mobile: '+919000000999', note: '', requesterId: M.boss, existingMemberId: null, at: '2026-11-02T12:00:00.000Z' },
+  { id: '100596000000071006', state: 'Pending', relation: 'mother', kid: false, name: 'Grace Member', gender: 'female', dob: null, mobile: '+919000000777', note: '', requesterId: M.office, existingMemberId: null, at: '2026-11-02T15:00:00.000Z' },
+  { id: '100596000000071004', state: 'Approved', relation: 'spouse', kid: false, name: 'Old Member', gender: 'male', dob: null, mobile: '+919000000778', note: '', requesterId: M.approved, existingMemberId: M.office, at: '2026-10-20T09:00:00.000Z' },
+  { id: '100596000000071005', state: 'Cancelled', relation: 'other', kid: false, name: 'Someone', gender: null, dob: null, mobile: '+919000000888', note: '', requesterId: M.boss, existingMemberId: null, at: '2026-10-25T09:00:00.000Z' },
+];
 /* Registrations whose member the fake Noah API has already told. */
 const told = new Set();
 const send = (res, status, body, headers = {}) => {
@@ -181,6 +199,53 @@ http.createServer(async (req, res) => {
     }
     S.clearCache();
     return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 0, emailed: true } });
+  }
+  /* ADMIN_INTEGRATION.md, "Family requests": the inbox, and the decision that links both accounts (or adds a child). */
+  if (req.method === 'GET' && path === '/admin/family-requests') {
+    const want = url.searchParams.get('state') || 'Pending';
+    const mem = (id) => tables[T.members].find((x) => x.ROWID === String(id));
+    const nameOf = (x) => (x ? [x.firstName, x.lastName].filter(Boolean).join(' ') : null);
+    return send(res, 200, {
+      requests: familyRequests.filter((r) => r.state === want).map((r) => {
+        const who = mem(r.requesterId);
+        const there = r.existingMemberId ? mem(r.existingMemberId) : null;
+        return {
+          ...r,
+          requesterName: nameOf(who), requesterMobile: who ? `${who.countryCode}${who.mobileNumber1}` : null,
+          existingMemberName: nameOf(there),
+        };
+      }),
+    });
+  }
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/family-requests\/(\d+)\/decide$/))) {
+    const r = familyRequests.find((x) => x.id === m[1]);
+    if (!r) return err(res, 404, 'family_request_not_found', 'No such family request.');
+    if (r.state !== 'Pending') return err(res, 409, 'not_pending', 'Already decided.');
+    if (!['Approved', 'Rejected'].includes(body.decision)) return err(res, 400, 'bad_decision', 'Decide Approved or Rejected.');
+    r.state = body.decision;
+    r.remark = body.remark || '';
+    if (body.decision === 'Approved') {
+      const me = tables[T.members].find((x) => x.ROWID === String(r.requesterId));
+      if (r.kid) {
+        const [first, ...rest] = r.name.split(' ');
+        const kidId = nextId();
+        tables[T.kids].push({ ROWID: kidId, id: kidId, firstName: first, lastName: rest.join(' '), gender: r.gender === 'male' ? 1 : 2, dateOfBirth: `${r.dob} 00:00:00`, archived: false });
+        const linkId = nextId();
+        tables[T.kidsConnect].push({ ROWID: linkId, id: linkId, kidId, memberId: r.requesterId, relationship: 9, isArchived: false });
+      } else {
+        const other = body.memberId || r.existingMemberId;
+        if (other) {
+          /* One row, both directions: A2B is what B is to A, B2A what A is to B. */
+          const code = { spouse: 1, son: 2, daughter: 3, father: 4, mother: 5, brother: 6, sister: 7, other: 8 }[r.relation];
+          const male = Number(me?.gender) === 1;
+          const back = { 1: 1, 8: 8, 2: male ? 4 : 5, 3: male ? 4 : 5, 4: male ? 2 : 3, 5: male ? 2 : 3, 6: male ? 6 : 7, 7: male ? 6 : 7 }[code];
+          const id = nextId();
+          tables[T.membersRelations].push({ ROWID: id, id, memberIdA: r.requesterId, memberIdB: String(other), relationshipA2B: code, relationshipB2A: back, isArchived: false });
+        }
+      }
+    }
+    S.clearCache();
+    return send(res, 200, { id: r.id, state: r.state, notified: { pushed: 2, emailed: false } });
   }
   /* ADMIN_SETUP.md: POST /admin/members/:id/roles { pastor?, admin? }, only what changes. */
   if (req.method === 'POST' && (m = path.match(/^\/admin\/members\/(\d+)\/roles$/))) {

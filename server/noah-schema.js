@@ -1461,17 +1461,16 @@ export async function loadPerson(memberRowId) {
      kids + kidsConnect  children who have no login of their own, and whose they are
      groupsConnect + groups  which groups a member is in
 
-   The relationship codes are the client's own (Laravel config/options.php,
-   'memberRelations'). A row is read as the Laravel app read it: on a relation of
-   members A and B, A2B is what B is to A, and B2A is what A is to B. Archived rows
-   are history and are skipped. */
+   The relationship codes are the Noah API's (ADMIN_INTEGRATION.md, family requests). On a relation of members A and
+   B, A2B is what B is to A, and B2A is what A is to B. Archived rows are history and are skipped. */
 
 const RELATION = {
-  1: 'Parent', 2: 'Child', 3: 'Uncle or aunt', 4: 'Nephew or niece', 5: 'Grandparent', 6: 'Grandchild',
-  7: 'Brother', 8: 'Sister', 9: 'Cousin', 10: 'Spouse', 11: 'In-law',
+  1: 'Spouse', 2: 'Son', 3: 'Daughter', 4: 'Father', 5: 'Mother', 6: 'Brother', 7: 'Sister', 8: 'Other',
+  9: 'Parent', 10: 'Child', 11: 'Sibling',
 };
-/** The other side of a relation: if I am your Parent, you are my Child. */
-const RELATION_BACK = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 7: 8, 8: 7, 9: 9, 10: 10, 11: 11 };
+
+/** What a child is called on a parent's page: by the child's gender, else just Child. */
+const kidLabel = (k) => (Number(k?.gender) === 1 ? 'Son' : Number(k?.gender) === 2 ? 'Daughter' : 'Child');
 
 let household = null;
 let householdAt = 0;
@@ -1523,7 +1522,7 @@ async function familyAndGroups(memberRowId, memberByRow) {
     rows.push({
       rowId: String(k.ROWID), name: [k.firstName, k.middleName, k.lastName].filter(Boolean).join(' ') || '(child, no name)',
       /* kidsConnect says what the member is to the child; the child is the other side of it. */
-      rel: RELATION[RELATION_BACK[code]] || RELATION[code] || 'Child', age: ageOf(utc(k.dateOfBirth)), kid: true,
+      rel: kidLabel(k), age: ageOf(utc(k.dateOfBirth)), kid: true,
     });
   }
 
@@ -1551,10 +1550,11 @@ async function familyAndGroups(memberRowId, memberByRow) {
    each of them to see the other, with the reverse relation, automatically. What matters when writing it is
    that the second code is right:
 
-     Parent <-> Child, Grandparent <-> Grandchild, Uncle or aunt <-> Nephew or niece   (always each other's reverse)
-     Cousin, Spouse, In-law                                                            (the same word both ways)
-     Brother or Sister                                                                 (what A is to B depends on A's gender:
-                                                                                        a man is a Brother, a woman a Sister)
+     Spouse, Other, Sibling                       (the same word both ways)
+     Parent <-> Child                             (each other's reverse)
+     Son or Daughter <-> Father or Mother         (what A is to B depends on A's gender: a man is the Father, a woman the Mother,
+     Father or Mother <-> Son or Daughter          and likewise Son and Daughter)
+     Brother or Sister                            (a man is a Brother, a woman a Sister)
 
    Both people must be members (people with the app): a relation links two member rows. */
 
@@ -1563,9 +1563,15 @@ export const RELATION_OPTIONS = Object.entries(RELATION).map(([code, label]) => 
 
 /** What the first person is to the second, given what the second is to the first. Null: needs the first person's gender. */
 function reverseRelation(code, firstGender) {
-  const fixed = { 1: 2, 2: 1, 3: 4, 4: 3, 5: 6, 6: 5, 9: 9, 10: 10, 11: 11 };
-  if (fixed[code]) return fixed[code];
-  if (code === 7 || code === 8) return Number(firstGender) === 1 ? 7 : Number(firstGender) === 2 ? 8 : null;
+  const same = { 1: 1, 8: 8, 11: 11 };
+  if (same[code]) return same[code];
+  if (code === 9) return 10;
+  if (code === 10) return 9;
+  const male = Number(firstGender) === 1, female = Number(firstGender) === 2;
+  const pick = (m, f) => (male ? m : female ? f : null);
+  if (code === 2 || code === 3) return pick(4, 5);   /* B is A's son or daughter, so A is B's father or mother */
+  if (code === 4 || code === 5) return pick(2, 3);   /* B is A's father or mother, so A is B's son or daughter */
+  if (code === 6 || code === 7) return pick(6, 7);   /* siblings: a man is a Brother, a woman a Sister */
   return undefined;
 }
 
@@ -1584,7 +1590,7 @@ export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
   if (!RELATION[asked]) throw Object.assign(new Error('Pick one of the relations on offer.'), { code: 'bad_relation' });
   const back = reverseRelation(asked, me.gender);
   if (back === null) {
-    throw Object.assign(new Error(`${memberFullName(me)}'s gender is not set, and Brother or Sister depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });
+    throw Object.assign(new Error(`${memberFullName(me)}'s gender is not set, and that relation depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });
   }
 
   const h = await householdRows();

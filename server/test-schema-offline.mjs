@@ -992,8 +992,8 @@ reset(seed());
   check('a spouse is listed, by name, with the relationship in words', spouse?.name === 'Old Member' && spouse.rel === 'Spouse' && spouse.kid === false, JSON.stringify(fam.rows));
   check('an archived relation is history and is skipped', !fam.rows.some((r) => r.rowId === M.pastor));
   const child = fam.rows.find((r) => r.kid);
-  check('a child is listed, with their age, and as the other side of the link (the member is a Parent, so the child is a Child)',
-    child?.name === 'Asha Rao' && child.rel === 'Child' && child.age >= 7 && child.age <= 9, JSON.stringify(child));
+  check('a child is listed, with their age, and as the other side of the link (a daughter, by her gender)',
+    child?.name === 'Asha Rao' && child.rel === 'Daughter' && child.age >= 7 && child.age <= 9, JSON.stringify(child));
   check('...a child belongs to the member it is linked to, not to others', (await S.loadPerson(M.office)).family.rows.every((r) => !r.kid));
 
   check('groups are listed by name', p.groups.rows.map((g) => g.name).join() === 'Cell Mumbai 1,Worship team', JSON.stringify(p.groups.rows));
@@ -1006,7 +1006,7 @@ reset(seed());
   check('seen from the other member, the same link names the first one', back?.name === 'Anand Rao' && back.rel === 'Spouse');
 
   /* directional codes: A2B is what B is to A */
-  tables[T.membersRelations].push({ ROWID: '27145000000170009', memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 1, relationshipB2A: 2, isArchived: false });
+  tables[T.membersRelations].push({ ROWID: '27145000000170009', memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 9, relationshipB2A: 10, isArchived: false });
   S.clearCache();
   check('a directional relation reads the right way round: B is a Parent of A, so A sees "Parent"', (await S.loadPerson(M.approved)).family.rows.find((r) => r.rowId === M.pastor)?.rel === 'Parent');
   check('...and B sees "Child"', (await S.loadPerson(M.pastor)).family.rows.find((r) => r.rowId === M.approved)?.rel === 'Child');

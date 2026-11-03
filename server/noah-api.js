@@ -38,7 +38,8 @@ const EXPLAIN = {
   invalid_admin_key: 'The admin key is wrong or missing. Check NOAH_ADMIN_API_KEY in .env.local.',
   registration_not_found: 'Noah has no registration with that id.',
   member_not_found: 'Noah has no member with that id.',
-  not_pending: 'That registration has already been decided. A decision can only be made once.',
+  not_pending: 'That has already been decided. A decision can only be made once.',
+  family_request_not_found: 'Noah has no family request with that id.',
   server_misconfigured: 'The Noah service is not fully configured. The Catalyst developer needs to look at it.',
   session_invalid: 'Noah refused the request without an admin key.',
 };
@@ -179,6 +180,29 @@ export const setMemberRoles = (memberRowId, roles, { actor } = {}) =>
    is needed — the admin key is enough. */
 export const getFile = (fileId, { actor } = {}) =>
   call(`/admin/files/${encodeURIComponent(fileId)}`, { raw: true, actor });
+
+/* ---------- family requests ----------
+
+   A member asks, from Me > Family in the app, to add a spouse, child, parent, brother, sister or
+   anyone else. The office decides here; on approval the API links both accounts (or, for a child under
+   18, adds the child and links them to the parent and the parent's spouse) and sends both a push.
+
+   GET  /admin/family-requests?state=Pending|Approved|Rejected|Cancelled   -> { requests: [...] }
+   POST /admin/family-requests/:id/decide { decision: 'Approved'|'Rejected', remark?, memberId? }
+
+   `memberId` is only for a grown-up, to link a member the office picked when the number the member
+   typed is not the one that person joined with. `remark` is shown to the member on a rejection. */
+export const listFamilyRequests = async (state = 'Pending') => {
+  const data = await call(`/admin/family-requests?state=${encodeURIComponent(state)}`);
+  /* The note shows { requests: [...] }; a bare array is accepted too, rather than failing on the shape. */
+  return Array.isArray(data) ? data : Array.isArray(data?.requests) ? data.requests : [];
+};
+
+export const decideFamilyRequest = (id, { decision, remark, memberId, actor } = {}) =>
+  call(`/admin/family-requests/${encodeURIComponent(id)}/decide`, {
+    method: 'POST', actor,
+    body: { decision, ...(remark ? { remark } : {}), ...(memberId ? { memberId } : {}) },
+  });
 
 /** Is the API reachable and is the key accepted? */
 export async function check() {

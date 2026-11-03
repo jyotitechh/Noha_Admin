@@ -34,7 +34,7 @@ Everything the office does is **recorded in an audit log** (who did what, and wh
 |---|---|
 | **Dashboard** | See where the ministry stands this morning and what is waiting. |
 | **Work queues** | One list of everything waiting for a decision, oldest first. |
-| **Membership** | Approve or reject registrations. View approved members and history. Approve changes members ask for after approval. Browse the member register. Open any person for their full record (photo, ID, video, family, groups, pastor, partnership). Edit a person's details. |
+| **Membership** | Approve or reject registrations. View approved members and history. Approve changes members ask for after approval. Approve or reject the relatives members ask to add to their family (Family requests). Browse the member register. Open any person for their full record (photo, ID, video, family, groups, pastor, partnership). Edit a person's details. |
 | **App roles** | Give or take away app roles: pastor, cell leader, prayer warrior, pass scanner, bus coordinator, translator, covenant partner and more. |
 | **Giving** | See receipts: every gift, its 80G receipt, mode and gateway. |
 | **Events** | See events and the passes members booked. |

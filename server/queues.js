@@ -10,6 +10,8 @@ import { db } from './db.js';
 import { live, listRegistrations } from './store.js';
 import { pendingPrayerRequests } from './prayer-requests.js';
 import { accessRequests } from './noah-schema.js';
+import { pendingRequests as pendingFamilyRequests } from './family-requests.js';
+import { noahConfigured } from './noah-api.js';
 
 const minDate = (a) => (a.length ? new Date(Math.min(...a.map((d) => +d))) : null);
 const open = (coll, fn) => (db[coll] || []).filter(fn);
@@ -29,7 +31,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -53,6 +55,11 @@ export function queues() {
       id: 'registrations', l: 'Member registrations to approve', area: 'Membership', icon: 'user-plus',
       to: '/members/registrations', perm: 'members.edit', owner: 'Membership officer', sla: 24, hot: true,
       ...q('REGISTRATIONS', (r) => r.state === 'pending'),
+    },
+    {
+      id: 'family', l: 'Family requests to approve', area: 'Membership', icon: 'users', to: '/members/family',
+      perm: 'members.edit', owner: 'Membership officer', sla: 48,
+      count: () => 0, oldest: () => null,   /* counted from the Noah API below; the sample data has none */
     },
     {
       id: 'prayer-inbox', l: 'App prayer requests to approve', area: 'Community', icon: 'flame',
@@ -115,6 +122,11 @@ export async function queuesFor(roleId, canFn) {
     if (rows.some((x) => x.id === 'access')) {
       try { real.access = tally(await accessRequests()); }
       catch { real.access = { count: 0, oldest: null }; }
+    }
+    if (rows.some((x) => x.id === 'family')) {
+      /* Only the Noah API has them. Without its key there is nothing to count, and saying 0 is the truth. */
+      try { real.family = noahConfigured() ? tally(await pendingFamilyRequests()) : { count: 0, oldest: null }; }
+      catch { real.family = { count: 0, oldest: null }; }
     }
     try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
     catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }
