@@ -379,7 +379,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
             <b className="small">Add a relative</b>
 
             <label className="fld">
-              <span className="lbl">1. Find the member</span>
+              <span className="lbl">Find the member</span>
               {relPick ? (
                 <span className="row gap6">
                   <Chip tone="ok" icon="check">{relPick.name}</Chip>
@@ -418,26 +418,22 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
             )}
 
             <label className="fld">
-              <span className="lbl">2. {relPick ? `${relPick.name} is ${member.name}’s…` : 'What are they to this person?'}</span>
+              <span className="lbl">{relPick ? `${relPick.name} is ${member.name}’s…` : 'What are they to this person?'}</span>
               <select className="inp" value={relCode} disabled={!relPick} onChange={(e) => setRelCode(e.target.value)}>
                 <option value="">{relPick ? 'Pick a relation' : 'Choose the member first'}</option>
                 {relationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
               </select>
-              {relationOptions.find((o) => String(o.code) === relCode)?.extra && (
-                <span className="xs muted">
-                  Uncle, aunt, nephew and niece are kept by the console. Check the Noah app shows them before using them for real members.
-                </span>
-              )}
             </label>
 
             <div>
-              <span className="lbl" style={{ display: 'block', marginBottom: 6 }}>3. Save</span>
-              <Btn icon="plus" variant="pri" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>
-                {savingRel ? 'Saving…' : 'Add relation'}
+              <Btn variant="pri" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>
+                {savingRel ? 'Saving…' : 'Save'}
               </Btn>
-              <span className="xs muted" style={{ marginLeft: 8 }}>
-                {!relPick ? 'Find the member first.' : !relCode ? 'Now pick the relation.' : 'The other person sees this one too, with the reverse relation, automatically.'}
-              </span>
+              {(!relPick || !relCode) && (
+                <span className="xs muted" style={{ marginLeft: 8 }}>
+                  {!relPick ? 'Find the member first.' : 'Now pick the relation.'}
+                </span>
+              )}
             </div>
           </div>
         )}
