@@ -596,8 +596,15 @@ section('Correcting a person, and what the app asks to have changed');
     const rejReq = byField('blood_group');
     const rejected = await call('POST', `/change-requests/${rejReq.id}/decide`, { approve: false, note: 'That is not a blood group we hold.' }, BT);
     check('turning one down sends the reason to the member', rejected.status === 200 && rejected.body?.via === 'api', rejected.text.slice(0, 200));
-    const turnedDown = (await call('GET', '/change-requests?status=rejected', null, BT)).body?.rows || [];
+    const rejList = await call('GET', '/change-requests?status=rejected', null, BT);
+    const turnedDown = rejList.body?.rows || [];
     check('...and the list shows the reason', turnedDown.some((r) => r.id === rejReq.id && /not a blood group/.test(r.note)));
+    /* The live Noah function fails on this one list (500), and the screen must not break with it. */
+    check('the Turned down list still loads when the Noah API fails on it: from the table, and it says why',
+      rejList.status === 200 && rejList.body?.listedFrom === 'table' && /Something went wrong/.test(rejList.body?.apiProblem || '') && rejList.body?.via === 'api', rejList.text.slice(0, 200));
+    check('...the other lists still come from the API', (await call('GET', '/change-requests?status=approved', null, BT)).body?.listedFrom === 'api');
+    check('...a decision on a request that is already turned down is still a 409, not a failure', await (async () => { const r = await call('POST', `/change-requests/${rejReq.id}/decide`, { approve: true }, BT); return r.status === 409 && r.body?.code === 'not_pending'; })());
+    check('...and an unknown request is still a 404', (await call('POST', '/change-requests/1/decide', { approve: false, note: 'x' }, BT)).status === 404);
     check('a request already decided is a 409 (not_pending)', await (async () => { const r = await call('POST', `/change-requests/${photoReq.id}/decide`, { approve: true }, BT); return r.status === 409 && r.body?.code === 'not_pending'; })());
   }
   check('finance still cannot even list them (403)', noPii === 403);

@@ -40,13 +40,34 @@ function fail(res, err) {
   });
 }
 
-/** The requests, from the API when it has the call, else from the table. `via` says which. */
+/** A failure on the Noah side (its function crashed), as opposed to a refusal of ours or a missing call. */
+const apiBroke = (err) => err instanceof NoahApiError && err.status >= 500;
+
+/**
+ * The requests, from the API when it has the call, else from the table.
+ *   via         how a decision would be made: 'api' (the member is told) or 'table' (nobody is).
+ *   listedFrom  where THIS list came from. Reading is harmless, so when the API's list fails on its side (it does for
+ *               status=rejected on the live function: a 500 "Something went wrong"), that status is read from the table
+ *               instead, and `apiProblem` says what the API answered. A refusal (a wrong key) is still an error.
+ */
 async function readRequests(status) {
-  if (noahConfigured()) {
-    try { return { rows: await listViaApi(status), via: 'api' }; }
-    catch (err) { if (!lacksCall(err)) throw err; }
+  if (!noahConfigured()) return { rows: await loadChangeRequests({ status }), via: 'table', listedFrom: 'table' };
+
+  const wanted = status ? [status] : ['pending', 'approved', 'rejected'];
+  const rows = [];
+  let problem = '';
+  for (const s of wanted) {
+    try {
+      rows.push(...await listViaApi(s));
+    } catch (err) {
+      if (lacksCall(err)) return { rows: await loadChangeRequests({ status }), via: 'table', listedFrom: 'table' };
+      if (!apiBroke(err)) throw err;
+      problem = err.message;
+      rows.push(...await loadChangeRequests({ status: s }));
+    }
   }
-  return { rows: await loadChangeRequests({ status }), via: 'table' };
+  rows.sort((a, b) => (+(b.at ?? 0)) - (+(a.at ?? 0)));
+  return { rows, via: 'api', listedFrom: problem ? 'table' : 'api', ...(problem ? { apiProblem: problem } : {}) };
 }
 
 export default function mountChanges(app, { requireSession, requirePerm }) {
@@ -56,11 +77,11 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
     if (!(live() && isNoah())) return res.json({ rows: [], total: 0, notInProject: true, message: 'Change requests need the Catalyst connection.' });
     try {
       const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : undefined;
-      const { rows: all, via } = await readRequests(status);
+      const { rows: all, via, listedFrom, apiProblem } = await readRequests(status);
       /* A contact detail's old and new value are shown only to someone who may see contact details. */
       const pii = can(req.session.role, 'members.pii');
       const rows = all.map((r) => (r.contact && !pii ? { ...r, oldValue: '••••••', newValue: '••••••', saves: null, problem: null, masked: true } : r));
-      res.json({ rows, total: rows.length, via });
+      res.json({ rows, total: rows.length, via, listedFrom, ...(apiProblem ? { apiProblem } : {}) });
     } catch (err) {
       fail(res, err);
     }
@@ -92,7 +113,7 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
       if (waiting) {
         const r = waiting.find((x) => x.id === String(req.params.id));
         if (!r) {
-          const everything = await listViaApi();
+          const { rows: everything } = await readRequests();
           return everything.some((x) => x.id === String(req.params.id))
             ? res.status(409).json({ error: 'That request has already been decided.', code: 'not_pending' })
             : res.status(404).json({ error: 'No such request.', code: 'not_found' });

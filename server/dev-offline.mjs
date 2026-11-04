@@ -205,6 +205,9 @@ http.createServer(async (req, res) => {
      right format and sends the member a push. The harness applies a value with the console's own map. */
   if (req.method === 'GET' && path === '/admin/profile-requests') {
     const want = url.searchParams.get('status') || 'pending';
+    /* The live Noah function answers 500 "Something went wrong. Try again." for status=rejected (checked 4 Nov 2026), while
+       pending and approved work. The console must keep working when that happens, so the fake does the same. */
+    if (want === 'rejected') return err(res, 500, 'server_error', 'Something went wrong. Try again.');
     const name = (id) => { const x = tables[T.members].find((m) => m.ROWID === String(id)); return x ? [x.firstName, x.lastName].filter(Boolean).join(' ') : null; };
     return send(res, 200, {
       requests: tables[T.appChangeRequests].filter((r) => normStatus(r.status) === want).map((r) => ({

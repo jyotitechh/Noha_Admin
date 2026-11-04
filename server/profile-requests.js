@@ -39,9 +39,8 @@ export function shape(item) {
   };
 }
 
-/** The requests with one status, or all three when none is named. Newest first. */
-export async function listViaApi(status) {
-  const wanted = status ? [status] : ['pending', 'approved', 'rejected'];
-  const lists = await Promise.all(wanted.map((s) => listProfileRequests(s)));
-  return lists.flat().map(shape).sort((a, b) => (+(b.at ?? 0)) - (+(a.at ?? 0)));
+/** The requests with one status, from the API. Newest first. */
+export async function listViaApi(status = 'pending') {
+  const items = await listProfileRequests(status);
+  return items.map(shape).sort((a, b) => (+(b.at ?? 0)) - (+(a.at ?? 0)));
 }

@@ -64,7 +64,7 @@ export default function ChangeRequests() {
   const { toast } = useToast();
   const { can } = useAuth();
 
-  const q = useQuery(() => api.get<{ rows: Request[]; notInProject?: boolean; message?: string; via?: 'api' | 'table' }>(`/change-requests?status=${show}`), [show]);
+  const q = useQuery(() => api.get<{ rows: Request[]; notInProject?: boolean; message?: string; via?: 'api' | 'table'; listedFrom?: 'api' | 'table'; apiProblem?: string }>(`/change-requests?status=${show}`), [show]);
 
   async function decide(r: Request, approve: boolean, note = '') {
     setBusy(r.id);
@@ -87,14 +87,14 @@ export default function ChangeRequests() {
     }
   }
 
-  if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
-  if (!q.data) return <Loading what="the requests" />;
-  if (q.data.notInProject) return <Note tone="mute" icon="info">{q.data.message}</Note>;
-  const rows = q.data.rows;
+  /* A failure shows inside the screen, under the tabs, so another tab can be tried: it used to replace everything. */
+  if (!q.data && !q.error) return <Loading what="the requests" />;
+  if (q.data?.notInProject) return <Note tone="mute" icon="info">{q.data.message}</Note>;
+  const rows = q.error ? [] : (q.data?.rows ?? []);
 
   return (
     <div className="stack">
-      {q.data.via === 'api' ? (
+      {!q.data ? null : q.data.via === 'api' ? (
         <Note tone="ok" icon="bell">
           Decided through the Noah API: the new value is written in the format the app expects, and <b>the member is sent a notification</b>.
           The reason for turning a request down is shown to them.
@@ -103,6 +103,12 @@ export default function ChangeRequests() {
         <Note tone="warn" icon="alert">
           The Noah API is not being used for these (its key is not set, or it does not have the calls yet), so deciding here updates the member's
           record but <b>the member is not sent a notification</b>. Set <span className="mono">NOAH_ADMIN_API_KEY</span> on the API to fix that.
+        </Note>
+      )}
+      {q.data?.apiProblem && !q.error && (
+        <Note tone="mute" icon="info">
+          The Noah API could not list these just now (it answered “{q.data.apiProblem}”), so they are shown from the table instead. Only this list
+          is affected.
         </Note>
       )}
       <div className="row wrap gap8">
@@ -115,7 +121,9 @@ export default function ChangeRequests() {
         <Btn icon="refresh" onClick={q.reload}>Refresh</Btn>
       </div>
 
-      {rows.length === 0 ? (
+      {q.error ? (
+        <Failed error={q.error} onRetry={q.reload} />
+      ) : rows.length === 0 ? (
         <div className="card">
           <Empty icon="inbox" title={show === 'pending' ? 'Nothing is waiting' : 'None here'}>
             {show === 'pending' ? 'When a member asks the app to change a detail, it appears here.' : undefined}
@@ -199,7 +207,7 @@ export default function ChangeRequests() {
           </>
         }
       >
-        <Field label="Why?" hint={q.data.via === 'api' ? 'The member is shown this reason, and it is kept with the request.' : 'Kept with the request, so the next person to look can see why. The member is not told.'}>
+        <Field label="Why?" hint={q.data?.via === 'api' ? 'The member is shown this reason, and it is kept with the request.' : 'Kept with the request, so the next person to look can see why. The member is not told.'}>
           <textarea className="inp" rows={4} value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Drawer>
