@@ -226,8 +226,10 @@ svg.i{width:1em;height:1em;flex:none;fill:none;stroke:currentColor;stroke-width:
 .list>li:first-child{border-top:0}
 .list>li.click{cursor:pointer}
 .list>li.click:hover{background:var(--wash)}
-.list .t1{font-weight:600;font-size:13.5px}
-.list .t2{font-size:12px;color:var(--ink-3)}
+/* A name and the line under it. They are spans, so without block they ran together ("Mehak DhamijaAlready in this family"). */
+.list .t1,.list .t2{display:block}
+.list .t1{font-weight:600;font-size:13.5px;line-height:1.35}
+.list .t2{font-size:12px;color:var(--ink-3);margin-top:2px;line-height:1.4}
 .qi{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand-ink);flex:none}
 .qi svg{font-size:16px}
 .qi.ok{background:var(--ok-bg);color:var(--ok)}.qi.warn{background:var(--warn-bg);color:var(--warn)}.qi.bad{background:var(--bad-bg);color:var(--bad)}.qi.info{background:var(--info-bg);color:var(--info)}.qi.mute{background:var(--mute-bg);color:var(--mute)}
