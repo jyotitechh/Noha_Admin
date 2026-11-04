@@ -20,8 +20,13 @@
 
    Not applied from here, and why:
      phone1   it is the member's sign-in number (`users.number`). Writing it to `members` alone would show a number they
-              cannot sign in with, and changing the login would hand the account to whoever holds the new number. Turn it
-              down, or have the Catalyst developer change both.
+              cannot sign in with, and changing the login would hand the account to whoever holds the new number. The Noah
+              API refuses it too (409 change_by_hand): change it by hand in `users` and `members`, then turn the request down
+              with a note such as "Changed".
+
+   WHO APPLIES IT. When the Noah API key is set the API decides (GET /admin/profile-requests, POST .../decide): it writes the
+   value in the right format and sends the member a push. This file's map is then used only to label a request, to guard the
+   cases above, and for the table fallback (no key, or an API without those calls), where nobody is told.
 
    What needs the permission to see contact details (members.pii), because nobody applies what they may not read: email,
    phones, addresses and pincodes, and the ID numbers (PAN, Aadhaar, Emirates ID, passport, voter, driving licence).
@@ -287,7 +292,7 @@ export const CHANGE_FIELDS = {
   /* The sign-in number: see the top of this file. Known, shown, but never applied here. */
   phone1: {
     label: 'Mobile number', contact: true,
-    blocked: 'This is the number the member signs in with. Changing it here would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number. Turn it down, or ask the Catalyst developer to change both together.',
+    blocked: 'This is the number the member signs in with. Changing it here would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number. Change it by hand in `users` and `members`, then turn the request down with a note such as “Changed”.',
   },
   phone2: phone('mobileNumber2', 'mobileNumber2CountryCode', 'Second mobile number'),
   landline: phone('landlineNumber', 'landlineCountryCode', 'Landline'),
@@ -297,12 +302,26 @@ export const CHANGE_FIELDS = {
 
   address: addressWithArea('address', 'area', 'Address'),
   location: cityStateCountry('city', 'state', 'country', 'Location'),
+  /* A new profile photo: `newValue` is a file id, and approving makes it members.photo. */
+  photo: text('photo', 'Profile photo', 255),
+
   pin: text('pincode', 'Pincode', 50, { contact: true }),
 
   corr_address: addressWithArea('corrAddress', 'corrArea', 'Postal address'),
   corr_location: cityStateCountry('corrCity', 'corrState', 'corrCountry', 'Postal location'),
   corr_pin: text('corrPincode', 'Postal pincode', 100, { contact: true }),
 };
+
+/**
+ * A status as the table may spell it: approved / Approved, rejected / Rejected / Turned down. Anything else is still waiting
+ * (ADMIN_INTEGRATION: "any of approved, Approved ... is understood. Anything else counts as still waiting").
+ */
+export function normStatus(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (s === 'approved') return 'approved';
+  if (s === 'rejected' || s === 'turned down') return 'rejected';
+  return 'pending';
+}
 
 /** What the console can say about a field before anything is decided. */
 export function describeChangeField(fieldId) {

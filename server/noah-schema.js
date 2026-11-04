@@ -38,7 +38,7 @@ import {
   getRows, getRow, update, insert, remove, listTables, listColumns,
 } from './catalyst.js';
 import { MEMBER_FIELDS } from './member-fields.js';
-import { describeChangeField, resolveChange } from './change-fields.js';
+import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
 import { kidLabel, relationLabel, reverseRelation, isOffered } from './relations.js';
 
 /* ---------- finding the tables ----------
@@ -1709,11 +1709,11 @@ export async function loadChangeRequests({ status } = {}) {
   const [rows, { members }] = await Promise.all([changeRequestRows(), snapshot()]);
   const byRow = new Map(members.map((m) => [String(m.ROWID), m]));
   return rows
-    .filter((r) => !status || String(r.status || 'pending').toLowerCase() === status)
+    .filter((r) => !status || normStatus(r.status) === status)
     .map((r) => {
       const m = byRow.get(String(r.memberRowId));
       const field = describeChangeField(r.fieldId);
-      const pending = String(r.status || 'pending').toLowerCase() === 'pending';
+      const pending = normStatus(r.status) === 'pending';
       /* What approving would save, so a value that is split (an address, a phone) can be checked before it is. */
       const plan = pending && field.known ? resolveChange(r.fieldId, r.newValue, m) : null;
       return {
@@ -1735,7 +1735,8 @@ export async function loadChangeRequests({ status } = {}) {
         problem: plan?.error || null,
         oldValue: r.oldValue ?? '',
         newValue: r.newValue ?? '',
-        status: String(r.status || 'pending').toLowerCase(),
+        status: normStatus(r.status),
+        photo: r.fieldId === 'photo',
         note: r.note || '',
         at: ist(r.CREATEDTIME),
         decidedAt: utc(r.reviewedAt),
@@ -1755,7 +1756,7 @@ export async function decideChangeRequest({ id, approve, note, byMemberRowId, ca
   const all = await changeRequestRows();
   const row = all.find((r) => same(r.ROWID, id));
   if (!row) throw Object.assign(new Error('No such request.'), { code: 'not_found' });
-  if (String(row.status || 'pending').toLowerCase() !== 'pending') {
+  if (normStatus(row.status) !== 'pending') {
     throw Object.assign(new Error('That request has already been decided.'), { code: 'not_pending' });
   }
 

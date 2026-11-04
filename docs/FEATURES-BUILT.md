@@ -61,13 +61,18 @@ Membership and a row in Work queues count the waiting ones.
 
 **What.** Members cannot edit their own details. They ask, and the office approves or turns down.
 
-**How.** **Membership > Changes asked for** lists each request. Approving writes the new value into the member's record.
-The app's field names are mapped to the right columns, and values are converted where needed (gender, yes/no, income,
-a phone split into dial code and number, an address into address and area, a location into city, state and country, a
-reference name or phone). A value that cannot be applied is flagged before anyone presses Approve. The sign-in number is
-never changed here, because it is the member's login. The member is not notified yet, and the screen says so.
+**How.** **Membership > Changes asked for** lists each request: Waiting, Approved, Turned down.
+- The decision goes through the **Noah API**, which writes the value in the format the app expects and **sends the member a
+  notification**. A reason given when turning one down is shown to the member. The screen says the member is notified.
+- A **new profile photo** is shown beside the current one so the office can look at it before approving. Approving makes it
+  the member's photo.
+- The member's **sign-in mobile number** is never approved here (it is their login). The screen says to change it by hand,
+  then turn the request down with a note such as "Changed".
+- If the API key is not set, or the API does not have these calls yet, the console writes the record itself, and the screen
+  shows a warning that the member is **not** notified.
 
-**Where.** `server/change-fields.js`, `server/noah-schema.js`, `server/routes/changes.js`, `src/modules/members/ChangeRequests.tsx`.
+**Where.** `server/noah-api.js`, `server/profile-requests.js`, `server/change-fields.js`, `server/routes/changes.js`,
+`src/modules/members/ChangeRequests.tsx`.
 
 ---
 

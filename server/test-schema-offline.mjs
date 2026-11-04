@@ -1027,7 +1027,7 @@ section('Changes the members ask for from the app');
 reset(seed());
 {
   const pending = await S.loadChangeRequests({ status: 'pending' });
-  check('the pending requests are listed, newest first', pending.length === 15 && pending[0].id === CR.firstName, pending.map((p) => p.fieldId).join());
+  check('the pending requests are listed, newest first', pending.length === 16 && pending[0].id === CR.firstName, pending.map((p) => p.fieldId).join());
   check('...each with who asked, the old value and the new', pending.find((p) => p.id === CR.name).memberName === 'Anand Rao' && pending.find((p) => p.id === CR.name).newValue === 'Anandan');
   check('...marking the ones the console can place', pending.find((p) => p.id === CR.name).known && pending.find((p) => p.id === CR.email).contact && !pending.find((p) => p.id === CR.unknown).known);
   check('a request already decided is not pending', (await S.loadChangeRequests({ status: 'approved' })).length === 1);
@@ -1160,6 +1160,26 @@ reset(seed());
   const locErr = await refuses(CR.locBad);
   check('a location with one part is refused, and nothing is written', locErr?.code === 'invalid_value' && mem().city === 'Pune');
   check('a blood group that does not exist is refused', (await refuses(CR.bloodBad))?.code === 'invalid_value' && !mem().bloodGroup);
+
+  /* a new profile photograph: newValue is a file id, and approving makes it members.photo (the table path) */
+  check('a photograph request is recognised as one', list.find((p) => p.id === CR.photo)?.photo === true && list.find((p) => p.id === CR.photo)?.fieldLabel === 'Profile photo');
+  await apply(CR.photo);
+  check('approving a photograph puts the file id on the member', mem().photo === '27145000000130999', String(mem().photo));
+
+  /* the status words the table may hold: approved / Approved, rejected / Rejected / Turned down, anything else is waiting */
+  tables[T.appChangeRequests].push(
+    { ROWID: '27145000000160080', memberRowId: M.approved, fieldId: 'city', oldValue: 'a', newValue: 'b', status: 'Approved', CREATEDTIME: '2026-10-23 09:00:00:000' },
+    { ROWID: '27145000000160081', memberRowId: M.approved, fieldId: 'city', oldValue: 'a', newValue: 'b', status: 'Rejected', CREATEDTIME: '2026-10-23 09:01:00:000' },
+    { ROWID: '27145000000160082', memberRowId: M.approved, fieldId: 'city', oldValue: 'a', newValue: 'b', status: 'Turned down', CREATEDTIME: '2026-10-23 09:02:00:000' },
+    { ROWID: '27145000000160083', memberRowId: M.approved, fieldId: 'city', oldValue: 'a', newValue: 'b', status: 'on hold', CREATEDTIME: '2026-10-23 09:03:00:000' },
+  );
+  S.clearCache();
+  const wordy = (st) => S.loadChangeRequests({ status: st }).then((rows) => rows.map((r) => r.id));
+  check('"Approved" counts as approved, whatever the case', (await wordy('approved')).includes('27145000000160080'));
+  check('"Rejected" and "Turned down" both count as turned down', (await wordy('rejected')).includes('27145000000160081') && (await wordy('rejected')).includes('27145000000160082'));
+  check('any other word counts as still waiting', (await wordy('pending')).includes('27145000000160083'));
+  let wasDecided = null; try { await S.decideChangeRequest({ id: '27145000000160080', approve: true, canContact: true }); } catch (e) { wasDecided = e; }
+  check('a request marked "Approved" cannot be decided again', wasDecided?.code === 'not_pending');
 
   /* the permission: contact details and ID numbers need it */
   reset(seed());

@@ -40,6 +40,7 @@ const EXPLAIN = {
   member_not_found: 'Noah has no member with that id.',
   not_pending: 'That has already been decided. A decision can only be made once.',
   family_request_not_found: 'Noah has no family request with that id.',
+  change_by_hand: 'That is the member\'s sign-in mobile number, so it cannot be approved here. Change it by hand in users and members, then turn the request down with a note such as "Changed".',
   server_misconfigured: 'The Noah service is not fully configured. The Catalyst developer needs to look at it.',
   session_invalid: 'Noah refused the request without an admin key.',
 };
@@ -202,6 +203,32 @@ export const decideFamilyRequest = (id, { decision, remark, memberId, actor } = 
   call(`/admin/family-requests/${encodeURIComponent(id)}/decide`, {
     method: 'POST', actor,
     body: { decision, ...(remark ? { remark } : {}), ...(memberId ? { memberId } : {}) },
+  });
+
+/* ---------- profile change requests ----------
+
+   A member asks from Me > My information to change a detail, or their photo. The API writes the value in the right
+   format (gender codes, dates, yes/no, phone split, addresses, income) and sends the member a push. Writing the table
+   by hand does neither, and the app may keep showing the old value because the format has to match exactly.
+
+   GET  /admin/profile-requests?status=pending|approved|rejected
+        -> items { id, memberRowId, memberName, fieldId, oldValue, newValue, status, note, createdAt, newFileUrl?, oldFileUrl? }
+   POST /admin/profile-requests/:id/decide  { decision: 'approve' | 'reject', note? }   -> { id, status, notified: { pushed } }
+
+   `note` is shown to the member on a rejection. A photo request's `newValue` is a file id: read it with getFile.
+   The member's main mobile number (phone1) answers 409 change_by_hand: it is their sign-in. */
+export const listProfileRequests = async (status = 'pending') => {
+  const data = await call(`/admin/profile-requests?status=${encodeURIComponent(status)}`);
+  /* The note shows items; the list may come bare or wrapped, so neither is assumed. */
+  if (Array.isArray(data)) return data;
+  for (const k of ['requests', 'items', 'rows', 'data']) if (Array.isArray(data?.[k])) return data[k];
+  return [];
+};
+
+export const decideProfileRequest = (id, { decision, note, actor } = {}) =>
+  call(`/admin/profile-requests/${encodeURIComponent(id)}/decide`, {
+    method: 'POST', actor,
+    body: { decision, ...(note ? { note } : {}) },
   });
 
 /** Is the API reachable and is the key accepted? */

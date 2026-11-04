@@ -196,12 +196,24 @@ developer: the Noah API routes and the server-side OAuth client. Flutter develop
 A member cannot edit their details in the app. They type the new values and press one button, and the app files one row
 in `appChangeRequests` per changed detail. The office decides in **Membership > Changes asked for**.
 
-**Logic.** The Noah API has no call for these yet, so the console reads the table and, on approval, writes `newValue`
-into the member's own column or columns, then marks the request (`status`, `reviewedAt`, `reviewedByRowId`). The value
-is written first and the request marked second, so a failure leaves a request still pending, never one marked approved
-whose value was not saved. The map from the app's `fieldId` to the `members` columns is the developer's
-ADMIN_INTEGRATION note and lives in `server/change-fields.js`; each field also says how the app's text becomes what the
-column holds:
+**Logic.** The Noah API now decides these (`GET /admin/profile-requests?status=` and `POST /admin/profile-requests/:id/decide`
+with `approve` or `reject`). It writes the value into the right column in the right format and **sends the member a push**
+("Your change was approved"); a reason given when turning one down is shown to the member. So when `NOAH_ADMIN_API_KEY`
+is set the console uses the API, and the screen says the member is notified. A **new profile photo** (`fieldId = photo`)
+comes the same way: `newValue` is a file id, which the office looks at (the new one beside the current one, read through
+the console and recorded in the audit log) before approving, and approving makes it the member's profile photo.
+
+**The table fallback.** If the key is not set, or the Noah deployment does not have those calls yet (it answers 404), the
+console does what it did before: it writes `newValue` into the member's own column or columns itself, then marks the
+request (`status`, `reviewedAt`, `reviewedByRowId`). The value is written first and the request marked second, so a
+failure leaves a request still pending, never one marked approved whose value was not saved. Nobody is told on this path,
+and the screen says so in a warning. A network failure to the API does NOT fall back, because deciding by the table would
+skip the member's notification. The status words in the table are read loosely, as the developer's note says: `approved` or
+`Approved`, `rejected`, `Rejected` or `Turned down`; anything else counts as still waiting.
+
+The map from the app's `fieldId` to the `members` columns is the developer's ADMIN_INTEGRATION note and lives in
+`server/change-fields.js`. The API applies it itself, so the console uses the map to label a request, to guard the cases
+below, and for the fallback. Each field says how the app's text becomes what the column holds:
 
 | The app sends | The console stores |
 |---|---|
@@ -216,8 +228,9 @@ column holds:
 | `corr_address`, `corr_location`, `corr_pin` | the same, into the postal columns |
 
 **What is not applied.** `phone1` is the number the member signs in with (`users.number`). Writing it to `members` alone
-would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number,
-so the screen says why and offers Turn down only. A `fieldId` the console does not know can also only be turned down.
+would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number.
+The API refuses it too (409 `change_by_hand`). The screen says why and offers Turn down only: change the number by hand
+in `users` and `members`, then turn the request down with a note such as "Changed". A `fieldId` the console does not know can also only be turned down.
 
 **Checks.** A value that cannot be applied (a location without a state, a blood group that does not exist, a date in the
 future) is flagged on the row before anyone presses Approve, and refused with 422 if they do. Where a value is split or
@@ -225,9 +238,9 @@ changed on the way in, the row shows "Will be saved as". Email, phones, addresse
 Aadhaar, Emirates ID, passport, voter, driving licence) need the permission to see contact details (`members.pii`) to
 approve, and are masked in the list without it.
 
-**Not done, and why.** The member is not told about the decision: the developer's note says nothing sends a push yet, so
-the screen says so. When the API grows a call for it, it replaces the table write here.
+**Only on the fallback.** The member is not told, and a value is checked by the console rather than the API.
 
-**Where.** `server/change-fields.js`, `server/noah-schema.js` (`loadChangeRequests`, `decideChangeRequest`),
-`server/routes/changes.js`, `src/modules/members/ChangeRequests.tsx`. Tests: "Change requests: the app's own field ids" in
+**Where.** `server/noah-api.js` (`listProfileRequests`, `decideProfileRequest`), `server/profile-requests.js`,
+`server/change-fields.js`, `server/noah-schema.js` (the fallback), `server/routes/changes.js` (including the photograph
+route), `src/modules/members/ChangeRequests.tsx`. Tests: "Change requests: the app's own field ids" in
 `server/test-schema-offline.mjs`, and the requests section of `server/test-offline-stack.mjs`.

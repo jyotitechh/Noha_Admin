@@ -531,7 +531,7 @@ section('Correcting a person, and what the app asks to have changed');
   /* ---------- the requests the app files ---------- */
   check('change requests need a sign-in and the permission', (await call('GET', '/change-requests')).status === 401 && (await call('GET', '/change-requests', null, FT)).status === 403);
   const pending = await call('GET', '/change-requests?status=pending', null, BT);
-  check('the pending requests are listed, with who asked and what changes', pending.status === 200 && pending.body?.rows?.length === 15 && pending.body.rows.some((r) => r.fieldId === 'firstName' && r.newValue === 'Anandan' && /Anand/.test(r.memberName)), pending.text.slice(0, 200));
+  check('the pending requests are listed, with who asked and what changes', pending.status === 200 && pending.body?.rows?.length === 16 && pending.body.rows.some((r) => r.fieldId === 'firstName' && r.newValue === 'Anandan' && /Anand/.test(r.memberName)), pending.text.slice(0, 200));
   check('...marking the one the console cannot place', pending.body.rows.find((r) => r.fieldId === 'favouriteColour')?.known === false);
 
   const nameReq = pending.body.rows.find((r) => r.fieldId === 'firstName');
@@ -561,18 +561,45 @@ section('Correcting a person, and what the app asks to have changed');
   const byField = (f) => fresh.find((r) => r.fieldId === f);
   check('a documented id is labelled for the office (first_name is "First name")', byField('first_name')?.fieldLabel === 'First name' && byField('first_name')?.known === true);
   check('the sign-in number is listed with the reason it cannot be applied', byField('phone1')?.known === false && /signs in/.test(byField('phone1')?.blocked || ''), JSON.stringify(byField('phone1')));
-  check('an address request shows how it will be split, before approving', byField('address')?.saves?.length === 2 && byField('address').saves[1].value === 'Dadar', JSON.stringify(byField('address')?.saves));
-  check('a location that cannot be split is flagged in the list', fresh.some((r) => r.fieldId === 'location' && /city, a state and a country/.test(r.problem || '')));
+  /* Through the Noah API the API itself checks and converts the value; only the table path previews it. */
+  check('the list says which way requests are decided', (await call('GET', '/change-requests?status=pending', null, BT)).body?.via === (NO_KEY ? 'table' : 'api'));
+  if (NO_KEY) {
+    check('an address request shows how it will be split, before approving', byField('address')?.saves?.length === 2 && byField('address').saves[1].value === 'Dadar', JSON.stringify(byField('address')?.saves));
+    check('a location that cannot be split is flagged in the list', fresh.some((r) => r.fieldId === 'location' && /city, a state and a country/.test(r.problem || '')));
+  }
   const phoneReq = byField('phone1');
   const blocked = await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, BT);
-  check('approving the sign-in number is refused (409, blocked_field)', blocked.status === 409 && blocked.body?.code === 'blocked_field', blocked.text.slice(0, 160));
-  const badLoc = fresh.find((r) => r.fieldId === 'location' && r.problem);
+  check('approving the sign-in number is refused (409)', blocked.status === 409 && blocked.body?.code === (NO_KEY ? 'blocked_field' : 'change_by_hand'), blocked.text.slice(0, 160));
+  const badLoc = fresh.find((r) => r.id === '27145000000160010');
   check('a location that cannot be split is refused when approved (422)', (await call('POST', `/change-requests/${badLoc.id}/decide`, { approve: true }, BT)).status === 422);
   const addr = await call('POST', `/change-requests/${byField('address').id}/decide`, { approve: true }, BT);
   check('an address request is applied', addr.status === 200 && addr.body?.applied?.join() === 'Address', addr.text.slice(0, 160));
   const afterAddr = (await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token)).body?.values || {};
   check('...the last part is now the area, the rest the address', afterAddr.address === '14 Church Road, Near the school' && afterAddr.area === 'Dadar', JSON.stringify([afterAddr.address, afterAddr.area]));
   const noPii = (await call('GET', '/change-requests?status=pending', null, FT)).status;
+  if (!NO_KEY) {
+    /* The decision went through the API, which tells the member. */
+    check('...and the reply says the member was notified', addr.body?.via === 'api' && addr.body?.notified?.pushed === 1, JSON.stringify([addr.body?.via, addr.body?.notified]));
+
+    /* A new profile photograph. */
+    const photoReq = byField('photo');
+    check('a photograph request is marked as one', photoReq?.photo === true && photoReq.fieldLabel === 'Profile photo', JSON.stringify(photoReq));
+    const newPic = await call('GET', `/change-requests/${photoReq.id}/photo/new`, null, BT);
+    check('the new photograph can be looked at through the console', newPic.status === 200 && /image\/png/.test(newPic.type || '') && /FAKE-photo/.test(newPic.text), `${newPic.status} ${newPic.type} ${newPic.text.slice(0, 40)}`);
+    check('...and so can the one it replaces', (await call('GET', `/change-requests/${photoReq.id}/photo/old`, null, BT)).status === 200);
+    check('...but not by someone who may not decide (403)', (await call('GET', `/change-requests/${photoReq.id}/photo/new`, null, FT)).status === 403);
+    check('...nor for a request that is not about a photograph (400)', (await call('GET', `/change-requests/${byField('first_name').id}/photo/new`, null, BT)).status === 400);
+    check('...and which must be old or new (400)', (await call('GET', `/change-requests/${photoReq.id}/photo/other`, null, BT)).status === 400);
+    check('viewing a photograph is in the audit log', ((await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || []).some((a) => /Viewed a profile photograph/.test(a.action)));
+    const okPic = await call('POST', `/change-requests/${photoReq.id}/decide`, { approve: true }, BT);
+    check('approving a photograph works and tells the member', okPic.status === 200 && okPic.body?.applied?.join() === 'Profile photo' && okPic.body?.notified?.pushed === 1, okPic.text.slice(0, 200));
+    const rejReq = byField('blood_group');
+    const rejected = await call('POST', `/change-requests/${rejReq.id}/decide`, { approve: false, note: 'That is not a blood group we hold.' }, BT);
+    check('turning one down sends the reason to the member', rejected.status === 200 && rejected.body?.via === 'api', rejected.text.slice(0, 200));
+    const turnedDown = (await call('GET', '/change-requests?status=rejected', null, BT)).body?.rows || [];
+    check('...and the list shows the reason', turnedDown.some((r) => r.id === rejReq.id && /not a blood group/.test(r.note)));
+    check('a request already decided is a 409 (not_pending)', await (async () => { const r = await call('POST', `/change-requests/${photoReq.id}/decide`, { approve: true }, BT); return r.status === 409 && r.body?.code === 'not_pending'; })());
+  }
   check('finance still cannot even list them (403)', noPii === 403);
 
   /* put the name and address back, so nothing later depends on this section */

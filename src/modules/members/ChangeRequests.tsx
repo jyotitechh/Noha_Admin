@@ -1,17 +1,22 @@
-/* Changes members ask for from the app.
+/* Changes members ask for from the app (Me > My information), and new profile photos.
 
    A member who wants a detail changed after they were approved files a request
-   in the Noah app. It lands in Catalyst; the office decides here. Approving
-   writes the new value to the member's record, the same place an edit from the
-   console writes, so the app shows it. Turning one down needs a reason.
+   in the Noah app. It lands in Catalyst; the office decides here. Turning one
+   down needs a reason.
+
+   The decision goes through the Noah API when its key is set: it writes the value
+   in the right format and sends the member a push, and a reason for turning it
+   down is shown to the member. Without it (or with an API that lacks the calls)
+   the console writes the record itself and nobody is told; the screen says which.
+   A new photograph is shown beside the current one so it can be looked at first.
 
    A request the console cannot place (a field it does not know) can be turned
    down but not approved: guessing which detail a stranger's request means is how
    the wrong thing gets edited. The mobile number the member signs in with is
    known but never applied from here (server/change-fields.js says why). */
 
-import { useState } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { api, apiUrl, getToken } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
 import { Drawer, useToast } from '@/components/layers';
@@ -20,11 +25,36 @@ import { fdt, since } from '@/lib/format';
 
 interface Request {
   id: string; memberRowId: string | null; memberName: string; fieldId: string; fieldLabel: string | null;
-  known: boolean; contact: boolean; blocked: string | null; saves: { label: string; value: string }[] | null; problem: string | null;
+  known: boolean; contact: boolean; photo?: boolean; blocked: string | null; saves: { label: string; value: string }[] | null; problem: string | null;
   oldValue: string; newValue: string; status: 'pending' | 'approved' | 'rejected';
   note: string; at: Date | null; decidedAt: Date | null; masked?: boolean;
 }
 type Show = 'pending' | 'approved' | 'rejected';
+
+/** One of the two photographs on a photo request, fetched through our own server (audited), never from a public address. */
+function RequestPhoto({ id, which, label }: { id: string; which: 'old' | 'new'; label: string }) {
+  const [src, setSrc] = useState('');
+  const [error, setError] = useState('');
+  const url = useRef('');
+  useEffect(() => {
+    let live = true;
+    fetch(apiUrl(`/change-requests/${id}/photo/${which}`), { headers: { authorization: 'Bearer ' + getToken() } })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Could not load it (${res.status}).`);
+        return res.blob();
+      })
+      .then((b) => { if (live) { url.current = URL.createObjectURL(b); setSrc(url.current); } })
+      .catch((e) => { if (live) setError((e as Error).message); });
+    return () => { live = false; if (url.current) URL.revokeObjectURL(url.current); };
+  }, [id, which]);
+  return (
+    <figure style={{ margin: 0 }}>
+      {src ? <img src={src} alt={label} style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)', display: 'block' }} />
+        : <div className="muted xs" style={{ width: 120, minHeight: 60 }}>{error || 'Loading…'}</div>}
+      <figcaption className="xs muted mt4">{label}</figcaption>
+    </figure>
+  );
+}
 
 export default function ChangeRequests() {
   const [show, setShow] = useState<Show>('pending');
@@ -34,15 +64,19 @@ export default function ChangeRequests() {
   const { toast } = useToast();
   const { can } = useAuth();
 
-  const q = useQuery(() => api.get<{ rows: Request[]; notInProject?: boolean; message?: string }>(`/change-requests?status=${show}`), [show]);
+  const q = useQuery(() => api.get<{ rows: Request[]; notInProject?: boolean; message?: string; via?: 'api' | 'table' }>(`/change-requests?status=${show}`), [show]);
 
   async function decide(r: Request, approve: boolean, note = '') {
     setBusy(r.id);
     try {
-      const out = await api.post<{ applied: string[] }>(`/change-requests/${r.id}/decide`, { approve, note });
-      toast(approve
+      const out = await api.post<{ applied: string[]; via?: 'api' | 'table'; notified?: { pushed?: number } | null }>(`/change-requests/${r.id}/decide`, { approve, note });
+      /* Say whether the member was told: through the API they are, by the table they are not. */
+      const told = out.via === 'api'
+        ? (out.notified?.pushed ? ' The member was notified.' : ' No phone could be reached to notify the member.')
+        : ' The member was not notified.';
+      toast((approve
         ? (out.applied.length ? `Applied: ${out.applied.join(', ')}. The member's record is updated.` : 'Approved. The member already had that value.')
-        : 'Turned down.');
+        : 'Turned down.') + told, out.via === 'api' && !out.notified?.pushed ? 'warn' : undefined);
       setTurning(null);
       setReason('');
       q.reload();
@@ -60,11 +94,17 @@ export default function ChangeRequests() {
 
   return (
     <div className="stack">
-      {/* The Noah API has no call for deciding these yet, so the member is not sent a push or an email. */}
-      <Note tone="mute" icon="info">
-        Deciding here updates the member's record and the app shows the new value, but <b>the member is not sent a notification</b> about
-        it yet (the Noah API has no call for it). Turn-down reasons are kept on the request.
-      </Note>
+      {q.data.via === 'api' ? (
+        <Note tone="ok" icon="bell">
+          Decided through the Noah API: the new value is written in the format the app expects, and <b>the member is sent a notification</b>.
+          The reason for turning a request down is shown to them.
+        </Note>
+      ) : (
+        <Note tone="warn" icon="alert">
+          The Noah API is not being used for these (its key is not set, or it does not have the calls yet), so deciding here updates the member's
+          record but <b>the member is not sent a notification</b>. Set <span className="mono">NOAH_ADMIN_API_KEY</span> on the API to fix that.
+        </Note>
+      )}
       <div className="row wrap gap8">
         <Seg<Show>
           value={show}
@@ -90,9 +130,16 @@ export default function ChangeRequests() {
                   {r.memberName} · {r.fieldLabel ?? r.fieldId}
                   {r.contact && <> <Chip tone="mute" icon="lock">Contact detail</Chip></>}
                 </span>
-                <span className="t2" style={{ display: 'block' }}>
-                  {r.masked ? 'Hidden: it is a contact detail' : <><s>{r.oldValue || 'empty'}</s> → <b>{r.newValue || 'empty'}</b></>}
-                </span>
+                {r.photo ? (
+                  <span className="row gap8 mt8" style={{ alignItems: 'flex-start' }}>
+                    {r.oldValue && <RequestPhoto id={r.id} which="old" label="Now" />}
+                    <RequestPhoto id={r.id} which="new" label="Asked for" />
+                  </span>
+                ) : (
+                  <span className="t2" style={{ display: 'block' }}>
+                    {r.masked ? 'Hidden: it is a contact detail' : <><s>{r.oldValue || 'empty'}</s> → <b>{r.newValue || 'empty'}</b></>}
+                  </span>
+                )}
                 <span className="t2" style={{ display: 'block' }}>
                   Asked {r.at ? `${since(r.at)} · ${fdt(r.at)}` : ''}
                   {r.status !== 'pending' && r.decidedAt ? ` · decided ${fdt(r.decidedAt)}` : ''}
@@ -152,7 +199,7 @@ export default function ChangeRequests() {
           </>
         }
       >
-        <Field label="Why?" hint="Kept with the request, so the next person to look can see why.">
+        <Field label="Why?" hint={q.data.via === 'api' ? 'The member is shown this reason, and it is kept with the request.' : 'Kept with the request, so the next person to look can see why. The member is not told.'}>
           <textarea className="inp" rows={4} value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Drawer>

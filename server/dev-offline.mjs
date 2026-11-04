@@ -77,6 +77,7 @@ const find = (id) => tables[T.appRegistrations].find((r) => r.ROWID === id);
 /* Requests members have filed from Me > Family. Four pending: a child under 18 and a brother who is a member (both for
    Anand), a sister and a mother who have not joined yet; plus two already decided, so the status filter has something to show. */
 const { M } = await import('./fake-catalyst.mjs');
+const { resolveChange, normStatus } = await import('./change-fields.js');
 let idSeq = 27145000000190000;
 const nextId = () => String(++idSeq);
 const familyRequests = [
@@ -200,6 +201,41 @@ http.createServer(async (req, res) => {
     S.clearCache();
     return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 0, emailed: true } });
   }
+  /* ADMIN_INTEGRATION.md, "Profile change requests": the list, and the decision that writes the member's column in the
+     right format and sends the member a push. The harness applies a value with the console's own map. */
+  if (req.method === 'GET' && path === '/admin/profile-requests') {
+    const want = url.searchParams.get('status') || 'pending';
+    const name = (id) => { const x = tables[T.members].find((m) => m.ROWID === String(id)); return x ? [x.firstName, x.lastName].filter(Boolean).join(' ') : null; };
+    return send(res, 200, {
+      requests: tables[T.appChangeRequests].filter((r) => normStatus(r.status) === want).map((r) => ({
+        id: r.ROWID, memberRowId: r.memberRowId, memberName: name(r.memberRowId), fieldId: r.fieldId,
+        oldValue: r.oldValue ?? '', newValue: r.newValue ?? '', status: normStatus(r.status), note: r.note || '',
+        createdAt: new Date(String(r.CREATEDTIME).slice(0, 19).replace(' ', 'T') + '+05:30').toISOString(),
+        ...(r.fieldId === 'photo' ? { newFileUrl: '/admin/files/' + r.newValue, oldFileUrl: r.oldValue ? '/admin/files/' + r.oldValue : null } : {}),
+      })),
+    });
+  }
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/profile-requests\/(\d+)\/decide$/))) {
+    const r = tables[T.appChangeRequests].find((x) => x.ROWID === m[1]);
+    if (!r) return err(res, 404, 'request_not_found', 'No such request.');
+    if (normStatus(r.status) !== 'pending') return err(res, 409, 'not_pending', 'Already decided.');
+    if (!['approve', 'reject'].includes(body.decision)) return err(res, 400, 'bad_decision', 'Decide approve or reject.');
+    if (body.decision === 'approve') {
+      if (r.fieldId === 'phone1') return err(res, 409, 'change_by_hand', 'This is the sign-in number.');
+      const mem = tables[T.members].find((x) => x.ROWID === String(r.memberRowId));
+      const plan = resolveChange(r.fieldId, r.newValue, mem);
+      if (plan.error) return err(res, 422, 'invalid_value', plan.error);
+      for (const p of plan.parts) mem[p.column] = p.value;
+      r.status = 'approved';
+    } else {
+      r.status = 'rejected';
+      r.note = body.note || '';
+    }
+    r.reviewedAt = stamp();
+    S.clearCache();
+    return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 1 } });
+  }
+
   /* ADMIN_INTEGRATION.md, "Family requests": the inbox, and the decision that links both accounts (or adds a child). */
   if (req.method === 'GET' && path === '/admin/family-requests') {
     const want = url.searchParams.get('state') || 'Pending';

@@ -61,7 +61,9 @@ export const CR = { name: '27145000000160001', email: '27145000000160002', unkno
   /* The app's own field ids (ADMIN_INTEGRATION, "Profile change requests"). */
   phone1: '27145000000160006', phone2: '27145000000160007', address: '27145000000160008', location: '27145000000160009',
   locBad: '27145000000160010', smoking: '27145000000160011', income: '27145000000160012', refPhone: '27145000000160013',
-  deceased: '27145000000160014', bloodBad: '27145000000160015', firstName: '27145000000160016' };
+  deceased: '27145000000160014', bloodBad: '27145000000160015', firstName: '27145000000160016',
+  /* A new profile photo: newValue is the file id of the picture the member took. */
+  photo: '27145000000160017' };
 /* Family and groups. */
 export const HH = { rel: '27145000000170001', relOld: '27145000000170002', kid: '27145000000171001', kidLink: '27145000000172001', g1: '27145000000173001', g2: '27145000000173002', gOld: '27145000000173003' };
 export const M = { approved: '27145000000145218', draft: '27145000000143401', office: '27145000000126932', pastor: '27145000000140310', blank: '27145000000146028', boss: '27145000000151002' };
@@ -112,6 +114,7 @@ export const seed = () => ({
   files: [
     { ROWID: '27145000000126953', uid: M.approved, path: '27145000000128680', fileType: 3, extension: 'mp4', size: 3012, archived: false, CREATEDTIME: '2026-10-19 18:02:00:000', remoteSource: '{"name":"declaration.mp4","mimeType":"video/mp4","purpose":"video"}' },
     { ROWID: '27145000000130921', uid: M.approved, path: '27145000000146032', fileType: 1, extension: 'jpg', size: 2004, archived: false, CREATEDTIME: '2026-10-19 18:01:00:000', remoteSource: '{"name":"photo.jpg","mimeType":"image/jpeg","purpose":"photo"}' },
+    { ROWID: '27145000000130999', uid: M.approved, path: '27145000000133999', fileType: 1, extension: 'png', size: 1500, archived: false, CREATEDTIME: '2026-10-21 08:00:00:000', remoteSource: '{"name":"new-photo.png","mimeType":"image/png","purpose":"photo"}' },
     { ROWID: '27145000000142407', uid: M.approved, path: '27145000000133990', fileType: 2, extension: 'png', size: 1008, archived: false, CREATEDTIME: '2026-10-19 18:01:30:000', remoteSource: '{"name":"pan.png","mimeType":"image/png","purpose":"idProof"}' },
   ],
   appRegistrations: [
@@ -168,6 +171,7 @@ export const seed = () => ({
     { ROWID: CR.refPhone, memberRowId: M.approved, fieldId: 'reference_phone', oldValue: '+91 9000011111', newValue: '+91 9000011222', status: 'pending', CREATEDTIME: '2026-10-21 10:10:00:000' },
     { ROWID: CR.deceased, memberRowId: M.office, fieldId: 'deceased', oldValue: '', newValue: '2026-09-30', status: 'pending', CREATEDTIME: '2026-10-21 10:20:00:000' },
     { ROWID: CR.bloodBad, memberRowId: M.approved, fieldId: 'blood_group', oldValue: '', newValue: 'Z+', status: 'pending', CREATEDTIME: '2026-10-21 10:30:00:000' },
+    { ROWID: CR.photo, memberRowId: M.approved, fieldId: 'photo', oldValue: '27145000000130921', newValue: '27145000000130999', status: 'pending', CREATEDTIME: '2026-10-20 08:00:00:000' },
     { ROWID: CR.firstName, memberRowId: M.approved, fieldId: 'first_name', oldValue: 'Anand', newValue: 'Anandan', status: 'pending', CREATEDTIME: '2026-10-21 10:40:00:000' },
   ],
 });
