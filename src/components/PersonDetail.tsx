@@ -386,7 +386,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                   <Btn sm onClick={() => { setRelPick(null); setRelCode(''); setRelQ(''); }}>Change</Btn>
                 </span>
               ) : (
-                <input className="inp" placeholder="Type a name, for example Mehak" value={relQ}
+                <input className="inp" placeholder="Type the name of an existing member" value={relQ}
                   onChange={(e) => { setRelQ(e.target.value); setRelPick(null); }} />
               )}
             </label>
