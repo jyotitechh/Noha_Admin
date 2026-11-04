@@ -15,7 +15,7 @@
    yet". And a role that may not see registrations is told there is one it cannot
    open, rather than being shown nothing. */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
@@ -90,18 +90,27 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [relQ, setRelQ] = useState('');
   const [relResults, setRelResults] = useState<{ rowId: string; name: string; where: string }[]>([]);
   const [relPick, setRelPick] = useState<{ rowId: string; name: string } | null>(null);
+  /* What the search is doing, so the office is never left looking at a box that seems to do nothing. */
+  const [relSearch, setRelSearch] = useState<'idle' | 'searching' | 'done' | 'error'>('idle');
+  const [relError, setRelError] = useState('');
+  const relBox = useRef<HTMLDivElement>(null);
   const [relCode, setRelCode] = useState('');
   const [savingRel, setSavingRel] = useState(false);
 
   /* Look members up as the office types (after a short pause), unless one has already been picked. */
   useEffect(() => {
-    if (relPick || relQ.trim().length < 2) { setRelResults([]); return; }
+    if (relPick || relQ.trim().length < 2) { setRelResults([]); setRelSearch('idle'); return; }
+    let live = true;
+    setRelSearch('searching');
     const t = setTimeout(() => {
       api.get<{ rows: { rowId: string; name: string; where: string }[] }>(`/people/${memberRowId}/relation-candidates?q=${encodeURIComponent(relQ.trim())}`)
-        .then((r) => setRelResults(r.rows)).catch(() => setRelResults([]));
+        .then((r) => { if (live) { setRelResults(r.rows); setRelSearch('done'); setRelError(''); } })
+        .catch((e) => { if (live) { setRelResults([]); setRelSearch('error'); setRelError((e as Error).message); } });
     }, 250);
-    return () => clearTimeout(t);
+    return () => { live = false; clearTimeout(t); };
   }, [relQ, relPick, memberRowId]);
+
+  useEffect(() => { if (relSearch === 'done' || relSearch === 'error') relBox.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [relSearch, relResults]);
 
   if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
   if (!q.data) return <Loading what="this person" />;
@@ -366,37 +375,68 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
 
         {/* Relating another member to this one. One row carries both directions, so they see this person too. */}
         {relationOptions && family.recorded && (
-          <div className="card pad mt8 stack" style={{ gap: 8 }}>
+          <div className="card pad mt8 stack" style={{ gap: 10 }} ref={relBox}>
             <b className="small">Add a relative</b>
-            <input className="inp" placeholder="Search a member by name" value={relQ}
-              onChange={(e) => { setRelQ(e.target.value); setRelPick(null); }} />
-            {!relPick && relResults.length > 0 && (
+
+            <label className="fld">
+              <span className="lbl">1. Find the member</span>
+              {relPick ? (
+                <span className="row gap6">
+                  <Chip tone="ok" icon="check">{relPick.name}</Chip>
+                  <Btn sm onClick={() => { setRelPick(null); setRelCode(''); setRelQ(''); }}>Change</Btn>
+                </span>
+              ) : (
+                <input className="inp" placeholder="Type a name, for example Mehak" value={relQ}
+                  onChange={(e) => { setRelQ(e.target.value); setRelPick(null); }} />
+              )}
+            </label>
+
+            {!relPick && relQ.trim().length === 1 && <span className="xs muted">Type at least two letters.</span>}
+            {!relPick && relSearch === 'searching' && <span className="xs muted">Searching…</span>}
+            {!relPick && relSearch === 'error' && <Note tone="bad" icon="alert">The search did not work: {relError}</Note>}
+            {!relPick && relSearch === 'done' && relResults.length === 0 && (
+              <Note tone="mute" icon="info">
+                No member found called “{relQ.trim()}”. Only people who are on the member register can be added.
+              </Note>
+            )}
+            {!relPick && relSearch === 'done' && relResults.length > 0 && (
               <ul className="list">
-                {relResults.map((c) => (
-                  <li key={c.rowId} className="click" onClick={() => { setRelPick(c); setRelQ(c.name); setRelResults([]); }}>
-                    <span className="grow"><span className="t1">{c.name}</span><span className="t2">{c.where || ' '}</span></span>
-                  </li>
-                ))}
+                {relResults.map((c) => {
+                  const already = family.rows.some((f) => f.rowId === c.rowId);
+                  return (
+                    <li key={c.rowId} className={already ? undefined : 'click'}
+                      onClick={already ? undefined : () => { setRelPick(c); setRelQ(c.name); setRelResults([]); }}>
+                      <span className="grow">
+                        <span className="t1">{c.name}</span>
+                        <span className="t2">{already ? 'Already in this family' : (c.where || 'No address on record')}</span>
+                      </span>
+                      {!already && <Btn sm>Choose</Btn>}
+                    </li>
+                  );
+                })}
               </ul>
             )}
-            {relPick && (
-              <label className="fld">
-                <span className="lbl">{relPick.name} is this person&rsquo;s…</span>
-                <select className="inp" value={relCode} onChange={(e) => setRelCode(e.target.value)}>
-                  <option value="">Pick a relation</option>
-                  {relationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
-                </select>
-                {relationOptions.find((o) => String(o.code) === relCode)?.extra && (
-                  <span className="xs muted">
-                    Uncle, aunt, nephew and niece are kept by the console. Check the Noah app shows them before using them for real members.
-                  </span>
-                )}
-              </label>
-            )}
+
+            <label className="fld">
+              <span className="lbl">2. {relPick ? `${relPick.name} is ${member.name}’s…` : 'What are they to this person?'}</span>
+              <select className="inp" value={relCode} disabled={!relPick} onChange={(e) => setRelCode(e.target.value)}>
+                <option value="">{relPick ? 'Pick a relation' : 'Choose the member first'}</option>
+                {relationOptions.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+              </select>
+              {relationOptions.find((o) => String(o.code) === relCode)?.extra && (
+                <span className="xs muted">
+                  Uncle, aunt, nephew and niece are kept by the console. Check the Noah app shows them before using them for real members.
+                </span>
+              )}
+            </label>
+
             <div>
-              <Btn icon="plus" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>{savingRel ? 'Saving…' : 'Add relation'}</Btn>
+              <span className="lbl" style={{ display: 'block', marginBottom: 6 }}>3. Save</span>
+              <Btn icon="plus" variant="pri" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>
+                {savingRel ? 'Saving…' : 'Add relation'}
+              </Btn>
               <span className="xs muted" style={{ marginLeft: 8 }}>
-                Both people must be in the app. The other person sees this one too, with the reverse relation, automatically.
+                {!relPick ? 'Find the member first.' : !relCode ? 'Now pick the relation.' : 'The other person sees this one too, with the reverse relation, automatically.'}
               </span>
             </div>
           </div>
