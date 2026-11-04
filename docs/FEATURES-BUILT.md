@@ -16,7 +16,7 @@ it then shows on both people.
 **How.**
 1. Person A is already a member and wants Person B added as a relative. A asks the office (from the app, which lands in
    Membership > Family requests), or tells them.
-2. The office opens A's page: **Membership > Member register > open A > Family > Add a relative**.
+2. The office opens A's page: **Membership > Member register > open A > Family > Add a relative**. A **Go to family** button at the top of the page scrolls straight to the Family section, so the office does not have to scroll the whole page.
 3. They search for B, choose what B is to A, and press **Add relation**.
 4. One row is saved. A sees B as the relation chosen; B sees A as the **reverse**, with nothing more to do.
    - B is A's **Father** -> B sees A as **Son** (A is a man) or **Daughter** (A is a woman).

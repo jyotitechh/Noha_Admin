@@ -94,6 +94,8 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [relSearch, setRelSearch] = useState<'idle' | 'searching' | 'done' | 'error'>('idle');
   const [relError, setRelError] = useState('');
   const relBox = useRef<HTMLDivElement>(null);
+  /* The Family section, so a button at the top of the page can scroll straight to it. */
+  const familySection = useRef<HTMLElement>(null);
   const [relCode, setRelCode] = useState('');
   const [savingRel, setSavingRel] = useState(false);
 
@@ -197,6 +199,10 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
         {partnership.isPartner && <Chip tone="brand" icon="heart">Covenant partner</Chip>}
         {member.kid && <Chip tone="plain">Child</Chip>}
         {member.masked && !contact && <Chip tone="mute" icon="lock">Contact details hidden</Chip>}
+        <span className="grow" />
+        <Btn sm icon="users" onClick={() => familySection.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          Go to family
+        </Btn>
       </div>
 
       {/* ---------- who they are ---------- */}
@@ -351,7 +357,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       </section>
 
       {/* ---------- family ---------- */}
-      <section>
+      <section ref={familySection}>
         <div className="sect-title">Family</div>
         {!family.recorded ? (
           <Missing why={family.why} />
