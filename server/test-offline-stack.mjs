@@ -811,7 +811,7 @@ check('someone with no gender set cannot be given a brother or sister (400, says
 const uncle = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 12 }, BT);
 check('an uncle can be added', uncle.status === 201, uncle.text.slice(0, 160));
 check('...Anand sees him as Uncle, and he sees Anand as Nephew (Anand is a man), automatically', (await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID && r.rel === 'Uncle') && (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Nephew'));
-check('the form offers uncle and aunt, with the console-only ones marked', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.filter((o) => o.extra).map((o) => o.label).join() === 'Uncle,Aunt,Nephew,Niece');
+check('the form offers uncle and aunt, with the console-only ones marked', (await call('GET', '/people/' + ANAND_ID, null, BT)).body?.relationOptions?.filter((o) => o.extra).map((o) => o.label).join() === 'Uncle / Aunt,Nephew / Niece');
 await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT);
 check('a person cannot be related to themselves (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: ANAND_ID, relation: 7 }, BT)).status === 400);
 check('a relation that is not on offer is refused (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 99 }, BT)).status === 400);

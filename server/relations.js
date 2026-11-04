@@ -33,7 +33,7 @@ const EXTRA_ON = () => String(process.env.FAMILY_EXTRA_RELATIONS ?? 'on').toLowe
 /** Every code and its plain name. */
 export const RELATION = {
   1: 'Spouse', 2: 'Son', 3: 'Daughter', 4: 'Father', 5: 'Mother', 6: 'Brother', 7: 'Sister', 8: 'Other',
-  9: 'Parent', 10: 'Child', 11: 'Sibling',
+  9: 'Grand Parent', 10: 'Grand Child', 11: 'Sibling',
   12: 'Uncle', 13: 'Aunt', 14: 'Nephew', 15: 'Niece',
 };
 
@@ -43,13 +43,29 @@ export const EXTRA_CODES = [12, 13, 14, 15];
 /** Is this code one the office may assign right now? */
 export const isOffered = (code) => Object.hasOwn(RELATION, code) && (!EXTRA_CODES.includes(Number(code)) || EXTRA_ON());
 
-/* The order the office sees them in: the close family first. */
-const ORDER = [4, 5, 2, 3, 1, 6, 7, 12, 13, 14, 15, 9, 10, 11, 8];
+/* The order the office sees them in: the close family first. Sibling (11) is no longer offered, but rows already saved with it
+   still read as Sibling. Codes 9 and 10 are offered as Grand Parent and Grand Child (the Noah app's own names for them are
+   Parent and Child, so confirm the app's labels before relying on them). */
+const ORDER = [4, 5, 2, 3, 1, 6, 7, 12, 14, 9, 10, 8];
+
+/** The two one-line choices whose stored code is picked from the OTHER person's gender: 12 Uncle / 13 Aunt, 14 Nephew / 15 Niece. */
+export const BY_THEIR_GENDER = { 12: [12, 13], 14: [14, 15] };
+
+/** Uncle/Aunt and Nephew/Niece: the code to store for a person of this gender (1 male, 2 female); null when it is not set. */
+export function genderedCode(code, otherGender) {
+  const pair = BY_THEIR_GENDER[Number(code)] ?? BY_THEIR_GENDER[Number(code) - 1];
+  if (!pair) return Number(code);
+  return Number(otherGender) === 1 ? pair[0] : Number(otherGender) === 2 ? pair[1] : null;
+}
 
 /** The relations the office can pick, for the form: { code, label, extra }. */
 export const relationOptions = () => ORDER
   .filter(isOffered)
-  .map((code) => ({ code, label: code === 1 ? 'Spouse (husband or wife)' : RELATION[code], extra: EXTRA_CODES.includes(code) }));
+  .map((code) => ({
+    code,
+    label: code === 1 ? 'Spouse (husband or wife)' : code === 12 ? 'Uncle / Aunt' : code === 14 ? 'Nephew / Niece' : RELATION[code],
+    extra: EXTRA_CODES.includes(code),
+  }));
 
 /**
  * What to call a relation on a page. `otherGender` is the gender of the person it describes (1 male, 2 female): that

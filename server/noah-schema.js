@@ -39,7 +39,7 @@ import {
 } from './catalyst.js';
 import { MEMBER_FIELDS } from './member-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
-import { kidLabel, relationLabel, reverseRelation, isOffered } from './relations.js';
+import { kidLabel, relationLabel, reverseRelation, isOffered, genderedCode, EXTRA_CODES } from './relations.js';
 
 /* ---------- finding the tables ----------
 
@@ -1558,8 +1558,16 @@ export async function addRelation(memberRowId, otherRowId, code, { by, change = 
   if (!me || !other || asBool(me.archived) || asBool(other.archived)) throw Object.assign(new Error('Both people must be members in the register.'), { code: 'not_found' });
   if (same(me.ROWID, other.ROWID)) throw Object.assign(new Error('A person cannot be related to themselves.'), { code: 'self' });
 
-  const asked = Number(code);
+  let asked = Number(code);
   if (!isOffered(asked)) throw Object.assign(new Error('Pick one of the relations on offer.'), { code: 'bad_relation' });
+  /* "Uncle / Aunt" and "Nephew / Niece" are one choice each; the code stored follows the other person's gender. */
+  if (EXTRA_CODES.includes(asked)) {
+    const byGender = genderedCode(asked, other.gender);
+    if (byGender === null) {
+      throw Object.assign(new Error(`${memberFullName(other)}'s gender is not set, and ${relationLabel(asked, 1)} or ${relationLabel(asked + 1, 2)} depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });
+    }
+    asked = byGender;
+  }
   const back = reverseRelation(asked, me.gender);
   if (back === null) {
     throw Object.assign(new Error(`${memberFullName(me)}'s gender is not set, and that relation depends on it. Set it first (Edit details), then add the relation.`), { code: 'need_gender' });

@@ -23,8 +23,11 @@ it then shows on both people.
    - B is A's **Uncle** -> B sees A as **Nephew** or **Niece**. **Aunt** works the same way.
    - **Spouse** is one choice and reads the same both ways. It is shown as **Husband** or **Wife** by the other person's gender.
 
-**The relations on offer:** Father, Mother, Son, Daughter, Spouse (shown as Husband or Wife), Brother, Sister, Uncle, Aunt,
-Nephew, Niece, Parent, Child, Sibling, Other.
+**The relations on offer (stored code in brackets):** Father (4), Mother (5), Son (2), Daughter (3), Spouse (1, shown as Husband or
+Wife), Brother (6), Sister (7), Uncle / Aunt (12 or 13, picked by the other person's gender), Nephew / Niece (14 or 15, the same
+way), Grand Parent (9), Grand Child (10), Other (8). Sibling (11) is no longer offered; rows already saved with it still read as
+Sibling. 9 and 10 are named Parent and Child in the Noah app, so check the app's labels. A person already in the family can be
+chosen again to **change** their relation. The member page has a button for each section at the top, to jump to it.
 
 **Rules.** Both people must be members. The same two people cannot be related twice (remove the old relation first). A
 gendered relation needs the first person's gender set, and the screen says so if it is not. Removing a relation takes it away from both people.

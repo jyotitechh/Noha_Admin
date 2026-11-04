@@ -1008,8 +1008,8 @@ reset(seed());
   /* directional codes: A2B is what B is to A */
   tables[T.membersRelations].push({ ROWID: '27145000000170009', memberIdA: M.approved, memberIdB: M.pastor, relationshipA2B: 9, relationshipB2A: 10, isArchived: false });
   S.clearCache();
-  check('a directional relation reads the right way round: B is a Parent of A, so A sees "Parent"', (await S.loadPerson(M.approved)).family.rows.find((r) => r.rowId === M.pastor)?.rel === 'Parent');
-  check('...and B sees "Child"', (await S.loadPerson(M.pastor)).family.rows.find((r) => r.rowId === M.approved)?.rel === 'Child');
+  check('a directional relation reads the right way round: B is a Parent of A, so A sees "Grand Parent"', (await S.loadPerson(M.approved)).family.rows.find((r) => r.rowId === M.pastor)?.rel === 'Grand Parent');
+  check('...and B sees "Grand Child"', (await S.loadPerson(M.pastor)).family.rows.find((r) => r.rowId === M.approved)?.rel === 'Grand Child');
 
   /* Catalyst cannot be read: say so, do not show an empty family */
   const realGet = S.io.getRows;
@@ -1081,12 +1081,21 @@ const REL = await import('./relations.js');
   check('a spouse reads as Husband or Wife by the other person\'s gender, else Spouse', REL.relationLabel(1, 1) === 'Husband' && REL.relationLabel(1, 2) === 'Wife' && REL.relationLabel(1) === 'Spouse');
   check('the form offers father, mother, son, daughter, spouse, uncle and aunt, closest family first',
     REL.relationOptions().map((o) => o.label).slice(0, 5).join() === 'Father,Mother,Son,Daughter,Spouse (husband or wife)'
-    && ['Uncle', 'Aunt', 'Nephew', 'Niece'].every((l) => REL.relationOptions().some((o) => o.label === l && o.extra === true)));
+    && ['Uncle / Aunt', 'Nephew / Niece'].every((l) => REL.relationOptions().some((o) => o.label === l && o.extra === true)));
+  check('the form offers Grand Parent and Grand Child, and no longer Sibling', REL.relationOptions().some((o) => o.code === 9 && o.label === 'Grand Parent') && REL.relationOptions().some((o) => o.code === 10 && o.label === 'Grand Child') && !REL.relationOptions().some((o) => o.code === 11));
+  check('an old Sibling row (11) still reads as Sibling', REL.relationLabel(11) === 'Sibling');
 
   process.env.FAMILY_EXTRA_RELATIONS = 'off';
   check('uncle and aunt can be switched off (FAMILY_EXTRA_RELATIONS=off)', !REL.isOffered(12) && !REL.relationOptions().some((o) => o.extra) && REL.isOffered(4));
   delete process.env.FAMILY_EXTRA_RELATIONS;
   check('...and are on again without it', REL.isOffered(12) && REL.isOffered(15));
+}
+
+reset(seed());
+{
+  /* "Uncle / Aunt" is one choice: a man is stored as Uncle (12), a woman as Aunt (13). Anitha is a woman, Anand a man. */
+  const woman = await S.addRelation(M.approved, M.boss, 12);
+  check('Uncle / Aunt picked for a woman is stored as Aunt (13)', woman.is === 'Aunt' && tables[T.membersRelations].some((r) => r.memberIdA === M.approved && r.memberIdB === M.boss && Number(r.relationshipA2B) === 13), JSON.stringify(woman));
 }
 
 reset(seed());

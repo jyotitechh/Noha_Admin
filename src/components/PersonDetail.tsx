@@ -94,8 +94,10 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [relSearch, setRelSearch] = useState<'idle' | 'searching' | 'done' | 'error'>('idle');
   const [relError, setRelError] = useState('');
   const relBox = useRef<HTMLDivElement>(null);
-  /* The Family section, so a button at the top of the page can scroll straight to it. */
-  const familySection = useRef<HTMLElement>(null);
+  /* Each section of the page, so the buttons at the top can scroll straight to it. */
+  const sections = useRef<Record<string, HTMLElement | null>>({});
+  const place = (key: string) => (el: HTMLElement | null) => { sections.current[key] = el; };
+  const jump = (key: string) => sections.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const [relCode, setRelCode] = useState('');
   /* True when the person picked is already in this family: saving then changes their relation. */
   const [relChange, setRelChange] = useState(false);
@@ -201,14 +203,24 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
         {partnership.isPartner && <Chip tone="brand" icon="heart">Covenant partner</Chip>}
         {member.kid && <Chip tone="plain">Child</Chip>}
         {member.masked && !contact && <Chip tone="mute" icon="lock">Contact details hidden</Chip>}
-        <span className="grow" />
-        <Btn sm icon="users" onClick={() => familySection.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-          Go to family
-        </Btn>
       </div>
 
+      {/* Jump to a section instead of scrolling the whole page. */}
+      <nav className="row wrap gap6" aria-label="Sections of this page">
+        {([
+          ['who', 'Who they are', 'user'],
+          ['registration', 'Registration', 'file'],
+          ['care', 'Pastoral care', 'heart'],
+          ['partnership', 'Partnership', 'award'],
+          ['family', 'Family', 'users'],
+          ['groups', 'Groups', 'tree'],
+        ] as const).map(([key, label, icon]) => (
+          <Btn key={key} sm icon={icon} onClick={() => jump(key)}>{label}</Btn>
+        ))}
+      </nav>
+
       {/* ---------- who they are ---------- */}
-      <section>
+      <section ref={place('who')}>
         <div className="row">
           <div className="sect-title grow">Who they are</div>
           {q.data.edit && <Btn sm icon="edit" onClick={() => setEditing(true)}>Edit details</Btn>}
@@ -249,7 +261,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       )}
 
       {/* ---------- the registration, with photo, ID and video open ---------- */}
-      <section>
+      <section ref={place('registration')}>
         <div className="sect-title">Registration</div>
         {registration ? (
           <>
@@ -304,7 +316,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       </section>
 
       {/* ---------- pastoral care ---------- */}
-      <section>
+      <section ref={place('care')}>
         <div className="sect-title">Pastoral care</div>
         <Kv rows={[
           ['Pastor', pastoral.pastor ? <b key="p">{pastoral.pastor.name}</b> : <span className="muted">Not assigned</span>],
@@ -348,7 +360,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       </section>
 
       {/* ---------- partnership ---------- */}
-      <section>
+      <section ref={place('partnership')}>
         <div className="sect-title">Partnership</div>
         <Kv rows={[
           ['Covenant partner', partnership.isPartner ? 'Yes' : 'No'],
@@ -359,7 +371,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       </section>
 
       {/* ---------- family ---------- */}
-      <section ref={familySection}>
+      <section ref={place('family')}>
         <div className="sect-title">Family</div>
         {!family.recorded ? (
           <Missing why={family.why} />
@@ -448,7 +460,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       </section>
 
       {/* ---------- groups ---------- */}
-      <section>
+      <section ref={place('groups')}>
         <div className="sect-title">Groups</div>
         {!groups.recorded ? (
           <Missing why={groups.why} />
