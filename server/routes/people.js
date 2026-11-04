@@ -100,10 +100,10 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
   app.post('/api/people/:id/relations', requireSession, requirePerm('members.edit'), async (req, res) => {
     if (!(live() && isNoah())) return res.status(409).json({ error: 'Adding a relation needs the Catalyst connection. The sample data cannot be saved.' });
     try {
-      const r = await addRelation(req.params.id, req.body?.otherRowId, req.body?.relation);
+      const r = await addRelation(req.params.id, req.body?.otherRowId, req.body?.relation, { change: req.body?.change === true });
       await writeAudit({
         actor: req.user.name, role: roleById(req.session.role).name,
-        action: 'Added a family relation', module: 'Membership', record: req.params.id,
+        action: r.changed ? 'Changed a family relation' : 'Added a family relation', module: 'Membership', record: req.params.id,
         before: null, after: { [r.me]: r.backIs, [r.other]: r.is }, remark: '', ip: req.ip || '',
       });
       res.status(201).json({ ok: true, person: await withChoices(await personProfile(req.params.id), req.session.role) });

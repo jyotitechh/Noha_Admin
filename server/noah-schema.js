@@ -1548,9 +1548,10 @@ async function familyAndGroups(memberRowId, memberByRow) {
 
 /**
  * Relate `otherRowId` to `memberRowId`: the other person is the member's `code` (7 = Brother, 1 = Parent, ...).
+ * With `change`, a person already in the family has the relation corrected instead of refused.
  * Throws { code: 'not_found' | 'self' | 'exists' | 'bad_relation' | 'need_gender' }.
  */
-export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
+export async function addRelation(memberRowId, otherRowId, code, { by, change = false } = {}) {
   const { members } = await snapshot();
   const me = members.find((m) => same(m.ROWID, memberRowId));
   const other = members.find((m) => same(m.ROWID, otherRowId));
@@ -1567,9 +1568,19 @@ export async function addRelation(memberRowId, otherRowId, code, { by } = {}) {
   const h = await householdRows();
   const dup = h.relations.filter(isLiveRow).find((r) =>
     (same(r.memberIdA, me.ROWID) && same(r.memberIdB, other.ROWID)) || (same(r.memberIdA, other.ROWID) && same(r.memberIdB, me.ROWID)));
+  if (dup && change) {
+    /* Already related: correct the relation on the same row, so both people see the new one and no second row is made. */
+    const meIsA = same(dup.memberIdA, me.ROWID);
+    await io.update(T.membersRelations, {
+      ROWID: String(dup.ROWID),
+      relationshipA2B: meIsA ? asked : back, relationshipB2A: meIsA ? back : asked,
+    });
+    clearCache();
+    return { me: memberFullName(me), other: memberFullName(other), is: relationLabel(asked, other.gender), backIs: relationLabel(back, me.gender), changed: true };
+  }
   if (dup) {
     const was = same(dup.memberIdA, me.ROWID) ? dup.relationshipA2B : dup.relationshipB2A;
-    throw Object.assign(new Error(`${memberFullName(other)} is already on this person's family as ${(relationLabel(was, other.gender) || 'a relation').toLowerCase()}. Remove that first to change it.`), { code: 'exists' });
+    throw Object.assign(new Error(`${memberFullName(other)} is already on this person's family as ${(relationLabel(was, other.gender) || 'a relation').toLowerCase()}. Choose them and pick a new relation to change it.`), { code: 'exists' });
   }
 
   await io.insert(T.membersRelations, {

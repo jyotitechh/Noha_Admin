@@ -796,6 +796,9 @@ check('...Anand sees him as Father', (await famOf(ANAND_ID)).some((r) => r.rowId
 check('...and Fr Thomas sees Anand as Son (Anand is male), with nothing added on his side', (await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID && r.rel === 'Son'));
 check('the same two people cannot be related twice (400)', (await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 7 }, BT)).status === 400);
 check('...nor from the other side', (await call('POST', '/people/' + THOMAS_ID + '/relations', { otherRowId: ANAND_ID, relation: 2 }, BT)).status === 400);
+const changed = await call('POST', '/people/' + ANAND_ID + '/relations', { otherRowId: THOMAS_ID, relation: 12, change: true }, BT);
+check('someone already in the family can have the relation changed', changed.status === 201, changed.text.slice(0, 160));
+check('...both sides show the new relation, and there is still one row (Uncle / Nephew)', (await famOf(ANAND_ID)).filter((r) => r.rowId === THOMAS_ID).map((r) => r.rel).join() === 'Uncle' && (await famOf(THOMAS_ID)).filter((r) => r.rowId === ANAND_ID).map((r) => r.rel).join() === 'Nephew');
 const gone = await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT);
 check('a relation can be removed, and it goes from both sides', gone.status === 200 && !(await famOf(ANAND_ID)).some((r) => r.rowId === THOMAS_ID) && !(await famOf(THOMAS_ID)).some((r) => r.rowId === ANAND_ID));
 check('removing what is not there is a 404', (await call('DELETE', '/people/' + ANAND_ID + '/relations/' + THOMAS_ID, null, BT)).status === 404);

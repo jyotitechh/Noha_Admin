@@ -97,6 +97,8 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   /* The Family section, so a button at the top of the page can scroll straight to it. */
   const familySection = useRef<HTMLElement>(null);
   const [relCode, setRelCode] = useState('');
+  /* True when the person picked is already in this family: saving then changes their relation. */
+  const [relChange, setRelChange] = useState(false);
   const [savingRel, setSavingRel] = useState(false);
 
   /* Look members up as the office types (after a short pause), unless one has already been picked. */
@@ -151,9 +153,9 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
     if (!relPick || !relCode) return;
     setSavingRel(true);
     try {
-      await api.post(`/people/${memberRowId}/relations`, { otherRowId: relPick.rowId, relation: Number(relCode) });
-      toast(`${relPick.name} was added to the family. They see this person on their side too.`);
-      setRelQ(''); setRelPick(null); setRelCode(''); setRelResults([]);
+      await api.post(`/people/${memberRowId}/relations`, { otherRowId: relPick.rowId, relation: Number(relCode), change: relChange });
+      toast(relChange ? `${relPick.name}’s relation was changed. They see it on their side too.` : `${relPick.name} was added to the family. They see this person on their side too.`);
+      setRelQ(''); setRelPick(null); setRelCode(''); setRelResults([]); setRelChange(false);
       q.reload();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -389,11 +391,11 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
               {relPick ? (
                 <span className="row gap6">
                   <Chip tone="ok" icon="check">{relPick.name}</Chip>
-                  <Btn sm onClick={() => { setRelPick(null); setRelCode(''); setRelQ(''); }}>Change</Btn>
+                  <Btn sm onClick={() => { setRelPick(null); setRelCode(''); setRelQ(''); setRelChange(false); }}>Change</Btn>
                 </span>
               ) : (
                 <input className="inp" placeholder="Type the name of an existing member" value={relQ}
-                  onChange={(e) => { setRelQ(e.target.value); setRelPick(null); }} />
+                  onChange={(e) => { setRelQ(e.target.value); setRelPick(null); setRelChange(false); }} />
               )}
             </label>
 
@@ -410,13 +412,13 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                 {relResults.map((c) => {
                   const already = family.rows.some((f) => f.rowId === c.rowId);
                   return (
-                    <li key={c.rowId} className={already ? undefined : 'click'}
-                      onClick={already ? undefined : () => { setRelPick(c); setRelQ(c.name); setRelResults([]); }}>
+                    <li key={c.rowId} className="click"
+                      onClick={() => { setRelPick(c); setRelQ(c.name); setRelResults([]); setRelChange(already); }}>
                       <span className="grow">
                         <span className="t1">{c.name}</span>
-                        <span className="t2">{already ? 'Already in this family' : (c.where || 'No address on record')}</span>
+                        <span className="t2">{already ? 'Already in this family. Choose to change the relation.' : (c.where || 'No address on record')}</span>
                       </span>
-                      {!already && <Btn sm>Choose</Btn>}
+                      <Btn sm>{already ? 'Change relation' : 'Choose'}</Btn>
                     </li>
                   );
                 })}
@@ -433,7 +435,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
 
             <div>
               <Btn variant="pri" disabled={!relPick || !relCode || savingRel} onClick={addRelative}>
-                {savingRel ? 'Saving…' : 'Save'}
+                {savingRel ? 'Saving…' : relChange ? 'Save change' : 'Save'}
               </Btn>
               {(!relPick || !relCode) && (
                 <span className="xs muted" style={{ marginLeft: 8 }}>
