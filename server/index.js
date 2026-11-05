@@ -14,7 +14,7 @@
 import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
-import { channels } from './deliver.js';
+import { channels, emailProvider } from './deliver.js';
 import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { demoMode, DEMO_MOBILE } from './demo.js';
@@ -215,6 +215,8 @@ app.get('/api/meta', (_req, res) => {
     /* Which ways of getting a code are really set up: the sign-in screen says
        "we will text you" or "we will email you" only when that is true. */
     codeChannels: channels(),
+    /* Which email provider sends the code first, 'catalyst' or 'smtp' (null when email is off). */
+    emailProvider: emailProvider(),
   });
 });
 

@@ -116,6 +116,8 @@ export const SCOPES = [
   'ZohoCatalyst.files.READ',
   /* Pictures uploaded from the content forms go to a Stratus bucket (server/pictures.js). */
   'Stratus.fileop.CREATE',
+  /* Sign-in codes sent by email through Catalyst Mail (Cloud Scale > Mail), see sendMail. */
+  'ZohoCatalyst.email.CREATE',
 ];
 
 /* Development or Production. Catalyst wants it named on every call. There is
@@ -441,6 +443,23 @@ export const remove = (tableId, rowIds) =>
   call(`/baas/v1/project/${PROJECT_ID}/table/${tableId}/row?ids=${[].concat(rowIds).map(String).join(',')}`, {
     method: 'DELETE',
   });
+
+/** Send one email through Catalyst Mail (Cloud Scale > Mail). `from` must be a sender address that is verified
+    there, on a domain verified with SPF and DKIM: Catalyst refuses anything else, and a public address such as
+    Gmail cannot be verified. Needs ZohoCatalyst.email.CREATE. Not counted in `spent`: that is Data Store use. */
+export async function sendMail({ from, to, subject, html }) {
+  try {
+    return await call(`/baas/v1/project/${PROJECT_ID}/email/send`, {
+      method: 'POST',
+      body: JSON.stringify({ from_email: from, to_email: [to], subject, content: html, html_mode: true }),
+    });
+  } catch (err) {
+    if (/scope/i.test(err.message)) {
+      throw new Error(`${err.message} The Catalyst token has no email scope: add ZohoCatalyst.email.CREATE and run npm run catalyst:connect again.`);
+    }
+    throw err;
+  }
+}
 
 /** Escape a value for ZCQL. Single quotes are doubled, as in SQL. */
 export const q = (v) => {

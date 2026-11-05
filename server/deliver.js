@@ -5,8 +5,14 @@
    up here is simply "not configured", and sign-in says so; it never pretends
    to have sent something.
 
-   EMAIL is SMTP, so it works with Zoho Mail, Gmail, SendGrid, Brevo and so on:
-     SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE
+   EMAIL goes out one of two ways:
+     Catalyst Mail (Cloud Scale > Mail), through the same Catalyst sign-in the console already has:
+       MAIL_CATALYST_FROM, a sender address verified in Catalyst on a domain verified with SPF and DKIM
+       (not a Gmail or Yahoo address). The Catalyst token also needs the scope ZohoCatalyst.email.CREATE.
+     SMTP, so Zoho Mail, Gmail, SendGrid, Brevo and so on work too:
+       SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE
+   MAIL_PROVIDER = catalyst or smtp says which goes first. Left out, SMTP goes first when it is set up, else Catalyst.
+   If the first fails and the other is set up, the other is tried, so one provider being down does not lock anyone out.
    SMS is Twilio today:
      TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and one of
      TWILIO_FROM (a number) or TWILIO_MESSAGING_SERVICE_SID
@@ -16,12 +22,29 @@
    the React app, and none of it is logged. */
 
 import nodemailer from 'nodemailer';
+import * as catalyst from './catalyst.js';
 
 const env = (k) => String(process.env[k] ?? '').trim();
 
 /* ---------- what is set up ---------- */
 
-const emailReady = () => !!(env('SMTP_HOST') && env('SMTP_USER') && env('SMTP_PASS') && env('SMTP_FROM'));
+const mailers = {
+  smtp: { ready: () => !!(env('SMTP_HOST') && env('SMTP_USER') && env('SMTP_PASS') && env('SMTP_FROM')), send: sendSmtp },
+  catalyst: { ready: () => !!(env('MAIL_CATALYST_FROM') && catalyst.configured()), send: sendCatalystMail },
+};
+
+/** The email providers that are set up, the one to try first coming first. */
+const mailOrder = () => {
+  const first = ['smtp', 'catalyst'].includes(env('MAIL_PROVIDER').toLowerCase())
+    ? env('MAIL_PROVIDER').toLowerCase()
+    : (mailers.smtp.ready() ? 'smtp' : 'catalyst');
+  return [first, first === 'smtp' ? 'catalyst' : 'smtp'].filter((name) => mailers[name].ready());
+};
+
+const emailReady = () => mailOrder().length > 0;
+
+/** Which provider a code would be emailed by first ('smtp' or 'catalyst'), or null; for the health check. */
+export const emailProvider = () => mailOrder()[0] ?? null;
 
 const smsProviders = {
   twilio: {
@@ -42,9 +65,29 @@ export const channels = () => ({ email: emailReady(), sms: smsReady() });
    (The same trick the Catalyst client uses to run against a fake.) */
 
 export const transport = {
-  email: sendSmtp,
+  email: sendEmail,
   sms: (to, text) => smsProvider().send(to, text),
 };
+
+/** Email by the first provider that is set up; if it fails, by the next. The last failure is the one thrown. */
+async function sendEmail(mail) {
+  const order = mailOrder();
+  let last = new Error('Email is not set up on this server.');
+  for (const [i, name] of order.entries()) {
+    try {
+      await mailers[name].send(mail);
+      return;
+    } catch (err) {
+      last = err;
+      if (i < order.length - 1) console.error(`[deliver] email by ${name} failed (${err.message}); trying ${order[i + 1]}`);
+    }
+  }
+  throw last;
+}
+
+async function sendCatalystMail({ to, subject, html }) {
+  await catalyst.sendMail({ from: env('MAIL_CATALYST_FROM'), to, subject, html });
+}
 
 async function sendSmtp({ to, subject, text, html }) {
   const port = Number(env('SMTP_PORT')) || 587;

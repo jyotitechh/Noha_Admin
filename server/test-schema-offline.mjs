@@ -554,7 +554,8 @@ const codeIn = (msg) => (msg.text.match(/\b(\d{6})\b/) || [])[1];
 
 const EMAIL = { SMTP_HOST: 'smtp.test', SMTP_USER: 'u', SMTP_PASS: 'p', SMTP_FROM: 'Karuna Sadan <no-reply@karunasadan.test>' };
 const TWILIO = { SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+15005550006', TWILIO_MESSAGING_SERVICE_SID: undefined };
-const NONE = Object.fromEntries(Object.keys({ ...EMAIL, ...TWILIO }).map((k) => [k, undefined]));
+const CATMAIL = { MAIL_CATALYST_FROM: 'no-reply@karunasadan.test' };
+const NONE = Object.fromEntries(Object.keys({ ...EMAIL, ...TWILIO, ...CATMAIL, MAIL_PROVIDER: 1 }).map((k) => [k, undefined]));
 
 /* Time is moved by hand, so the resend rules can be tested without waiting. */
 const realNow = Date.now;
@@ -805,6 +806,75 @@ try {
     check('a mail server that cannot be reached is a plain failure, not a hang or a crash',
       failure?.code === 'delivery_failed' && /could not be emailed/.test(failure.message) && !/ECONNREFUSED|127\.0\.0\.1/.test(failure.message), failure?.message);
   });
+
+  /* ---------- email through Catalyst Mail ----------
+     fetch is stubbed throughout: nothing reaches Catalyst, whatever .env.local holds. */
+  const realFetch = globalThis.fetch;
+  const mailCalls = [];
+  const stubCatalyst = (answer) => {
+    mailCalls.length = 0;
+    globalThis.fetch = async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }), { status: 200 });
+      mailCalls.push({ url: u, init });
+      return answer();
+    };
+  };
+  const okMail = () => new Response(JSON.stringify({ status: 'success', data: {} }), { status: 200 });
+  const quietly = async (fn) => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
+
+  await withEnv({ ...NONE }, async () => {
+    check('Catalyst Mail needs a sender address: without one, email is off', !D.channels().email && D.emailProvider() === null);
+  });
+  await withEnv({ ...NONE, ...CATMAIL }, async () => {
+    check('with a sender address (and the Catalyst sign-in), Catalyst Mail turns email on', D.channels().email && D.emailProvider() === 'catalyst');
+  });
+  await withEnv({ ...NONE, ...EMAIL }, async () => {
+    check('SMTP alone still sends first, as before', D.emailProvider() === 'smtp');
+  });
+  await withEnv({ ...NONE, ...EMAIL, ...CATMAIL }, async () => {
+    check('with both set up and no choice made, SMTP goes first', D.emailProvider() === 'smtp');
+  });
+  await withEnv({ ...NONE, ...EMAIL, ...CATMAIL, MAIL_PROVIDER: 'catalyst' }, async () => {
+    check('MAIL_PROVIDER=catalyst puts Catalyst Mail first', D.emailProvider() === 'catalyst');
+  });
+  await withEnv({ ...NONE, ...EMAIL, MAIL_PROVIDER: 'catalyst' }, async () => {
+    check('...and a choice that is not set up falls to the one that is', D.emailProvider() === 'smtp');
+  });
+
+  await withEnv({ ...NONE, ...CATMAIL }, async () => {
+    stubCatalyst(okMail);
+    try { await D.sendCode({ via: 'email', to: 'anitha@example.com', code: '482913', ttlMs: 300000 }); } finally { globalThis.fetch = realFetch; }
+    const call = mailCalls[0];
+    const sent = JSON.parse(call?.init.body || '{}');
+    check('a code is posted to the project\'s Mail send endpoint', mailCalls.length === 1 && /\/baas\/v1\/project\/[^/]+\/email\/send$/.test(call.url) && call.init.method === 'POST', call?.url);
+    check('...signed in with the Catalyst token, for this organisation and environment', /^Zoho-oauthtoken tok$/.test(call?.init.headers.authorization) && !!call.init.headers['CATALYST-ORG'] && !!call.init.headers.Environment);
+    check('...from the verified sender, to the one person', sent.from_email === 'no-reply@karunasadan.test' && JSON.stringify(sent.to_email) === '["anitha@example.com"]', call?.init.body);
+    check('...with the code in the subject and the body, as HTML', sent.subject === '482913 is your Karuna Sadan console code' && sent.html_mode === true && sent.content.includes('482913'), call?.init.body);
+  });
+
+  await withEnv({ ...NONE, ...EMAIL, SMTP_HOST: '127.0.0.1', SMTP_PORT: '1', ...CATMAIL }, async () => {
+    stubCatalyst(okMail);
+    try { await quietly(() => D.sendCode({ via: 'email', to: 'anitha@example.com', code: '555111', ttlMs: 300000 })); } finally { globalThis.fetch = realFetch; }
+    check('if SMTP is down and Catalyst Mail is set up, the code still goes out by Catalyst', mailCalls.length === 1 && /email\/send$/.test(mailCalls[0].url));
+  });
+
+  await withEnv({ ...NONE, ...EMAIL, ...CATMAIL, MAIL_PROVIDER: 'catalyst', SMTP_HOST: '127.0.0.1', SMTP_PORT: '1' }, async () => {
+    stubCatalyst(() => new Response(JSON.stringify({ status: 'failure', data: { message: 'Sender not verified' } }), { status: 400 }));
+    let failure = null;
+    try { await quietly(() => D.sendCode({ via: 'email', to: 'anitha@example.com', code: '777222', ttlMs: 300000 })); } catch (e) { failure = e; } finally { globalThis.fetch = realFetch; }
+    check('when every provider fails the person gets the plain sentence, not Catalyst\'s words',
+      failure?.code === 'delivery_failed' && /could not be emailed/.test(failure.message) && !/verified|Catalyst/.test(failure.message), failure?.message);
+  });
+
+  await withEnv({ ...NONE, ...CATMAIL }, async () => {
+    stubCatalyst(() => new Response(JSON.stringify({ status: 'failure', data: { message: 'OAUTH_SCOPE_MISMATCH' } }), { status: 400 }));
+    let said = '';
+    const e = console.error; console.error = (...a) => { said += a.join(' '); };
+    try { await D.sendCode({ via: 'email', to: 'anitha@example.com', code: '888333', ttlMs: 300000 }); } catch { /* checked below */ } finally { console.error = e; globalThis.fetch = realFetch; }
+    check('a token without the email scope is explained in the server log', /ZohoCatalyst\.email\.CREATE/.test(said) && !said.includes('anitha@example.com'), said);
+  });
+  check('the console asks for the email scope when it is connected', (await import('./catalyst.js')).SCOPES.includes('ZohoCatalyst.email.CREATE'));
 } finally {
   Date.now = realNow;
   Object.assign(D.transport, realTransport);

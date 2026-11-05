@@ -164,8 +164,31 @@ names; on Render they are in the Environment tab):
 
 | Channel | Settings | Notes |
 |---|---|---|
-| Email | `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Any SMTP account: Zoho Mail, Gmail with an app password, SendGrid, Brevo. |
+| Email (Catalyst Mail) | `MAIL_CATALYST_FROM`, and optionally `MAIL_PROVIDER=catalyst` | Sends through Catalyst Cloud Scale > Mail with the console's own Catalyst sign-in. See "Email through Catalyst Mail" below. |
+| Email (SMTP) | `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Any SMTP account: Zoho Mail, Gmail with an app password, SendGrid, Brevo. |
 | SMS | `SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM` or `TWILIO_MESSAGING_SERVICE_SID` | **Indian numbers need DLT registration** (sender id and message template) before texts are delivered, whichever provider is used. Start this early: it takes days to weeks. |
+
+### Email through Catalyst Mail
+
+Only people on the member register who hold a console role can ask for a code by email, and the address typed
+must be the one on their member record. The code goes to that inbox, so entering it proves the person owns the
+address. Anyone else gets the same neutral answer, so the screen never says who is staff.
+
+To set it up:
+
+1. In the Catalyst console, open Cloud Scale > Mail. Add the client's domain, add the DKIM and SPF records
+   Catalyst shows to the domain's DNS, and click Authenticate. Then add the sender address (for example
+   `no-reply@<their domain>`) and confirm it with the code Catalyst emails. Gmail and Yahoo addresses cannot be
+   verified, so they cannot be the sender.
+2. The Catalyst token needs the scope `ZohoCatalyst.email.CREATE`. It is now in the scope list, so run
+   `npm run catalyst:connect` in your own terminal and paste the new values (a token made before this change does
+   not have it, and the server log then says so).
+3. Set `MAIL_CATALYST_FROM=<the verified sender>` and, to make it the first choice, `MAIL_PROVIDER=catalyst`.
+   Then `npm run deploy:api`.
+
+If both Catalyst Mail and SMTP are set up, `MAIL_PROVIDER` says which goes first (SMTP when it is not set), and the
+other is used if the first fails. Catalyst documents at most 10 recipients per send and no per-day figure; ask
+Catalyst support for the monthly allowance and price before relying on it.
 
 Another SMS provider (MSG91, for example) is one more entry in
 `smsProviders` in `server/deliver.js`. It has not been added because its
