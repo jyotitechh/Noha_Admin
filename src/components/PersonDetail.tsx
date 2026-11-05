@@ -208,14 +208,14 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       {/* Jump to a section instead of scrolling the whole page. */}
       <nav className="row wrap gap6" aria-label="Sections of this page">
         {([
-          ['who', 'Who they are', 'user'],
-          ['registration', 'Registration', 'file'],
-          ['care', 'Pastoral care', 'heart'],
-          ['partnership', 'Partnership', 'award'],
-          ['family', 'Family', 'users'],
-          ['groups', 'Groups', 'tree'],
-        ] as const).map(([key, label, icon]) => (
-          <Btn key={key} sm icon={icon} onClick={() => jump(key)}>{label}</Btn>
+          ['who', 'Who they are'],
+          ['registration', 'Registration'],
+          ['care', 'Pastoral care'],
+          ['partnership', 'Partnership'],
+          ['family', 'Family'],
+          ['groups', 'Groups'],
+        ] as const).map(([key, label]) => (
+          <Btn key={key} sm onClick={() => jump(key)}>{label}</Btn>
         ))}
       </nav>
 
