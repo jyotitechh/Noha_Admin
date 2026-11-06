@@ -37,7 +37,7 @@ S.io.getRow = async (id, rowId) => {
 };
 S.io.insert = async (id, row) => {
   const made = { ROWID: newId(), CREATEDTIME: '2026-10-19 18:00:00:000', ...row };
-  tables[id].push(made);
+  (tables[id] ||= []).push(made);
   writes.push({ op: 'insert', table: id, row });
   /* The real API sends the ROWID of an insert as a bare number. A test that
      handed back the string would hide the exact bug the read-back avoids. */
@@ -185,16 +185,21 @@ export const seed = () => ({
    out of the project altogether, for the "no such table" case. */
 
 import { TYPES } from './content-types.js';
+import { EVENT_TABLES, resetEventsMemory } from './events.js';
 
 const contentIds = new Map();   /* table name -> fake id */
 const shells = new Set();       /* ids that refuse a write */
 const removed = new Set();      /* table names taken out of the project */
+
+/* The event tables (server/events.js) exist in the project with their columns, so they take writes. */
+const eventIds = new Map(Object.values(EVENT_TABLES).map((name, i) => [name, String(27145000000400001n + BigInt(i))]));
 
 const fill = () => {
   contentIds.clear();
   TYPES.forEach((t, i) => {
     if (!removed.has(t.table)) contentIds.set(t.table, String(27145000000300001n + BigInt(i)));
   });
+  for (const [name, id] of eventIds) if (!removed.has(name)) contentIds.set(name, id);
 };
 fill();
 
@@ -208,6 +213,8 @@ export function resetContent() {
   fill();
   shells.clear();
   for (const id of contentIds.values()) { shells.add(id); tables[id] = []; }
+  for (const id of eventIds.values()) { shells.delete(id); tables[id] = []; }
+  resetEventsMemory();
 }
 
 /** Give a table its columns, so it accepts writes. */

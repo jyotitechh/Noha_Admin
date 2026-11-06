@@ -75,7 +75,7 @@ export default function mountContent(app, { requireSession, requirePerm }) {
      the Stratus bucket and the reply is the public link, which the form then stores in the
      picture field like any pasted link. Anyone who may write content may upload one. */
   app.post('/api/uploads/picture',
-    requireSession, requirePerm('content.edit'),
+    requireSession, requirePerm(['content.edit', 'events.manage']),
     express.raw({ type: () => true, limit: MAX_BYTES + 1024 }),
     async (req, res) => {
       try {

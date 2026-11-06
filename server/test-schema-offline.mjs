@@ -1704,6 +1704,71 @@ reset(seed());
 const [a, b] = await Promise.all([S.loadMembers(), S.loadRegistrations()]);
 check('two reads at once share one fetch', a.length > 0 && b.length > 0);
 
+/* ================================================================== */
+section('Events, event groups and language groups');
+
+{
+  const EV = await import('./events.js');
+  reset(seed());
+  const refused = async (p) => { try { await p; return null; } catch (e) { return e; } };
+
+  check('a wall-clock time in Kolkata is 5 h 30 earlier in UTC', EV.zonedToUtc('2026-11-07', '15:00', 'Asia/Kolkata').toISOString() === '2026-11-07T09:30:00.000Z');
+  check('...and London in summer is one hour earlier', EV.zonedToUtc('2026-07-01', '10:00', 'Europe/London').toISOString() === '2026-07-01T09:00:00.000Z');
+
+  const noLang = await refused(EV.createGroup({ name: 'Sunday' }));
+  check('an event group needs its language group', noLang?.status === 400 && !!noLang.errors?.languageGroupId);
+  const lang = await EV.createLanguageGroup({ name: 'Mumbai - English' });
+  check('a language group is added and read back', (await EV.listLanguageGroups()).some((l) => l.id === lang.id && l.name === 'Mumbai - English'));
+  check('...the same name twice is refused', (await refused(EV.createLanguageGroup({ name: 'mumbai - english' })))?.status === 409);
+
+  const grp = await EV.createGroup({ name: 'Sunday services', languageGroupId: lang.id, pastors: ['27145000000138578'], donationTeam: ['1', '2'] });
+  const groups = await EV.listGroups();
+  const g = groups.find((x) => x.id === grp.id);
+  check('a group keeps its language group, pastors and teams', g?.languageGroupName === 'Mumbai - English' && g.pastors[0] === '27145000000138578' && g.donationTeam.length === 2, JSON.stringify(g));
+  const groupRow = (await EV.storedRows('groups')).find((r) => r.name === 'Sunday services');
+  check('...stored as JSON lists in the office\'s own columns', groupRow?.connectedEmployees === '["27145000000138578"]' && groupRow.eventLanguageGroupId === lang.id, JSON.stringify(groupRow));
+
+  const base = { name: 'Test', date: '2026-11-07', publishAt: '2026-11-06T15:30', startTime: '15:00', endTime: '16:00', timezone: 'Asia/Kolkata', groupId: grp.id, filters: { pastor: true }, expenses: { hall: 500 }, about: '<p>Hi<script>alert(1)</script></p>' };
+  const missing = await refused(EV.createEvent({ name: '' }));
+  check('an event without its required details is refused field by field', missing?.status === 400 && ['name', 'date', 'publishAt', 'startTime', 'endTime'].every((k) => missing.errors?.[k]), JSON.stringify(missing?.errors));
+  const backwards = await refused(EV.createEvent({ ...base, endTime: '14:00' }));
+  check('...and one that ends before it starts', !!backwards?.errors?.endTime);
+  check('...and a group that does not exist', !!(await refused(EV.createEvent({ ...base, groupId: '42' })))?.errors?.groupId);
+
+  const first = await EV.createEvent(base);
+  const row = (await EV.storedRows('events')).find((r) => r.name === 'Test');
+  check('an event is written to the events table', !!row && row.eventGroupId === grp.id && row.preachingTitle === '' && row.isArchived === false);
+  check('...its day as eventType 1 and eventValue', row?.eventType === 1 && row.eventValue === '2026-11-07');
+  check('...its times in its timezone and in UTC', row?.startTime === '15:00' && row.startTimeUtc === '2026-11-07 09:30:00' && row.endTimeUtc === '2026-11-07 10:30:00', `${row?.startTimeUtc} ${row?.endTimeUtc}`);
+  check('...the publish time as a Catalyst datetime', row?.publishDateTime === '2026-11-06 15:30:00');
+  check('...the filters as JSON', JSON.parse(row?.filters || '{}').forPastor === true);
+  check('...the formatted text with scripts removed', row?.formattedDescription === '<p>Hi</p>', row?.formattedDescription);
+  check('..."Visible" stored as its opposite, isInvisible', row?.isInvisible === false);
+
+  const second = await EV.createEvent({ ...base, name: 'Special Intercession', date: '2026-11-06', blockedEventIds: [first.id] });
+  const inRange = await EV.listEvents({ from: '2026-10-30', to: '2026-11-13' });
+  check('the list is the events in the dates, soonest first', inRange.map((e) => e.name).join() === 'Special Intercession,Test', inRange.map((e) => e.name).join());
+  check('...and narrows by name', (await EV.listEvents({ q: 'special' })).length === 1);
+  check('...and leaves out other dates', (await EV.listEvents({ from: '2026-12-01', to: '2026-12-31' })).length === 0);
+
+  const one = await EV.getEvent(second.id, async () => null);
+  check('one event comes back with the names behind its ids', one.groupName === 'Sunday services' && one.blockedEvents[0]?.name === 'Test' && one.expenses.hall === 500);
+  check('...and the form\'s own shape for editing', one.date === '2026-11-06' && one.publishAt === '2026-11-06T15:30' && one.filters.pastor === true && one.visible === true);
+
+  await EV.updateEvent(first.id, { ...base, name: 'Test changed', visible: false });
+  const changed = (await EV.storedRows('events')).find((r) => String(r.ROWID) === first.id);
+  check('an edit writes over the same row', changed?.name === 'Test changed' && changed.isInvisible === true);
+  check('an event cannot block itself', !(await EV.getEvent(first.id, async () => null)).blockedEventIds.includes(first.id));
+
+  const inUse = await refused(EV.archiveGroup(grp.id));
+  check('a group events still use cannot be archived', inUse?.status === 409 && /2 events/.test(inUse.message), inUse?.message);
+
+  await EV.archiveEvent(first.id);
+  check('an archived event leaves the list but stays in the table',
+    !(await EV.listEvents()).some((e) => e.id === first.id) && (await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id && r.isArchived === true));
+  check('...and is gone from what still blocks it', (await EV.getEvent(second.id, async () => null)).blockedEvents.length === 0);
+}
+
 /* ---------- result ---------- */
 
 console.log('\n' + '─'.repeat(64));

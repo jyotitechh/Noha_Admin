@@ -33,6 +33,7 @@ import mountPeople from './routes/people.js';
 import mountChanges from './routes/changes.js';
 import mountContent from './routes/content.js';
 import mountFamily from './routes/family.js';
+import mountEvents from './routes/events.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
    Catalyst AppSail is started, so it never depends on a variable being injected), then
@@ -491,6 +492,7 @@ mountPeople(app, { requireSession, requirePerm });
 mountChanges(app, { requireSession, requirePerm });
 mountContent(app, { requireSession, requirePerm });
 mountFamily(app, { requireSession, requirePerm });
+mountEvents(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 

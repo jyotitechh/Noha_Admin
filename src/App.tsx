@@ -45,7 +45,8 @@ const SCREENS: Record<string, ComponentType> = {
   'school/bibleschool': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.BibleSchool }))),
   'school/courses': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Courses }))),
 
-  'events/events': lazy(() => import('@/modules/events/Events')),
+  'events/events': lazy(() => import('@/modules/events/EventAdmin')),
+  'events/groups': lazy(() => import('@/modules/events/EventGroups')),
   'events/passes': lazy(() => import('@/modules/events/Passes')),
 
   'finance/receipts': lazy(() => import('@/modules/finance/Receipts')),

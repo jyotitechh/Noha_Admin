@@ -121,7 +121,8 @@ export const MODULES: ModuleDef[] = [
     desc: 'Services, events, halls and the passes members book in the app.',
     badges: ['absent'],
     tabs: [
-      { id: 'events', label: 'Events', status: 'built', desc: 'What is open for booking in the app, and what has been.' },
+      { id: 'events', label: 'Events', status: 'built', desc: 'Find events by name and date, and add, change or copy one.' },
+      { id: 'groups', label: 'Event groups', status: 'built', desc: 'The groups events belong to, with their language group, pastors and teams.' },
       { id: 'passes', label: 'Passes', status: 'built', desc: 'Every pass issued, its seats, gate and booking code.' },
       { id: 'halls', label: 'Halls and seating', perm: 'events.manage', status: 'planned', from: 'Events → Halls and seating', desc: 'Halls, sections and the seat map members choose from.' },
       { id: 'attendance', label: 'Attendance', status: 'planned', from: 'Events → Attendance', desc: 'Who came, and the absentees to follow up.' },
