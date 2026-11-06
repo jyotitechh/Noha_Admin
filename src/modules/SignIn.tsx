@@ -150,9 +150,7 @@ export default function SignIn() {
           <div className="si-card">
             <h2>Sign in</h2>
             <p className="muted mt0">
-              Use the mobile number or the email address you registered with in the
-              Noah app. If a super administrator has given you access, we will send
-              a six-digit code: texted to a number, emailed to an address.
+              Enter your registered mobile number or email address. We will send you a six-digit code.
             </p>
 
             {demo && (
@@ -230,10 +228,7 @@ export default function SignIn() {
                     placeholder="Shared with the office"
                     onChange={(e) => { setPassphrase(e.target.value); setError(''); }}
                   />
-                  <span className="small muted mt4">
-                    This console is reachable from the internet, so sign-in needs the
-                    shared passphrase as well as your {mode === 'mobile' ? 'number' : 'address'}.
-                  </span>
+                  <span className="small muted mt4">Ask the office if you do not have it.</span>
                 </label>
               )}
               {error && <div className="small mt8" role="alert" style={{ color: 'var(--bad)', fontWeight: 600 }}>{error}</div>}
@@ -257,7 +252,7 @@ export default function SignIn() {
               ) : (
                 <div className="card pad stack" style={{ gap: 8 }}>
                   <b className="small">Ask for access</b>
-                  <span className="xs muted">For members of the church who registered in the Noah app. A super administrator will see your request.</span>
+                  <span className="xs muted">A super administrator will review your request.</span>
                   <input className="inp" type="tel" inputMode="tel" value={askMobile} placeholder="The mobile number you registered with"
                     aria-label="Your mobile number" onChange={(e) => { setAskMobile(e.target.value); setAskError(''); }} />
                   <input className="inp" value={askNote} maxLength={100} placeholder="Who are you, and why do you need it? (optional)"
@@ -292,11 +287,6 @@ export default function SignIn() {
                 </div>
               </div>
             )}
-
-            <p className="xs muted mt16" style={{ lineHeight: 1.6 }}>
-              Zoho single sign-on is not wired up in this build. When it is, it
-              replaces this form and nothing else changes.
-            </p>
           </div>
         ) : (
           <div className="si-card">
@@ -336,7 +326,6 @@ export default function SignIn() {
             {sent?.devCode ? (
               <div className="mt16">
                 <Note tone="warn" icon="key">
-                  This server cannot {who?.email ? 'email' : 'text'} codes yet, so it is shown here.
                   Your code is{' '}
                   <b className="mono" style={{ fontSize: 15, letterSpacing: '.08em' }}>{sent.devCode}</b>.
                 </Note>

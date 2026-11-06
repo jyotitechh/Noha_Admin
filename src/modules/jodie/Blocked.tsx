@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { Table } from '@/components/Table';
-import { Chip, Kpi, Kpis, Note, Status, Failed, Loading, Empty } from '@/components/ui';
+import { Chip, Kpi, Kpis, Status, Failed, Loading, Empty } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
 
 interface Block { id: string; by: string; byName: string; who: string; whoName: string; reason: string; at: Date; review: string }
@@ -33,12 +33,6 @@ export default function Blocked() {
 
   return (
     <div className="stack">
-      <Note tone="warn" icon="shield">
-        <b>Treat requests for money as serious.</b> Asking another member for
-        money, or pushing a phone number into chat, are the two patterns worth
-        acting on quickly. The chat filter catches the second automatically.
-      </Note>
-
       <Kpis>
         <Kpi label="Blocks to review" value={stats.openBlocks} icon="ban" tone={stats.openBlocks ? 'warn' : undefined} />
         <Kpi label="Reported messages" value={stats.openReports} icon="flag" tone={stats.openReports ? 'warn' : undefined} />

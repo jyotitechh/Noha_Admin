@@ -18,12 +18,6 @@ export default function Receipts() {
       sort={{ key: 'at', dir: 'desc' }}
       searchPlaceholder="Receipt number, member or reference"
       searchIn={(r) => `${r.id} ${r.name} ${r.ref} ${r.towards} ${r.mode}`}
-      intro={
-        <Note tone="mute" icon="receipt">
-          Receipts are the ledger of record and post to Zoho Books. A gift given
-          in the app arrives here within minutes of the gateway confirming it.
-        </Note>
-      }
       kpis={(rows) => {
         const paid = rows.filter((r) => r.status === 'Paid');
         const total = paid.reduce((n, r) => n + r.amt, 0);

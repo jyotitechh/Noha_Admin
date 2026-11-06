@@ -25,14 +25,6 @@ export default function Dunning() {
       searchIn={(s) => `${s.name} ${s.pid} ${s.ref} ${s.plan} ${s.mandate}`}
       emptyIcon="check"
       emptyTitle="Nothing to chase"
-      intro={
-        <Note tone="warn" icon="repeat">
-          <b>Grace</b> means they still have access while the charge is retried.
-          <b> Past due</b> means the grace period has run out. A failed mandate
-          usually needs the member to re-authorise it in the app, not another
-          retry.
-        </Note>
-      }
       kpis={(rows) => {
         const grace = rows.filter((s) => s.status === 'Grace');
         const pastDue = rows.filter((s) => s.status === 'Past due');
@@ -105,11 +97,6 @@ export default function Dunning() {
               ['Gateway reference', <span key="r" className="mono">{s.ref}</span>],
             ]} />
           </div>
-
-          <Note tone="mute" icon="info">
-            Retrying a charge, extending the grace period and cancelling are in
-            the Mandates tab, which is not built yet.
-          </Note>
         </>
       )}
       footNote="Closest to losing access first"

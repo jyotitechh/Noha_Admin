@@ -468,7 +468,7 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
 
 /* ---------- one kind of content ---------- */
 
-function TypeScreen({ def, source, lookup }: { def: TypeDef; source: string; lookup: (id: string) => TypeDef | undefined }) {
+function TypeScreen({ def, lookup }: { def: TypeDef; source?: string; lookup: (id: string) => TypeDef | undefined }) {
   const { can } = useAuth();
   const [search, setSearch] = useState('');
   const [state, setState] = useState<'' | 'live' | 'draft'>('');
@@ -541,29 +541,12 @@ function TypeScreen({ def, source, lookup }: { def: TypeDef; source: string; loo
       </div>
 
       {/* Whether the Noah app can show what is saved here: not every kind has a route in the app's backend yet. */}
-      {def.inApp === true && (
-        <Note tone="ok" icon="mobile">
-          <b>The Noah app reads this.</b> A published item shows to members from its date, within a minute or so of saving.
-        </Note>
-      )}
       {def.inApp === false && (
-        <Note tone="warn" icon="mobile">
-          <b>The Noah app does not read this yet.</b> What you save here is stored safely in Catalyst, and it
-          shows in the app once the app&rsquo;s backend has a route for it.
-        </Note>
+        <Note tone="warn" icon="mobile">Not shown in the Noah app yet. What you save here is kept and will appear once the app shows it.</Note>
       )}
 
       {notReady && (
-        <Note tone="warn" icon="alert">
-          <b>Cannot be used yet.</b> {notReady.why}
-          {notReady.hint && <><br /><span className="small">{notReady.hint}</span></>}
-        </Note>
-      )}
-      {!notReady && source === 'catalyst' && (
-        <p className="xs muted" style={{ margin: 0 }}>
-          Saved to the Catalyst table <span className="mono">{def.table}</span>. If a save is refused, that table
-          has not been given its columns yet; the message will say so.
-        </p>
+        <Note tone="warn" icon="alert">This section cannot be used yet. Ask the administrator who looks after the console.</Note>
       )}
 
       <Kpis>

@@ -10,8 +10,8 @@
    `status` says how far the React port has got:
      'built'   the tab is implemented against the API
      'planned' the tab is routed and describes itself, but is not built yet
-   Areas marked 'planned' show what they will hold and which prototype screen
-   they come from, so nothing in the navigation is a dead end. */
+   Only built tabs are shown (shownTabs below); the planned ones are the list
+   of what is still to come. */
 
 export type ModuleGroup = 'work' | 'noah' | 'jodie' | 'admin';
 export type TabStatus = 'built' | 'planned';
@@ -25,6 +25,8 @@ export interface TabDef {
   desc?: string;
   /** Which prototype screen this comes from, for the planned ones. */
   from?: string;
+  /** Built, but a tool for whoever maintains the console rather than for the office: not shown. */
+  internal?: boolean;
 }
 
 export interface ModuleDef {
@@ -262,7 +264,7 @@ export const MODULES: ModuleDef[] = [
         desc: 'Members who asked for console access from the sign-in page: approve with a role, or decline.' },
       { id: 'roles', label: 'Roles and permissions', status: 'built', desc: 'The permission grid. Changing a tick here changes what the server allows.' },
       { id: 'effective', label: 'Effective permissions', status: 'planned', from: 'Staff → Effective permissions', desc: 'What one person actually holds, after role and overrides.' },
-      { id: 'coverage', label: 'Authorisation coverage', status: 'built', desc: 'Every endpoint and the permission guarding it.' },
+      { id: 'coverage', label: 'Authorisation coverage', status: 'built', internal: true, desc: 'Every endpoint and the permission guarding it.' },
     ],
   },
   {
@@ -285,8 +287,6 @@ export const moduleById = (id: string) => MODULES.find((m) => m.id === id);
 
 export const groupLabel = (g: ModuleGroup) => GROUPS.find((x) => x[0] === g)?.[1] ?? '';
 
-/** Count of what the React port covers, for the badge in the sidebar foot. */
-export const buildProgress = () => {
-  const tabs = MODULES.flatMap((m) => m.tabs);
-  return { built: tabs.filter((t) => t.status === 'built').length, total: tabs.length };
-};
+/** The tabs the office sees: built ones only. The planned tabs stay listed above as the plan, but a menu item
+    that leads to an unfinished screen is not shown. */
+export const shownTabs = (m: ModuleDef) => m.tabs.filter((t) => t.status === 'built' && !t.internal);

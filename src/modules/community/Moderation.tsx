@@ -24,13 +24,6 @@ export default function Moderation() {
       approveLabel="Approve"
       rejectLabel="Reject"
       emptyTitle="Nothing to moderate"
-      intro={
-        <Note tone="brand" icon="chats">
-          <b>Nothing here is visible to other members yet.</b> Posts, reels,
-          comments, profile photographs and about-me text all wait for a
-          moderator before they appear in Noahgram.
-        </Note>
-      }
       extraKpis={(rows) => {
         const pending = rows.filter((r) => r.state === 'Pending');
         const flagged = pending.filter((r) => r.auto).length;

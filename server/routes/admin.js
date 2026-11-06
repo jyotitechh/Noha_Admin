@@ -199,7 +199,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
            approval that did not land is the worst answer. */
         if (!canEnterApp(them, fresh)) {
           return res.status(502).json({
-            error: 'The Noah API accepted the approval, but the registration does not read approved yet. Refresh in a moment; if it still says pending, tell the Catalyst developer.',
+            error: 'The approval was sent but has not shown up yet. Refresh in a moment; if it still says pending, contact the administrator who looks after the console.',
           });
         }
         /* The API also clears `isUnVerified` so the office's own tools see the

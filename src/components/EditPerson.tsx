@@ -97,7 +97,6 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
       open={open}
       onClose={onClose}
       title={`Edit ${name}`}
-      sub="Saved straight to Catalyst, where the Noah app reads it."
       width="wide"
       footer={
         <>

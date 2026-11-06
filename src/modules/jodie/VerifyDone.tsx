@@ -4,7 +4,7 @@
    whether the four verifiers are deciding consistently. */
 
 import { ListScreen } from '@/components/ListScreen';
-import { Chip, Kpi, Kpis, Kv, Note, Who } from '@/components/ui';
+import { Chip, Kpi, Kpis, Kv, Who } from '@/components/ui';
 import { fdt, pct } from '@/lib/format';
 
 const STAGE_NAME: Record<string, string> = {
@@ -24,12 +24,6 @@ export default function VerifyDone() {
       sort={{ key: 'at', dir: 'desc' }}
       searchPlaceholder="Profile, verifier or words in the note"
       searchIn={(d) => `${d.name} ${d.by} ${d.remark} ${STAGE_NAME[d.stage] ?? d.stage}`}
-      intro={
-        <Note tone="mute" icon="history">
-          Every decision is also in the audit log, with what changed. This view
-          is the verifiers’ own record.
-        </Note>
-      }
       kpis={(rows) => {
         const approved = rows.filter((d) => d.decision === 'Approved').length;
         const verifiers = new Set(rows.map((d) => d.by));

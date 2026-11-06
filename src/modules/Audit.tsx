@@ -4,7 +4,7 @@
    work land in the log as you do it. */
 
 import { ListScreen } from '@/components/ListScreen';
-import { Chip, Icon, Kpi, Kpis, Kv, Note, Who } from '@/components/ui';
+import { Chip, Kpi, Kpis, Kv, Who } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
 
 interface Entry {
@@ -45,12 +45,6 @@ export default function Audit() {
       searchIn={(a) => `${a.actor} ${a.action} ${a.mod} ${a.rec} ${a.role} ${a.remark}`}
       pageSize={30}
       drawerWidth="wide"
-      intro={
-        <Note tone="mute" icon="history">
-          Every change made in this console is recorded here, including reading
-          a member’s contact details. Entries cannot be edited or removed.
-        </Note>
-      }
       kpis={(rows) => {
         const thisSession = rows.filter((a) => a.live).length;
         const people = new Set(rows.map((a) => a.actor));
@@ -119,11 +113,6 @@ export default function Audit() {
 
           <div className="sect-title">What changed</div>
           <Diff before={a.before} after={a.after} />
-
-          <Note tone="mute" icon="lock">
-            <Icon name="info" /> Audit entries are written once. Nothing in this
-            console can change or remove one.
-          </Note>
         </>
       )}
       footNote="Newest first"

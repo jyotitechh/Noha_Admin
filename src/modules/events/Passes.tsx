@@ -4,7 +4,7 @@
    and the booking code they hold up at the door. */
 
 import { ListScreen } from '@/components/ListScreen';
-import { Chip, Kpi, Kpis, Kv, Note, Status, Who } from '@/components/ui';
+import { Chip, Kpi, Kpis, Kv, Status, Who } from '@/components/ui';
 import { fdt, num } from '@/lib/format';
 
 interface Pass {
@@ -20,12 +20,6 @@ export default function Passes() {
       sort={{ key: 'at', dir: 'desc' }}
       searchPlaceholder="Member, booking code or event"
       searchIn={(p) => `${p.name} ${p.code} ${p.event} ${p.seat} ${p.member}`}
-      intro={
-        <Note tone="mute" icon="ticket">
-          A member sees these in the app’s <b>My passes</b> carousel, newest
-          first. The booking code is what gets scanned at the gate.
-        </Note>
-      }
       kpis={(rows) => {
         const seats = rows.reduce((n, p) => n + (p.count || 1), 0);
         const family = rows.filter((p) => p.type === 'Family').length;

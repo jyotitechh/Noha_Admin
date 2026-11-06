@@ -133,7 +133,7 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
 
     const existing = (await loadStaffDirectory(roleIds())).find((s) => s.memberRowId === String(member.rowId));
     if (existing?.source === 'catalyst-flag') {
-      return res.status(409).json({ error: 'The office already made them a super administrator in Catalyst.' });
+      return res.status(409).json({ error: 'They are already a super administrator.' });
     }
     if (existing && existing.status !== 'Revoked') {
       return res.status(409).json({ error: `They already have access as ${roleById(existing.role).name}. Change their role instead.` });
@@ -168,7 +168,7 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
     const staff = (await loadStaffDirectory(roleIds())).find((s) => s.id === id);
     if (!staff) { res.status(404).json({ error: 'No such staff account.' }); return null; }
     if (staff.source !== 'catalyst') {
-      res.status(409).json({ error: 'The office set this one in Catalyst (is_super_admin), so it cannot be changed here.' });
+      res.status(409).json({ error: 'This super administrator access was set by the office and cannot be changed here.' });
       return null;
     }
     if (staff.id === req.session.staffId) {

@@ -137,12 +137,6 @@ export default function VerifyQueue() {
 
   return (
     <div className="stack">
-      <Note tone="brand" icon="shield-check">
-        <b>A profile goes live only when all four stages are approved.</b> Until
-        then nobody sees it in the deck. Returning a stage sends the member back
-        to fix that one thing, not the whole profile.
-      </Note>
-
       <Kpis>
         {STAGES.map((s) => (
           <Kpi key={s.key} label={s.name} value={counts[s.key]} icon={s.icon}

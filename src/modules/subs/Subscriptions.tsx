@@ -19,13 +19,6 @@ export default function Subscriptions() {
       sort={{ key: 'started', dir: 'desc' }}
       searchPlaceholder="Member, profile number or payment reference"
       searchIn={(s) => `${s.name} ${s.pid} ${s.id} ${s.ref} ${s.plan}`}
-      intro={
-        <Note tone="mute" icon="repeat">
-          Jodie membership is ₹300, paid once. Premium plans renew. Access is
-          granted by the server after the gateway confirms the payment, never
-          by the app.
-        </Note>
-      }
       kpis={(rows) => {
         const active = rows.filter((s) => s.status === 'Active');
         const trouble = rows.filter((s) => s.status === 'Grace' || s.status === 'Past due');

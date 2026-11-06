@@ -99,11 +99,6 @@ export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) 
             ['Signed', fdt(r.signedOn)],
             ['Typed signature', <b key="s" style={{ fontFamily: 'cursive', fontSize: 17 }}>{r.signature}</b>],
           ]} />
-          <Note tone="mute" icon="check">
-            The signature must match the full name given in step 1, and the
-            tick box must be accepted. The server checks both on submission,
-            so a registration that reaches this screen has passed them.
-          </Note>
         </div>
       </div>
 
@@ -325,13 +320,6 @@ export default function Registrations() {
 
   return (
     <div className="stack">
-      <Note tone="brand" icon="mobile">
-        <b>These people are locked out until you decide.</b> Each one finished the
-        six-step registration in the Noah app and is on its waiting screen.
-        Approving creates their member record and opens the app; returning the
-        video sends them back to step six to record it again.
-      </Note>
-
       <Kpis>
         <Kpi label="Waiting" value={tally.pending} icon="user-plus" tone={tally.pending > 6 ? 'warn' : undefined}
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={24} bad={48} /></> : 'nothing waiting'} />
@@ -401,11 +389,6 @@ export default function Registrations() {
              lead to an error. */
           open && open.state === 'pending' ? (
             <>
-              <span className="muted small">
-                {onCatalyst
-                  ? 'Approving opens the app for them, and the Noah API emails them.'
-                  : 'Approving creates the member record. The app opens for them straight away.'}
-              </span>
               <span className="sp" style={{ flex: 1 }} />
               <Btn variant="danger" icon="video" onClick={() => setReturning(true)} disabled={busy}>
                 Return the video
@@ -501,7 +484,7 @@ export default function Registrations() {
               {onCatalyst ? (
                 <>
                   <b>{open.fullName}</b> is approved and the Noah app opens for them
-                  immediately. The Noah API emails them to say so.
+                  immediately. They are emailed to say so.
                 </>
               ) : (
                 <>

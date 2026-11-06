@@ -1,7 +1,7 @@
 /* Everyone on Jodie, verified or not. */
 
 import { ListScreen } from '@/components/ListScreen';
-import { Chip, Icon, Kpi, Kpis, Kv, Note, Who } from '@/components/ui';
+import { Chip, Icon, Kpi, Kpis, Kv, Who } from '@/components/ui';
 import { num, pct } from '@/lib/format';
 
 type StageKey = 'I' | 'P' | 'E' | 'Q';
@@ -23,12 +23,6 @@ export default function Profiles() {
       searchPlaceholder="Name, profile number, city, work or church"
       searchIn={(p) => `${p.name} ${p.id} ${p.loc} ${p.job} ${p.edu} ${p.church} ${p.denom}`}
       drawerWidth="wide"
-      intro={
-        <Note tone="mute" icon="heart">
-          A profile is in the deck only when it is verified and its membership
-          is paid. Verification is in the tab before this one.
-        </Note>
-      }
       kpis={(rows) => {
         const verified = rows.filter((p) => p.verified).length;
         const paying = rows.filter((p) => p.sub && p.sub !== 'None').length;

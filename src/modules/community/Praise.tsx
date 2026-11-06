@@ -4,7 +4,7 @@
    app, so they are read far more often than they are written. */
 
 import { DecisionQueue, type DecisionRow } from '@/components/DecisionQueue';
-import { Chip, Kpi, Note, Who } from '@/components/ui';
+import { Chip, Kpi, Who } from '@/components/ui';
 
 interface Praise extends DecisionRow {
   member: string; name: string; text: string; photos: number; likes: number;
@@ -21,12 +21,6 @@ export default function PraiseScreen() {
       approveLabel="Publish"
       rejectLabel="Reject"
       emptyTitle="Nothing to publish"
-      intro={
-        <Note tone="brand" icon="sparkles">
-          Published praise reports appear on the praise wall and in the
-          swipeable <b>Praises</b> screen in the app.
-        </Note>
-      }
       extraKpis={(rows) => (
         <>
           <Kpi label="Published" value={rows.filter((r) => r.state === 'Published').length} icon="check" />
@@ -65,9 +59,6 @@ export default function PraiseScreen() {
                   </div>
                 ))}
               </div>
-              <p className="xs muted mt8">
-                There is no file storage in this build, so the photographs are shown as placeholders.
-              </p>
             </div>
           )}
 

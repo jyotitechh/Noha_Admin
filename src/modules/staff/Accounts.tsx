@@ -102,17 +102,10 @@ function GiveAccess({ open, onClose, roles, onDone }: {
       }
     >
       {needsCatalyst && (
-        <Note tone="warn" icon="alert">
-          Giving access needs the Catalyst connection. The sample staff cannot be changed this way.
-        </Note>
+        <Note tone="warn" icon="alert">Access cannot be given right now.</Note>
       )}
       {!needsCatalyst && !tableReady && (
-        <Note tone="warn" icon="alert">
-          <b>Not set up in Catalyst yet.</b> Roles are kept in six columns on the member's
-          extra record, and they have not been added. You can look at who would be offered, but
-          not save. Running <code>npm run catalyst:columns -- --apply</code> adds them
-          (docs/CONSOLE-ACCESS.md).
-        </Note>
+        <Note tone="warn" icon="alert">Access cannot be saved right now. Ask the administrator who looks after the console.</Note>
       )}
 
       <div className="mt12">
@@ -222,18 +215,11 @@ export default function Accounts() {
         searchPlaceholder="Name, number or job title"
         searchIn={(s) => `${s.name} ${s.email} ${s.mobile ?? ''} ${s.title} ${s.role}`}
         intro={
-          <div className="stack">
-            <Note tone="mute" icon="key">
-              {onCatalyst
-                ? 'Staff are members. They sign in with the mobile number they registered with in the Noah app, and a super administrator decides what this console lets them do.'
-                : 'Sign-in is a mobile number and one-time code in this build. Zoho single sign-on is not wired up; when it is, these accounts stay as they are and only the sign-in step changes.'}
-            </Note>
-            {user && user.perms.includes('staff.manage') && onCatalyst && (
-              <div>
-                <Btn variant="ok" icon="user-plus" onClick={() => setGiving(true)}>Give access to a member</Btn>
-              </div>
-            )}
-          </div>
+          user && user.perms.includes('staff.manage') && onCatalyst && (
+            <div>
+              <Btn variant="ok" icon="user-plus" onClick={() => setGiving(true)}>Give access to a member</Btn>
+            </div>
+          )
         }
         kpis={(rows) => (
           <Kpis>

@@ -13,7 +13,7 @@ import { collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { Table, type Column } from '@/components/Table';
 import { Drawer } from '@/components/layers';
-import { Chip, Empty, Failed, Kpi, Kpis, Loading, Note, Seg, Who } from '@/components/ui';
+import { Chip, Empty, Failed, Kpi, Kpis, Loading, Seg, Who } from '@/components/ui';
 import { fd, fdt, since } from '@/lib/format';
 import { PersonDetail } from '@/components/PersonDetail';
 import type { Registration } from '@/lib/types';
@@ -102,13 +102,6 @@ export default function Approved() {
 
   return (
     <div className="stack">
-      <Note tone="ok" icon="user-check">
-        Everyone here has been decided. <b>Approved</b> means the Noah app
-        opens for them; <b>video returned</b> means they were asked to record
-        step six again and the app stays shut until they do; <b>rejected</b> is
-        final, and the member was told why.
-      </Note>
-
       <Kpis>
         <Kpi label="Approved" value={stats.approved} icon="user-check"
           detail={stats.latest ? <>latest {since(stats.latest)}</> : 'none yet'} />
@@ -166,9 +159,7 @@ export default function Approved() {
                 ? <Chip tone="ok" icon="user-check">Approved — the app is open to them</Chip>
                 : open.state === 'rejected'
                   ? <Chip tone="bad" icon="x">Rejected — the app stays shut</Chip>
-                  : <Chip tone="bad" icon="video">Video returned — the app stays shut</Chip>}
-              {open.rawStatus && <Chip tone="plain">Catalyst status: {open.rawStatus}</Chip>}
-            </div>
+                  : <Chip tone="bad" icon="video">Video returned — the app stays shut</Chip>}            </div>
 
             <div className="sect-title">What happened</div>
             <ul className="tl">

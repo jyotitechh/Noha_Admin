@@ -9,7 +9,7 @@ import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
 import { useToast } from '@/components/layers';
-import { Card, Chip, Icon, Kpi, Kpis, Note, Failed, Loading } from '@/components/ui';
+import { Card, Chip, Icon, Kpi, Kpis, Failed, Loading } from '@/components/ui';
 import { pct } from '@/lib/format';
 
 interface Role { id: string; name: string; desc: string; perms: string[] }
@@ -51,12 +51,6 @@ export default function Roles() {
 
   return (
     <div className="stack">
-      <Note tone="warn" icon="shield">
-        <b>These ticks are enforced, not cosmetic.</b> The API checks the same
-        list on every call, so removing one stops the request as well as hiding
-        the button. Changing your own role takes effect straight away.
-      </Note>
-
       <Kpis>
         <Kpi label="Roles" value={roles.length} icon="key" />
         <Kpi label="Permissions" value={allPerms.length} icon="lock" detail={`in ${permGroups.length} groups`} />

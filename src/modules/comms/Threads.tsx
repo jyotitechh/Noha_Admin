@@ -4,7 +4,7 @@
    so the age column is the point of the screen. */
 
 import { ListScreen } from '@/components/ListScreen';
-import { Age, Chip, Kpi, Kpis, Note, Status, Who, Icon } from '@/components/ui';
+import { Age, Chip, Kpi, Kpis, Status, Who, Icon } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
 
 interface Thread {
@@ -24,12 +24,6 @@ export default function Threads() {
       searchPlaceholder="Member, recipient or words in the message"
       searchIn={(t) => `${t.name} ${t.to} ${t.last} ${t.kind}`}
       drawerWidth="wide"
-      intro={
-        <Note tone="mute" icon="msg">
-          These come from <b>Messages</b> in the app. A member who writes to
-          their pastor sees the reply in the same thread.
-        </Note>
-      }
       kpis={(rows) => {
         const open = rows.filter((t) => t.state === 'Open');
         const oldest = open.map((t) => t.at).sort((a, b) => +a - +b)[0] ?? null;
@@ -117,12 +111,6 @@ export default function Threads() {
               </div>
             ))}
           </div>
-
-          <Note tone="mute" icon="info">
-            Replying from this console is not built yet. The thread, its history
-            and who it is assigned to are all here; the compose box comes with
-            the Broadcast and Push screens.
-          </Note>
         </>
       )}
       footNote="Newest first"

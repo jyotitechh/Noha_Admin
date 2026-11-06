@@ -109,34 +109,7 @@ export function Upload({ registrationId, kind, filename, seconds, sizeKb, auto =
         {state === 'failed' && (
           <div className="mt8">
             <Note tone={scopeMissing || needsAdminKey ? 'warn' : 'bad'} icon="alert">
-              {error}
-              {/* The file is in Catalyst either way. What is missing is
-                  permission to read it, and there are two ways to get that —
-                  the first needs nobody else. */}
-              {(scopeMissing || needsAdminKey) && (
-                <>
-                  <br />
-                  <span className="small">
-                    The upload is in Catalyst; what is missing is permission to
-                    read it. Either:
-                    <br />
-                    <b>1.</b> Add the File Store scopes to the Catalyst token —{' '}
-                    <code className="mono">node server/catalyst.js --scopes</code>{' '}
-                    prints the list, then generate a fresh self-client code and run{' '}
-                    <code className="mono">--exchange</code> with it.
-                    {needsAdminKey && (
-                      <>
-                        <br />
-                        <b>2.</b> Or put the key from{' '}
-                        <code className="mono">ADMIN_API_KEY.txt</code> into{' '}
-                        <code className="mono">.env.local</code> as{' '}
-                        <code className="mono">NOAH_ADMIN_API_KEY</code>, which reads
-                        uploads through the Noah API and needs no scope at all.
-                      </>
-                    )}
-                  </span>
-                </>
-              )}
+              {scopeMissing || needsAdminKey ? 'This file cannot be opened right now.' : error}
             </Note>
           </div>
         )}

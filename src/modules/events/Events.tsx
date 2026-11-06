@@ -47,12 +47,6 @@ export default function Events() {
       sort={{ key: 'start', dir: 'asc' }}
       searchPlaceholder="Event name, place or type"
       searchIn={(e) => `${e.name} ${e.loc} ${e.type} ${e.group}`}
-      intro={
-        <Note tone="mute" icon="mobile">
-          An event appears in the app’s Events tab, and in its “Book by date”
-          calendar, only while its status is <b>Published</b>.
-        </Note>
-      }
       kpis={(rows) => {
         const open = rows.filter((e) => e.status === 'Published');
         const issued = rows.reduce((n, e) => n + e.issued, 0);

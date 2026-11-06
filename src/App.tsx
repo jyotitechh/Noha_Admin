@@ -1,9 +1,8 @@
 /* Routing.
 
-   One route pattern, /:mod/:tab, resolved against the module registry. A tab
-   with a screen in SCREENS renders it; a tab without one renders <Planned>,
-   which says what it will hold and which prototype screen it comes from.
-   That way the navigation never offers a dead end. */
+   One route pattern, /:mod/:tab, resolved against the module registry. Only
+   the tabs the office sees (shownTabs) can be opened; any other address,
+   including an unfinished tab, goes to the area's first tab. */
 
 import { Suspense, lazy, type ComponentType } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
@@ -11,9 +10,9 @@ import { AuthProvider, useAuth } from '@/state/auth';
 import { QueuesProvider } from '@/state/queues';
 import { ToastProvider } from '@/components/layers';
 import { Shell } from '@/components/Shell';
-import { PageHeader, Planned, NoAccess } from '@/components/Page';
+import { PageHeader, NoAccess } from '@/components/Page';
 import { Loading } from '@/components/ui';
-import { MODULES, moduleById } from '@/modules/registry';
+import { MODULES, moduleById, shownTabs } from '@/modules/registry';
 import SignIn from '@/modules/SignIn';
 
 /* Screens that exist, keyed by "<module>/<tab>". */
@@ -78,15 +77,16 @@ function ModulePage() {
   const { can, user } = useAuth();
 
   const mod = moduleById(modId || '');
-  if (!mod) return <Navigate to="/dashboard" replace />;
+  const tabs = mod ? shownTabs(mod).filter((t) => SCREENS[`${mod.id}/${t.id}`]) : [];
+  if (!mod || !tabs.length) return <Navigate to="/dashboard" replace />;
 
   /* No tab in the URL: open the first one this role may see. */
   if (!tabId) {
-    const first = mod.tabs.find((t) => can(t.perm)) ?? mod.tabs[0];
+    const first = tabs.find((t) => can(t.perm)) ?? tabs[0];
     return <Navigate to={`/${mod.id}/${first.id}`} replace />;
   }
 
-  const tab = mod.tabs.find((t) => t.id === tabId);
+  const tab = tabs.find((t) => t.id === tabId);
   if (!tab) return <Navigate to={`/${mod.id}`} replace />;
 
   const Screen = SCREENS[`${mod.id}/${tab.id}`];
@@ -96,12 +96,10 @@ function ModulePage() {
       <PageHeader mod={mod} tab={tab} />
       {!can(mod.perm) || !can(tab.perm) ? (
         <NoAccess perm={tab.perm ?? mod.perm ?? ''} youAre={user?.roleName ?? 'this role'} />
-      ) : Screen ? (
+      ) : (
         <Suspense fallback={<div className="card"><Loading what={tab.label.toLowerCase()} /></div>}>
           <Screen />
         </Suspense>
-      ) : (
-        <Planned mod={mod} tab={tab} />
       )}
     </>
   );

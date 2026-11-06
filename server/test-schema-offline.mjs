@@ -1085,9 +1085,12 @@ reset(seed());
   const realGet = S.io.getRows;
   S.clearCache();
   S.io.getRows = async (id, o) => { if (id === T.kids) throw new Error('Catalyst: boom'); return realGet(id, o); };
+  const quiet = console.error; console.error = () => {};
   const down = await S.loadPerson(M.approved);
+  console.error = quiet;
   S.io.getRows = realGet;
-  check('if the family cannot be read it says so, rather than showing none', down.family.recorded === false && /boom/.test(down.family.why) && down.groups.recorded === false);
+  check('if the family cannot be read it says so, rather than showing none', down.family.recorded === false && /could not be loaded/.test(down.family.why) && down.groups.recorded === false);
+  check('...in plain words, without the technical reason', !/boom|Catalyst/.test(down.family.why), down.family.why);
   check('...and the rest of the person still loads', down.member.name === 'Anand Rao' && !!down.registration);
 }
 

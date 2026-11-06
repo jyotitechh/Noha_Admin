@@ -71,14 +71,8 @@ export default function Requests() {
         and approve in one click, or decline. Approved people sign in with the mobile number they registered with.
       </p>
 
-      {q.data.needsCatalyst && (
-        <Note tone="warn" icon="alert">Requests are kept in Catalyst, so there are none to show on the sample data.</Note>
-      )}
       {q.data.tableReady === false && (
-        <Note tone="warn" icon="alert">
-          The console&rsquo;s access columns are not in Catalyst yet, so nobody can be given access.
-          Run <code className="mono">npm run catalyst:columns -- --apply</code> (docs/CONSOLE-ACCESS.md).
-        </Note>
+        <Note tone="warn" icon="alert">Access cannot be given right now. Ask the administrator who looks after the console.</Note>
       )}
 
       {q.data.rows.length === 0 ? (

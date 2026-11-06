@@ -7,11 +7,10 @@
 import { useMemo, useState } from 'react';
 import { collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
-import { useAuth } from '@/state/auth';
 import { Drawer } from '@/components/layers';
 import { PersonDetail } from '@/components/PersonDetail';
 import { Table, type Column } from '@/components/Table';
-import { Chip, Kpi, Kpis, Note, Status, Who, Failed, Loading, Empty } from '@/components/ui';
+import { Chip, Kpi, Kpis, Status, Who, Failed, Loading, Empty } from '@/components/ui';
 import { fd, num } from '@/lib/format';
 import type { Member } from '@/lib/types';
 
@@ -24,7 +23,6 @@ export default function Register() {
   const [status, setStatus] = useState('Active');
   const [open, setOpen] = useState<Member | null>(null);
 
-  const { can } = useAuth();
 
   const q = useQuery(
     () => collection<Member>('MEMBERS', { q: search || undefined, loc: loc || undefined, status: status || undefined, limit: 500 }),
@@ -72,13 +70,6 @@ export default function Register() {
         <Kpi label="Joined through the app" value={num(stats.fromApp)} icon="mobile" detail="approved in this console" />
         <Kpi label="Congregations" value={stats.locations.length} icon="pin" />
       </Kpis>
-
-      {!can('members.pii') && (
-        <Note tone="mute" icon="lock">
-          Mobile numbers and email addresses are masked for your role. A
-          membership officer can reveal them, and every reveal is recorded.
-        </Note>
-      )}
 
       {q.loading && !q.data ? (
         <div className="card"><Loading what="the register" /></div>

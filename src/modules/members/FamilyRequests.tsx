@@ -170,21 +170,12 @@ export default function FamilyRequests() {
 
   if (q.data?.needsAdminKey) {
     return (
-      <Note tone="warn" icon="key">
-        <b>Family requests need the Noah API key.</b> Set <span className="mono">NOAH_ADMIN_API_KEY</span> on the API.
-        Requests are read and decided through the Noah API, so that both people are told. Nothing can be shown until it is set.
-      </Note>
+      <Note tone="warn" icon="alert">Family requests cannot be shown right now. Ask the administrator who looks after the console.</Note>
     );
   }
 
   return (
     <div className="stack">
-      <Note tone="brand" icon="users">
-        <b>Check before you approve.</b> Approving makes both accounts show each other, and sends both a notification.
-        For a grown-up, look at who the number belongs to. For a child under 18 no account is linked: the child is added
-        as a record on the member's family.
-      </Note>
-
       <Kpis>
         <Kpi label="Waiting" value={tally.pending} icon="users" tone={tally.pending > 4 ? 'warn' : undefined}
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={48} bad={96} /></> : 'nothing waiting'} />

@@ -13,7 +13,7 @@ import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useToast, Drawer, Confirm } from '@/components/layers';
 import { Table, type Column } from '@/components/Table';
-import { Chip, Empty, Failed, Icon, Kpi, Kpis, Loading, Note, Seg, Switch, Who } from '@/components/ui';
+import { Chip, Empty, Failed, Kpi, Kpis, Loading, Note, Seg, Switch, Who } from '@/components/ui';
 
 interface RoleDef {
   id: string; label: string; desc: string;
@@ -149,17 +149,6 @@ export default function People() {
 
   return (
     <div className="stack">
-      <Note tone="brand" icon="mobile">
-        <b>Everyone approved starts as an ordinary church member.</b> Anything
-        more is given here, deliberately. The app opens the matching features
-        the next time that person signs in.
-        <br />
-        <span className="small">
-          These are roles in the member app. They do not give anyone a sign-in
-          to this console — that is Staff and permissions.
-        </span>
-      </Note>
-
       <Kpis>
         <Kpi label="Pastors" value={stats.pastors} icon="user-check" detail="see their congregation" />
         <Kpi label="Cell leaders" value={stats.leaders} icon="users" />
@@ -290,10 +279,7 @@ export default function People() {
               <p className="muted small">Nothing beyond the ordinary member app.</p>
             )}
 
-            <Note tone="mute" icon="info">
-              <Icon name="info" /> The app reads these when they sign in, so a
-              change takes effect on their next sign-in.
-            </Note>
+            <p className="xs muted">Changes take effect the next time they sign in to the app.</p>
           </>
         )}
       </Drawer>

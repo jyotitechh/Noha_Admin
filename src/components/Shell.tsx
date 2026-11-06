@@ -1,10 +1,6 @@
 /* The frame every screen sits in: sidebar, top bar, breadcrumb, queue bell,
-   account menu and the command palette.
-
-   The prototype's sidebar ended with a "Zoho, single sign-on" block of three
-   buttons. It is gone: there is no Zoho SSO in this build. In its place the
-   foot says how much of the port is built, which is information the people
-   using it actually need right now. */
+   account menu and the command palette. Only finished screens are offered
+   (shownTabs in the registry). */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -12,7 +8,7 @@ import { useAuth } from '@/state/auth';
 import { useQueues } from '@/state/queues';
 import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
-import { GROUPS, MODULES, buildProgress, type ModuleDef } from '@/modules/registry';
+import { GROUPS, MODULES, shownTabs, type ModuleDef } from '@/modules/registry';
 import { Icon, Avatar, Age } from './ui';
 import { useToast } from './layers';
 import logo from '@/assets/logo.png';
@@ -22,7 +18,6 @@ import logo from '@/assets/logo.png';
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { can } = useAuth();
   const { byId } = useQueues();
-  const progress = buildProgress();
 
   const badgeFor = (m: ModuleDef) =>
     (m.badges ?? []).reduce((n, id) => n + (byId[id]?.count ?? 0), 0);
@@ -39,7 +34,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
 
       <nav className="nav">
         {GROUPS.map(([group, label]) => {
-          const mods = MODULES.filter((m) => m.group === group && can(m.perm));
+          const mods = MODULES.filter((m) => m.group === group && can(m.perm) && shownTabs(m).length);
           if (!mods.length) return null;
           return (
             <div key={group}>
@@ -58,16 +53,6 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-
-      <div className="side-foot">
-        <h6>This build</h6>
-        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--side-fg-2)', lineHeight: 1.55 }}>
-          {progress.built} of {progress.total} screens built against the API.
-          The rest are routed and say what they will hold.
-          <br />
-          <span style={{ color: 'var(--side-fg-3)' }}>Zoho single sign-on is not wired up.</span>
-        </p>
-      </div>
     </aside>
   );
 }
@@ -174,7 +159,7 @@ function MeMenu() {
               {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
             <p className="xs muted mt8" style={{ margin: '8px 0 0' }}>
-              Changes what you can reach, here and on the server. {user.perms.length} of 36 permissions held.
+              Changes what you can see and do. {user.perms.length} of 36 permissions held.
             </p>
           </div>
           <hr />
@@ -205,13 +190,12 @@ function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const results = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const pages = MODULES.filter((m) => can(m.perm)).flatMap((m) =>
-      m.tabs.map((t) => ({
+      shownTabs(m).map((t) => ({
         id: m.id + '/' + t.id,
         title: t.label,
         sub: m.title,
         icon: m.icon,
         to: `/${m.id}/${t.id}`,
-        planned: t.status === 'planned',
       })),
     );
     if (!needle) return pages.slice(0, 10);
@@ -244,7 +228,6 @@ function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <b>{r.title}</b>
                 <span className="muted small"> · {r.sub}</span>
               </span>
-              {r.planned && <span className="chip plain">Planned</span>}
             </button>
           ))}
           {!results.length && <div className="empty">Nothing matches “{q}”.</div>}
@@ -276,7 +259,7 @@ function RefreshButton() {
     }
   }
   return (
-    <button className="icon-btn" aria-label="Refresh from Catalyst" title="Read the latest from Catalyst" disabled={busy} onClick={go}>
+    <button className="icon-btn" aria-label="Refresh" title="Refresh" disabled={busy} onClick={go}>
       <Icon name="refresh" />
     </button>
   );
@@ -320,7 +303,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <>
                 {mod.group === 'work' ? 'Workspace' : mod.group === 'noah' ? 'Noah' : mod.group === 'jodie' ? 'Jodie' : 'Administration'}
                 <Icon name="chev-r" />
-                {tab && mod.tabs.length > 1 ? (
+                {tab && shownTabs(mod).length > 1 ? (
                   <>
                     <Link to={'/' + mod.id} style={{ color: 'inherit', textDecoration: 'none' }}>{mod.title}</Link>
                     <Icon name="chev-r" />

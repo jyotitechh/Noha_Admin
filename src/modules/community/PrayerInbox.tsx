@@ -136,13 +136,6 @@ export default function PrayerInbox() {
 
   return (
     <div className="stack">
-      <Note tone="brand" icon="shield">
-        <b>Nothing here is visible to anyone else yet.</b> A request appears on a
-        wall only once it is approved, and only to the audience the member
-        asked for. <b>Prayer warriors</b> is the default, and the server keeps
-        those requests off the open wall — approving does not widen it.
-      </Note>
-
       <Kpis>
         <Kpi label="Waiting" value={tally.pending} icon="flame" tone={tally.pending > 4 ? 'warn' : undefined}
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={12} bad={24} /></> : 'nothing waiting'} />

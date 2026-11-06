@@ -24,13 +24,6 @@ export default function Reports() {
       searchPlaceholder="Report name or area"
       searchIn={(r) => `${r.name} ${r.app} ${r.area}`}
       pageSize={25}
-      intro={
-        <Note tone="mute" icon="pie">
-          Reports run in Zoho Analytics against the same data this console
-          shows. A report you cannot open is one your role does not hold the
-          permission for.
-        </Note>
-      }
       kpis={(rows) => {
         const mine = rows.filter((r) => can(r.perm));
         return (
@@ -97,21 +90,12 @@ export default function Reports() {
           <Kv rows={[
             ['Application', r.app],
             ['Area', r.area],
-            ['Needs', <span key="p" className="mono">{r.perm}</span>],
             ['Run', `${num(r.runs)} times`],
             ['Last run', fdt(r.last)],
           ]} />
 
-          {can(r.perm) ? (
-            <Note tone="ok" icon="check">
-              Your role may run this. Opening it in Zoho Analytics is not wired
-              up in this build.
-            </Note>
-          ) : (
-            <Note tone="mute" icon="lock">
-              Your role does not hold <span className="mono">{r.perm}</span>, so
-              this report is listed but cannot be run.
-            </Note>
+          {!can(r.perm) && (
+            <Note tone="mute" icon="lock">Your role cannot run this report.</Note>
           )}
         </>
       )}

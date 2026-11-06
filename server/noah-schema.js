@@ -1486,7 +1486,8 @@ async function familyAndGroups(memberRowId, memberByRow) {
   let h;
   try { h = await householdRows(); } catch (err) {
     /* Say it could not be read, rather than show an empty family. */
-    const why = `Could not be read from Catalyst just now: ${err.message}`;
+    console.error(`[people] family and groups could not be read: ${err.message}`);
+    const why = 'This could not be loaded just now. Try again in a moment.';
     return { family: { recorded: false, rows: [], why }, groups: { recorded: false, rows: [], why } };
   }
   const me = String(memberRowId);
