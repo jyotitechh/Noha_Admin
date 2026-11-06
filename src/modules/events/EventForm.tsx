@@ -27,7 +27,7 @@ const STEPS = [
 /** Which page a field the server refused is on. */
 const stepOf = (field: string) => {
   if (field.startsWith('expenses') || field === 'hallId') return 6;
-  const at: Record<string, number> = { about: 1, photo: 2, terms: 3, termsFormatted: 4, translation: 5, filters: 7, blockedEventIds: 8 };
+  const at: Record<string, number> = { preacherId: 0, about: 1, photo: 2, terms: 3, termsFormatted: 4, translation: 5, filters: 7, blockedEventIds: 8 };
   return at[field] ?? 0;
 };
 
@@ -189,8 +189,9 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
                   <input className="inp" value={v.messageTitle} maxLength={300} onChange={(e) => set('messageTitle', e.target.value)} />
                 </Field>
               </div>
-              <FieldBox label="Preacher">
-                <MemberPicker single label="Preacher" ids={v.preacherId ? [v.preacherId] : []} onChange={(ids) => set('preacherId', ids[0] ?? '')} />
+              <FieldBox label="Preacher" hint="Only pastors can be chosen." error={errors.preacherId}>
+                <MemberPicker single pastorsOnly label="Preacher" placeholder="Type a pastor's name or mobile number"
+                  ids={v.preacherId ? [v.preacherId] : []} onChange={(ids) => set('preacherId', ids[0] ?? '')} />
               </FieldBox>
 
               <div className="g2">

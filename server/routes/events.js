@@ -38,6 +38,18 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
 
   /* Members by name, for the preacher and the teams. Only members who finished registering. */
   const members = async () => (onCatalyst() ? (await loadMembers()).filter((m) => m.name && m.name !== '(not registered yet)') : []);
+  const isPastor = (m) => String(m.memberType || '').toLowerCase() === 'pastor';
+
+  /* The preacher is always a pastor: anyone else is refused, whatever the form sent. */
+  const checkPreacher = async (body) => {
+    const id = String(body?.preacherId || '').trim();
+    if (!id || !onCatalyst()) return;
+    const m = (await members()).find((x) => x.rowId === id);
+    if (!m || !isPastor(m)) {
+      throw Object.assign(new EventError(400, 'Some details need attention.'), { errors: { preacherId: 'Choose a pastor. Only members marked as pastors can preach.' } });
+    }
+  };
+
   const shown = (req) => (m) => ({
     id: m.rowId, name: m.name,
     mobile: m.mobile ? (can(req.session.role, 'members.pii') ? m.mobile : maskMobile(m.mobile)) : '',
@@ -50,7 +62,7 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
   }));
 
   app.get('/api/event-admin/members', ...view, guarded(async (req, res) => {
-    const all = await members();
+    const all = (await members()).filter((m) => req.query.pastors !== '1' || isPastor(m));
     const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (ids.length) return res.json({ rows: all.filter((m) => ids.includes(m.rowId)).map(shown(req)) });
     const q = String(req.query.q || '').trim().toLowerCase();
@@ -72,12 +84,14 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
   }));
 
   app.post('/api/event-admin/events', ...manage, guarded(async (req, res) => {
+    await checkPreacher(req.body);
     const made = await createEvent(req.body || {});
     await audit(req, 'Added an event', made.name);
     res.json({ ok: true, ...made });
   }));
 
   app.put('/api/event-admin/events/:id', ...manage, guarded(async (req, res) => {
+    await checkPreacher(req.body);
     const done = await updateEvent(req.params.id, req.body || {});
     await audit(req, 'Changed an event', done.name);
     res.json({ ok: true, id: done.id, name: done.name });

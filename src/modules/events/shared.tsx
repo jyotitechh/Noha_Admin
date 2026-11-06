@@ -101,8 +101,10 @@ export function FieldBox({ label, hint, error, children }: { label: ReactNode; h
  * Choose members by name or mobile number. `ids` is what is chosen; one when `single`.
  * Names for ids chosen before are fetched once, so an edited form shows who is there.
  */
-export function MemberPicker({ ids, onChange, single, placeholder, label }: {
+export function MemberPicker({ ids, onChange, single, placeholder, label, pastorsOnly }: {
   ids: string[]; onChange: (ids: string[]) => void; single?: boolean; placeholder?: string; label: string;
+  /** Offer only members marked as pastors. */
+  pastorsOnly?: boolean;
 }) {
   const [known, setKnown] = useState<Record<string, Person>>({});
   const [q, setQ] = useState('');
@@ -123,13 +125,13 @@ export function MemberPicker({ ids, onChange, single, placeholder, label }: {
     if (term.length < 2) { setHits([]); return; }
     setBusy(true);
     const t = setTimeout(() => {
-      api.get<{ rows: Person[] }>(`/event-admin/members?q=${encodeURIComponent(term)}`)
+      api.get<{ rows: Person[] }>(`/event-admin/members?q=${encodeURIComponent(term)}${pastorsOnly ? '&pastors=1' : ''}`)
         .then((r) => setHits(r.rows))
         .catch(() => setHits([]))
         .finally(() => setBusy(false));
     }, 250);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, pastorsOnly]);
 
   const pick = (p: Person) => {
     setKnown((k) => ({ ...k, [p.id]: p }));
@@ -169,7 +171,7 @@ export function MemberPicker({ ids, onChange, single, placeholder, label }: {
                     {ids.includes(p.id) ? <Icon name="check" /> : <Icon name="plus" />}
                   </li>
                 ))}
-                {!busy && !hits.length && <li className="muted" style={{ padding: 12 }}>No member found.</li>}
+                {!busy && !hits.length && <li className="muted" style={{ padding: 12 }}>{pastorsOnly ? 'No pastor found.' : 'No member found.'}</li>}
                 {busy && !hits.length && <li className="muted" style={{ padding: 12 }}>Searching…</li>}
               </ul>
             </div>
