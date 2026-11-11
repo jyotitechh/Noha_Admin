@@ -10,6 +10,7 @@ import { useAuth } from '@/state/auth';
 import { Confirm, Drawer, useToast } from '@/components/layers';
 import { Btn, Chip, Empty, Failed, Icon, Kv, Loading, Seg } from '@/components/ui';
 import { EventFormDrawer, blankEvent, formOf } from './EventForm';
+import { mapLink } from './LocationPicker';
 import { dayLong, forgetChoices, time12, whenLong, type EventDetail, type EventForm, type EventRow } from './shared';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -216,7 +217,10 @@ function EventView({ e }: { e: EventDetail }) {
         ['Date', dayLong(e.date)],
         ['Time', `${time12(e.startTime)} to ${time12(e.endTime)}`],
         ['Timezone', e.timezone],
-        ['Location', e.locationName || e.locationAddress ? <span key="l">{e.locationName}{e.locationAddress ? <><br /><span className="muted">{e.locationAddress}</span></> : null}</span> : '—'],
+        ['Location', e.locationName || e.locationAddress
+          ? <span key="l">{e.locationName}{e.locationAddress && e.locationAddress !== e.locationName ? <><br /><span className="muted">{e.locationAddress}</span></> : null}
+            {e.locationLat && e.locationLon ? <><br /><a href={mapLink(e.locationLat, e.locationLon)} target="_blank" rel="noreferrer">Open on the map</a></> : null}</span>
+          : '—'],
         ['Publish date and time', dash(whenLong(e.publishAt))],
         ['Event group', dash(e.groupName)],
         ['Message title', dash(e.messageTitle)],

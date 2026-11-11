@@ -6,12 +6,18 @@ import { Icon } from '@/components/ui';
 
 export interface Option { id: string; name: string }
 
+/** A place from the map search, or one saved from an earlier event. */
+export interface Place {
+  id: string; name: string; area: string; city: string; state: string; country: string; address: string; lat: string; lon: string;
+}
+
 export interface Choices {
   languageGroups: Option[];
   eventGroups: (Option & { languageGroupName: string | null })[];
   halls: (Option & { seats: number | null })[];
   memberGroups: Option[];
   pastors: Option[];
+  savedLocations: Place[];
   expenses: { key: string; label: string }[];
   source: 'catalyst' | 'sample';
 }
@@ -23,7 +29,9 @@ export interface EventForm {
   showOnDashboard: boolean; hideFromPublic: boolean; hideFromLeaders: boolean;
   groupId: string; tallyLedgerTitle: string; messageTitle: string; preacherId: string;
   date: string; publishAt: string;
-  locationName: string; locationAddress: string;
+  locationId: string; locationName: string; locationAddress: string; locationLat: string; locationLon: string;
+  /** Only sent when saving: the parts of a place picked on the map, so it can be kept in the saved places. */
+  locationParts: { area: string; city: string; state: string; country: string } | null;
   startTime: string; endTime: string; timezone: string;
   hideFromDonation: boolean; visible: boolean;
   maxAge: number | null; meetingLink: string; zoomId: string; zoomPassword: string;

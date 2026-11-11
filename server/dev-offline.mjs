@@ -52,6 +52,8 @@ Object.assign(process.env, {
     STRATUS_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
     CATALYST_ACCOUNTS_HOST: `http://127.0.0.1:${STRATUS_PORT}`,
   }),
+  /* Place search for an event's location: this stand-in, not OpenStreetMap. */
+  PLACES_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
 });
 delete process.env.ADMIN_PASSPHRASE;
 
@@ -311,6 +313,17 @@ http.createServer(async (req, res) => {
   if (key === '/oauth/v2/token') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ access_token: 'offline-access-token', expires_in: 3600 }));
+  }
+  /* A stand-in for the map search (Nominatim's /search). */
+  if (key === '/search') {
+    const q = (new URL(req.url, 'http://x').searchParams.get('q') || '').toLowerCase();
+    const all = [
+      { osm_type: 'node', osm_id: 1001, lat: '19.018', lon: '72.843', name: 'Dadar', display_name: 'Dadar, Mumbai, Maharashtra, India', address: { suburb: 'Dadar', city: 'Mumbai', state: 'Maharashtra', country: 'India' } },
+      { osm_type: 'way', osm_id: 1002, lat: '19.119', lon: '72.846', name: 'Andheri East Community Hall', display_name: 'Andheri East Community Hall, Andheri East, Mumbai, Maharashtra, 400069, India', address: { suburb: 'Andheri East', city: 'Mumbai', state: 'Maharashtra', country: 'India' } },
+      { osm_type: 'node', osm_id: 1003, lat: '18.520', lon: '73.856', name: 'Pune', display_name: 'Pune, Pune District, Maharashtra, India', address: { city: 'Pune', state: 'Maharashtra', country: 'India' } },
+    ].filter((p) => p.display_name.toLowerCase().includes(q));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify(all));
   }
   if (req.method === 'GET') {
     const f = stored.get(key);

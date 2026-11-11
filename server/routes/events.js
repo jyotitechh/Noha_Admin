@@ -9,6 +9,7 @@
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers, pastoralChoices } from '../noah-schema.js';
+import { searchPlaces, PlaceError } from '../places.js';
 import {
   EventError, onCatalyst, listEvents, getEvent, createEvent, updateEvent, archiveEvent, restoreEvent, deleteEvent,
   listGroups, createGroup, updateGroup, archiveGroup, restoreGroup, deleteGroup, listLanguageGroups, createLanguageGroup, choices,
@@ -31,6 +32,7 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
       await fn(req, res);
     } catch (e) {
       if (e instanceof EventError) return res.status(e.status).json({ error: e.message, ...(e.errors ? { errors: e.errors } : {}) });
+      if (e instanceof PlaceError) return res.status(e.status).json({ error: e.message });
       console.error('[events]', e);
       res.status(503).json({ error: 'That could not be done just now. Try again in a moment.' });
     }
@@ -69,6 +71,12 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
     const digits = q.replace(/\D/g, '');
     const hit = q ? all.filter((m) => m.name.toLowerCase().includes(q) || (digits.length >= 3 && String(m.mobile).replace(/\D/g, '').includes(digits))) : [];
     res.json({ rows: hit.slice(0, 20).map(shown(req)) });
+  }));
+
+  /* Places on the map, for an event's location. Searching costs the public map service a request, so only someone who
+     can add or change events may. */
+  app.get('/api/event-admin/places', ...manage, guarded(async (req, res) => {
+    res.json({ rows: await searchPlaces(String(req.query.q || '')) });
   }));
 
   /* ---------- events ---------- */

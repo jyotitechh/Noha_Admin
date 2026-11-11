@@ -6,6 +6,7 @@
        eventGroup           the group an event belongs to (its pastors, donation and scanning teams)
        eventLanguageGroups  "Mumbai - English" and the like; every event group belongs to one
        halls, groups        read only: the hall an event is in, and the member groups it can be limited to
+       locations            the places the office has chosen on the map before, offered again when adding an event
      Without a Catalyst connection (the sample data) the same rows are kept in memory instead.
 
    HOW THE FIELDS ARE STORED (the tables were empty when this was written, so these are the console's choices,
@@ -17,6 +18,8 @@
      who may see it          filters, JSON: { forPastor, forLeader, forVip, forPrayerWarrior, memberGroups: [ROWID] }
      visible                 isInvisible is the opposite of the form's "Visible" switch
      links between rows      by ROWID: events.eventGroupId, eventGroup.eventLanguageGroupId, events.hallId
+     the place               locationName and locationAddress, with locationLat / locationLon and locationId (the map's own id
+                             for it, e.g. 'way:12345'), picked from a map search (server/places.js)
    Nothing is deleted: archiving sets isArchived, as everywhere else in the office's schema. */
 
 import { io } from './noah-schema.js';
@@ -30,7 +33,7 @@ export class EventError extends Error {
 export const onCatalyst = () => live() && isNoah();
 
 /** The office's tables this file reads or writes, by name. */
-export const EVENT_TABLES = { events: 'events', groups: 'eventGroup', langs: 'eventLanguageGroups', halls: 'halls', memberGroups: 'groups' };
+export const EVENT_TABLES = { events: 'events', groups: 'eventGroup', langs: 'eventLanguageGroups', halls: 'halls', memberGroups: 'groups', locations: 'locations' };
 
 /* ---------- rows, from Catalyst or from memory ---------- */
 
@@ -159,8 +162,11 @@ function eventOut(r) {
     preacherId: str(r.preacherId),
     date: Number(r.eventType) === 1 || !r.eventType ? str(r.eventValue).slice(0, 10) : '',
     publishAt: toLocalInput(r.publishDateTime),
+    locationId: str(r.locationId),
     locationName: str(r.locationName),
     locationAddress: str(r.locationAddress),
+    locationLat: str(r.locationLat),
+    locationLon: str(r.locationLon),
     startTime: str(r.startTime).slice(0, 5),
     endTime: str(r.endTime).slice(0, 5),
     timezone: str(r.timezone) || 'Asia/Kolkata',
@@ -194,7 +200,8 @@ function eventIn(v) {
     preacherId: v.preacherId || '',
     eventType: 1, eventValue: v.date,
     publishDateTime: v.publishAt.replace('T', ' ') + ':00',
-    locationName: v.locationName, locationAddress: v.locationAddress,
+    locationId: v.locationId, locationName: v.locationName, locationAddress: v.locationAddress,
+    locationLat: v.locationLat, locationLon: v.locationLon,
     startTime: v.startTime, endTime: v.endTime, timezone: v.timezone,
     startTimeUtc: utcStamp(zonedToUtc(v.date, v.startTime, v.timezone)),
     endTimeUtc: utcStamp(zonedToUtc(v.date, v.endTime, v.timezone)),
@@ -237,8 +244,15 @@ async function validateEvent(body, selfId) {
     preacherId: text(body.preacherId, 30),
     date: text(body.date, 10),
     publishAt: text(body.publishAt, 16),
+    locationId: text(body.locationId, 100),
     locationName: text(body.locationName, 200),
     locationAddress: text(body.locationAddress, 500),
+    locationLat: text(body.locationLat, 20),
+    locationLon: text(body.locationLon, 20),
+    locationParts: body.locationParts && typeof body.locationParts === 'object' ? {
+      area: text(body.locationParts.area, 200), city: text(body.locationParts.city, 100),
+      state: text(body.locationParts.state, 100), country: text(body.locationParts.country, 100),
+    } : null,
     startTime: text(body.startTime, 5),
     endTime: text(body.endTime, 5),
     timezone: text(body.timezone, 60) || 'Asia/Kolkata',
@@ -270,6 +284,12 @@ async function validateEvent(body, selfId) {
   else if (TIME.test(v.startTime) && v.endTime <= v.startTime) errors.endTime = 'The end time must be after the start time.';
   if (!validZone(v.timezone)) errors.timezone = 'Choose a timezone from the list.';
   if (v.maxAge !== null && (!Number.isInteger(v.maxAge) || v.maxAge < 1 || v.maxAge > 120)) errors.maxAge = 'A whole number of years, 1 to 120.';
+  if (v.locationLat || v.locationLon) {
+    const lat = Number(v.locationLat); const lon = Number(v.locationLon);
+    if (!v.locationLat || !v.locationLon || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) {
+      errors.locationName = 'Choose the place again from the search.';
+    }
+  }
   if (v.meetingLink && !LINK.test(v.meetingLink)) errors.meetingLink = 'A link starting with https://';
   if (v.photo && !LINK.test(v.photo)) errors.photo = 'A picture link starting with https://';
   for (const [k, , label] of EXPENSES) {
@@ -333,9 +353,27 @@ export async function getEvent(id, nameOfMember) {
   };
 }
 
+/** A place chosen on the map is kept in `locations`, so the next event can pick it from the saved list. A failure here
+    never fails the event: the event already has the place written on it. */
+async function rememberPlace(v) {
+  if (!v.locationId || !v.locationLat || !v.locationLon || !v.locationName) return;
+  try {
+    if ((await rows('locations')).some((r) => str(r.locationId) === v.locationId && isLive(r))) return;
+    const p = v.locationParts || {};
+    await insertRow('locations', {
+      locationId: v.locationId, name: v.locationName,
+      area: p.area || v.locationAddress, city: p.city || '', state: p.state || '', country: p.country || '',
+      lat: v.locationLat, lng: v.locationLon, createdOn: stamp(), archived: false,
+    });
+  } catch (err) {
+    console.error(`[events] could not remember the place "${v.locationName}": ${err.message}`);
+  }
+}
+
 export async function createEvent(body) {
   const v = await validateEvent(body, '');
   const id = await insertRow('events', { ...eventIn(v), isArchived: false, createdOn: stamp() });
+  await rememberPlace(v);
   return { id, name: v.name };
 }
 
@@ -345,6 +383,7 @@ export async function updateEvent(id, body) {
   if (!r || !isLive(r)) throw new EventError(404, 'That event is not there any more.');
   const v = await validateEvent(body, String(id));
   await updateRow('events', { ROWID: String(id), ...eventIn(v), updatedOn: stamp() });
+  await rememberPlace(v);
   return { id: String(id), name: v.name, before: eventOut(r).name };
 }
 
@@ -486,8 +525,15 @@ export async function createLanguageGroup(body) {
 
 /** What the forms choose from. */
 export async function choices() {
-  const [langs, halls, memberGroups, groups] = await Promise.all([listLanguageGroups(), rows('halls'), rows('memberGroups'), listGroups()]);
+  const [langs, halls, memberGroups, groups, places] = await Promise.all([listLanguageGroups(), rows('halls'), rows('memberGroups'), listGroups(), rows('locations')]);
   return {
+    savedLocations: places.filter(isLive).map((p) => {
+      const parts = [str(p.area), str(p.city), str(p.state), str(p.country)].filter(Boolean);
+      return {
+        id: str(p.locationId) || str(p.ROWID), name: str(p.name), area: str(p.area), city: str(p.city), state: str(p.state), country: str(p.country),
+        address: parts.join(', '), lat: str(p.lat), lon: str(p.lng),
+      };
+    }).filter((p) => p.name && p.lat && p.lon).sort((a, b) => a.name.localeCompare(b.name)),
     languageGroups: langs,
     eventGroups: groups.map(({ id, name, languageGroupName }) => ({ id, name, languageGroupName })),
     halls: halls.filter(isLive).map((h) => ({ id: str(h.ROWID), name: str(h.name), seats: num(h.totalSeats) })),

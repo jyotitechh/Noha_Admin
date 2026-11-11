@@ -10,6 +10,7 @@ import { Drawer, useToast } from '@/components/layers';
 import { Btn, Field, Note, Switch } from '@/components/ui';
 import { RichText } from '@/modules/content/RichText';
 import { PictureInput } from '@/modules/content/PictureInput';
+import { LocationPicker } from './LocationPicker';
 import { FieldBox, MemberPicker, TIMEZONES, dayLong, time12, useChoices, type EventForm as Form, type EventRow } from './shared';
 
 const STEPS = [
@@ -37,7 +38,8 @@ const nowLocal = () => { const d = new Date(); return `${d.getFullYear()}-${pad(
 export const blankEvent = (): Form => ({
   name: '', description: '', showOnDashboard: false, hideFromPublic: false, hideFromLeaders: false,
   groupId: '', tallyLedgerTitle: '', messageTitle: '', preacherId: '',
-  date: '', publishAt: nowLocal(), locationName: '', locationAddress: '',
+  date: '', publishAt: nowLocal(),
+  locationId: '', locationName: '', locationAddress: '', locationLat: '', locationLon: '', locationParts: null,
   startTime: '', endTime: '', timezone: 'Asia/Kolkata', hideFromDonation: false, visible: true,
   maxAge: null, meetingLink: '', zoomId: '', zoomPassword: '',
   about: '', photo: '', terms: '', termsFormatted: '', translation: '', hallId: '',
@@ -219,14 +221,18 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
                 </select>
               </Field>
 
-              <div className="g2">
-                <Field label="Location">
-                  <input className="inp" value={v.locationName} maxLength={200} placeholder="Dadar" onChange={(e) => set('locationName', e.target.value)} />
-                </Field>
-                <Field label="Address">
-                  <input className="inp" value={v.locationAddress} maxLength={500} placeholder="Dadar, Mumbai, Maharashtra, India" onChange={(e) => set('locationAddress', e.target.value)} />
-                </Field>
-              </div>
+              <FieldBox label="Location" error={errors.locationName}>
+                <LocationPicker
+                  saved={choices.savedLocations}
+                  value={v.locationName || v.locationAddress
+                    ? { id: v.locationId, name: v.locationName, address: v.locationAddress, lat: v.locationLat, lon: v.locationLon }
+                    : null}
+                  onChange={(c) => setV((x) => ({
+                    ...x,
+                    locationId: c?.id ?? '', locationName: c?.name ?? '', locationAddress: c?.address ?? '',
+                    locationLat: c?.lat ?? '', locationLon: c?.lon ?? '', locationParts: c?.parts ?? null,
+                  }))} />
+              </FieldBox>
 
               <div className="g2">
                 <Field label="Attendee's maximum age" error={errors.maxAge}>

@@ -1768,6 +1768,48 @@ section('Events, event groups and language groups');
     !(await EV.listEvents()).some((e) => e.id === first.id) && (await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id && r.isArchived === true));
   check('...and is gone from what still blocks it', (await EV.getEvent(second.id, async () => null)).blockedEvents.length === 0);
 
+  /* ---- the place on the map ---- */
+  const PL = await import('./places.js');
+  const realFetchP = globalThis.fetch;
+  let asked = [];
+  const nominatim = [
+    { place_id: 7, osm_type: 'way', osm_id: 555, lat: '19.0178123', lon: '72.8478456', name: 'St. Joseph Church', display_name: 'St. Joseph Church, Dadar West, Mumbai, Maharashtra, 400028, India', address: { suburb: 'Dadar West', city: 'Mumbai', state: 'Maharashtra', country: 'India' } },
+    { place_id: 8, osm_type: 'way', osm_id: 555, lat: '19.0178123', lon: '72.8478456', name: 'St. Joseph Church', display_name: 'duplicate', address: {} },
+    { place_id: 9, osm_type: 'node', osm_id: 9, lat: 'nope', lon: 'nope', name: 'Broken', display_name: 'Broken', address: {} },
+  ];
+  globalThis.fetch = async (url, init) => { asked.push({ url: String(url), headers: init?.headers }); return new Response(JSON.stringify(nominatim), { status: 200 }); };
+  let found;
+  try { found = await PL.searchPlaces('  St Joseph   Dadar '); } finally { globalThis.fetch = realFetchP; }
+  check('a place search asks OpenStreetMap, as a named application', asked.length === 1 && /^https:\/\/nominatim\.openstreetmap\.org\/search\?/.test(asked[0].url) && /KarunaSadan/.test(asked[0].headers['User-Agent']), asked[0]?.url);
+  check('...for at most six, with the address parts', /limit=6/.test(asked[0].url) && /addressdetails=1/.test(asked[0].url));
+  check('...and a place comes back as a name, its parts, an address and a position', found.length === 1 && found[0].name === 'St. Joseph Church' && found[0].area === 'Dadar West' && found[0].city === 'Mumbai' && found[0].lat === '19.017812' && found[0].lon === '72.847846' && found[0].id === 'way:555', JSON.stringify(found));
+  check('...with the same place listed once and one without a position left out', found.length === 1);
+  globalThis.fetch = async () => { throw new Error('should have been remembered'); };
+  try { check('the same search again is remembered, not asked twice', (await PL.searchPlaces('st joseph dadar')).length === 1); } finally { globalThis.fetch = realFetchP; }
+  check('a search of under three letters asks nothing', (await PL.searchPlaces('ab')).length === 0);
+  process.env.PLACES_BASE_URL = 'http://places.test';
+  globalThis.fetch = async () => new Response('busy', { status: 429 });
+  const quietP = console.error; console.error = () => {};
+  let placeFail = null;
+  try { await PL.searchPlaces('somewhere new'); } catch (e) { placeFail = e; } finally { globalThis.fetch = realFetchP; console.error = quietP; delete process.env.PLACES_BASE_URL; }
+  check('a map service that will not answer is a plain failure', placeFail?.status === 503 && /not available/.test(placeFail.message) && !/429/.test(placeFail.message), placeFail?.message);
+
+  const where = { locationId: 'way:555', locationName: 'St. Joseph Church', locationAddress: 'St. Joseph Church, Dadar West, Mumbai, Maharashtra, India', locationLat: '19.017812', locationLon: '72.847846', locationParts: { area: 'Dadar West', city: 'Mumbai', state: 'Maharashtra', country: 'India' } };
+  const placed = await EV.createEvent({ ...base, name: 'At the church', ...where });
+  const placedRow = (await EV.storedRows('events')).find((r) => r.name === 'At the church');
+  check('an event keeps the place\'s name, address, position and map id', placedRow?.locationName === 'St. Joseph Church' && placedRow.locationLat === '19.017812' && placedRow.locationLon === '72.847846' && placedRow.locationId === 'way:555');
+  check('...and reads them back for the form', (await EV.getEvent(placed.id, async () => null)).locationLat === '19.017812');
+  const saved1 = await EV.storedRows('locations');
+  check('a place chosen on the map is kept in the saved places', saved1.length === 1 && saved1[0].name === 'St. Joseph Church' && saved1[0].city === 'Mumbai' && saved1[0].lat === '19.017812' && saved1[0].lng === '72.847846', JSON.stringify(saved1));
+  await EV.createEvent({ ...base, name: 'At the church again', ...where });
+  check('...once, however many events use it', (await EV.storedRows('locations')).length === 1);
+  const offered = (await EV.choices()).savedLocations;
+  check('...and offered again when adding an event', offered.length === 1 && offered[0].name === 'St. Joseph Church' && offered[0].address === 'Dadar West, Mumbai, Maharashtra, India' && offered[0].lat === '19.017812', JSON.stringify(offered));
+  check('a position that is not one is refused', !!(await refused(EV.createEvent({ ...base, name: 'Bad pin', locationLat: '99', locationLon: '10' })))?.errors?.locationName);
+  check('...as is a latitude with no longitude', !!(await refused(EV.createEvent({ ...base, name: 'Half pin', locationLat: '19.01' })))?.errors?.locationName);
+  const typed = await EV.createEvent({ ...base, name: 'Typed place', locationName: 'Church hall', locationAddress: 'Near the station' });
+  check('an event with a place typed in, and no position, is still fine and is not saved as a place', !!typed.id && (await EV.storedRows('locations')).length === 1);
+
   /* ---- the archive: hidden from everyone, kept for the office, restorable or deletable ---- */
   const archivedList = await EV.listEvents({ archived: true });
   check('the Archived list shows what was archived, and only that', archivedList.length === 1 && archivedList[0].id === first.id && archivedList[0].archived === true, JSON.stringify(archivedList));

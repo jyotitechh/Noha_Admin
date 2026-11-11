@@ -15,6 +15,7 @@ Code: `server/events.js` (storage), `server/routes/events.js` (API), `src/module
 | `eventGroup` | reads and writes |
 | `eventLanguageGroups` | reads, and adds new ones ("Mumbai - English") |
 | `halls` | reads (the Hall choice) |
+| `locations` | reads and adds: the places chosen on the map before, offered again as "Saved places" |
 | `groups` | reads (member groups an event can be limited to) |
 
 All five were **empty** in the project when this was built, so the formats below are the console's choices. The Noah
@@ -37,7 +38,7 @@ API and the Flutter app must read them the same way.
 | Start, End | `startTime`, `endTime` | `'HH:mm'` in the event's timezone |
 | | `startTimeUtc`, `endTimeUtc` | the same moments in UTC, `'YYYY-MM-DD HH:mm:ss'` |
 | Timezone | `timezone` | IANA name, default `Asia/Kolkata` |
-| Location, Address | `locationName`, `locationAddress` | text |
+| Location | `locationName`, `locationAddress`, `locationLat`, `locationLon`, `locationId` | picked from a map search: the name, the full address, the latitude and longitude as text (6 decimals), and the map's own id (for example `way:12345`) |
 | Attendee's maximum age | `allowMaxAge` | int or empty |
 | Meeting link, Zoom ID, Zoom password | `meetingLink`, `zoomMeetingId`, `zoomMeetingPassword` | text |
 | About | `formattedDescription` | HTML, cleaned (no scripts) |
@@ -65,6 +66,19 @@ target/result counters. Rows are linked by **ROWID**.
 | Pastors | `connectedEmployees` | JSON list of member ROWIDs (members whose `memberType` is pastor) |
 
 A group that events still use cannot be archived.
+
+## The place on the map
+
+The Location field is a search, not typed text. The office types a place or address, picks one from a short list (a name and
+one line under it), and the form then shows only a compact card: the name, the address and a small map with a pin.
+
+- The search is OpenStreetMap's (Nominatim), asked from the server (`server/places.js`, `GET /api/event-admin/places?q=`).
+  It needs no key. The public service asks for one request a second at most, so searches are spaced and remembered for ten
+  minutes. `PLACES_BASE_URL` points it at another Nominatim. Google Places or Mapbox would replace `searchPlaces` and nothing else.
+- A place picked on the map is also written to `locations` (`name`, `area`, `city`, `state`, `country`, `lat`, `lng`, `locationId`),
+  once, so the next event can choose it under "Saved places".
+- The event itself carries the place (columns above), so the app can show it, and can open a map from `locationLat` and
+  `locationLon`, without reading `locations`.
 
 ## Archive and delete
 
