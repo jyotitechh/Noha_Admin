@@ -67,22 +67,26 @@ target/result counters. Rows are linked by **ROWID**.
 
 A group that events still use cannot be archived.
 
-## Door scanner, attendance and bookings
+## Attendance and bookings
 
 Built from the Noah API developer's `docs/EVENTS-QR-CONTRACT.md` and `docs/FOR-CONSOLE-EVENTS.md` (`server/routes/attendance.js`,
-`src/modules/events/Scanner.tsx`, `Attendance.tsx`, `Bookings.tsx`).
+`Attendance.tsx`, `Bookings.tsx`). **Door staff scan passes in the Noah app** (the `scanner` app role, below); the console has no
+scanner of its own.
 
-| Screen | Who | What it calls |
+| Screen | Who | What it reads |
 |---|---|---|
-| **Event scanner** | `events.scan` | `POST /admin/events/:id/scan` to look, then with `confirm: true` to admit. Camera: the browser's BarcodeDetector, else jsQR; or the typed reference |
-| **Attendance** | `events.view` or `events.scan` | `GET /admin/events/:id/attendance` (every 5 s while Live), `.../attendance/export` (CSV), `.../attendance/audit` |
-| Correct attendance | `events.scan` | `POST /admin/events/:id/attendance/correct`, a reason is required |
+| **Attendance**: every event | `events.view` or `events.scan` | `GET /api/event-admin/attendance/events`: each event with booked, present, not yet arrived (from Catalyst's `passes` table) |
+| **Attendance**: one event (click its name) | `events.view` or `events.scan` | `GET /api/event-admin/events/:id/people`: everyone booked, Present / Not yet arrived / Cancelled, when they came in (`passIsUsedTime`, UTC) and who let them in (`passIsUsedEmployeeId`). The numbers at the top are counted from this list |
+| Latest arrivals | same | the Noah API's `recent` (`GET /admin/events/:id/attendance`): the last 15 let in, read every 5 s while Live is on; when its numbers move, the list and history are read again |
+| History (audit trail) | same | `GET /admin/events/:id/attendance/audit`: every admission and hand correction, who, when, device, reason (kept by the Noah API in `taskLogs`) |
+| CSV | same | `GET /admin/events/:id/attendance/export` |
+| Mark present / absent | `events.scan` | `POST /admin/events/:id/attendance/correct`, a reason is required |
 | **Bookings** | `events.view` | Catalyst's `passes` table, read only |
 | "In the app" on an event | `events.view` | `GET /admin/diagnostics/events`: whether the app shows it and why not |
 
 The console's server checks the permission before every call, and names the staff member (`X-Admin-Name`, `X-Admin-Staff-Id` / `staffId`).
-A scan the Noah API could not record is shown as a failed scan. The form now saves `passRequired` and `passAvailable` (seats), writes
-`passUsed: 0` only when an event is created, and the audience is "Everyone" unless roles are picked.
+The form saves `passRequired` and `passAvailable` (seats), writes `passUsed: 0` only when an event is created, and the audience is
+"Everyone" unless roles are picked.
 
 ### Door staff scanning in the Noah app (the `scanner` app role)
 

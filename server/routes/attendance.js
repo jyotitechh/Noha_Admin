@@ -1,14 +1,15 @@
-/* Entry passes at the door, attendance and bookings: the console's part of EVENTS-QR-CONTRACT.md and FOR-CONSOLE-EVENTS.md.
+/* Attendance and bookings: the console's part of EVENTS-QR-CONTRACT.md and FOR-CONSOLE-EVENTS.md.
 
-   The Noah API keeps the passes, checks the QR codes and records attendance. It trusts the console's admin key and knows nothing
-   of the console's roles, so THIS server checks the permission before every call:
+   Door staff scan passes in the Noah app (the `scanner` app role, see server/scanner-role.js); the console has no scanner of its
+   own. It shows who came: every event with its numbers, and for one event everyone booked, present or not, from the passes table;
+   plus the Noah API's live numbers, latest arrivals, CSV and history (audit trail). The Noah API trusts the console's admin key
+   and knows nothing of the console's roles, so THIS server checks the permission before every call:
 
-     events.scan                  the door scanner, and correcting attendance by hand
-     events.view or events.scan   the attendance numbers, the live list, the CSV, the audit trail
+     events.scan                  correcting attendance by hand
+     events.view or events.scan   the events and their attendance, the CSV, the history
      events.view                  bookings, and "is it shown in the app"
 
-   Every call to the Noah API names the staff member (X-Admin-Name) and their id (staffId, digits), which it stores with the
-   scan. A scan the Noah API could not record (500, or no answer) is shown as a failed scan, never as a success. */
+   Every call to the Noah API names the staff member (X-Admin-Name) and their id (staffId, digits). */
 
 import { roleById } from '../db.js';
 import { writeAudit } from '../store.js';
@@ -21,6 +22,25 @@ const { noahConfigured, NoahApiError } = noah;
 /* The staff member's id, as digits: their member row, else their staff row. */
 const staffIdOf = (req) => [req.session?.memberRowId, req.session?.rowId, req.session?.staffId]
   .map((v) => String(v ?? '')).find((v) => /^\d+$/.test(v)) || '';
+
+const bool = (v) => v === true || v === 'true' || v === 1 || v === '1';
+
+/** The passes table, one row per booking, in plain words. `inactive` = cancelled by the member; `passIsUsed` = came in. */
+async function passRows() {
+  return (await io.getRows('tbl:passes'))
+    .filter((p) => !bool(p.archived))
+    .map((p) => ({
+      id: String(p.ROWID), eventId: String(p.eventId ?? ''), memberId: String(p.memberId ?? ''),
+      cancelled: bool(p.inactive), present: !bool(p.inactive) && bool(p.passIsUsed),
+      bookedAt: String(p.created || p.CREATEDTIME || '').slice(0, 19),
+      usedAt: p.passIsUsedTime ? String(p.passIsUsedTime).slice(0, 19) : '',
+      usedBy: /^\d+$/.test(String(p.passIsUsedEmployeeId ?? '')) ? String(p.passIsUsedEmployeeId) : '',
+      seat: String(p.seatLabel ?? ''),
+    }));
+}
+
+/* The office's member number (members.memberId). The register falls back to the row id when there is none: show nothing then. */
+const memberNumber = (m) => (m?.id && String(m.id) !== String(m.rowId) ? String(m.id) : '');
 
 const pad = (n) => String(n).padStart(2, '0');
 const istDay = (offsetDays = 0) => {
@@ -53,46 +73,60 @@ export default function mountAttendance(app, { requireSession, requirePerm }) {
     }
   };
 
-  /* ---------- the door scanner ---------- */
+  /* Door staff scan passes in the Noah app (the `scanner` app role), not in the console. The console shows who came. */
 
-  /* Events to scan for: from yesterday to a week ahead, soonest first. */
-  app.get('/api/event-admin/scan/events', ...scan, async (_req, res) => {
+  /* ---------- attendance: every event, and the people booked for one ---------- */
+
+  /* The events, newest first, each with how many are booked, present and not yet arrived (from the passes table). */
+  app.get('/api/event-admin/attendance/events', ...watch, async (_req, res) => {
     try {
-      res.json({ rows: await listEvents({ from: istDay(-1), to: istDay(7) }), today: istDay(0) });
+      const [events, passes] = await Promise.all([listEvents(), onCatalyst() ? passRows() : []]);
+      const tally = new Map();
+      for (const p of passes) {
+        const t = tally.get(p.eventId) || { booked: 0, present: 0, cancelled: 0 };
+        if (p.cancelled) t.cancelled += 1; else { t.booked += 1; if (p.present) t.present += 1; }
+        tally.set(p.eventId, t);
+      }
+      const rows = events
+        .map((e) => {
+          const t = tally.get(String(e.id)) || { booked: 0, present: 0, cancelled: 0 };
+          return { ...e, ...t, notArrived: t.booked - t.present };
+        })
+        .sort((a, b) => (b.date + b.startTime).localeCompare(a.date + a.startTime));
+      res.json({ rows, today: istDay(0) });
     } catch (err) {
-      console.error(`[attendance] scan events: ${err.message}`);
+      console.error(`[attendance] events: ${err.message}`);
       res.status(503).json({ error: 'The events could not be read just now.' });
     }
   });
 
-  /* Look at a pass (confirm: false) or admit it (confirm: true). */
-  app.post('/api/event-admin/events/:id/scan', ...scan, async (req, res) => {
-    if (!noahConfigured()) return res.status(503).json({ result: 'failed', ok: false, message: 'The Noah API is not connected on this server, so passes cannot be checked.' });
-    const b = req.body || {};
-    const token = String(b.token || '').trim().slice(0, 600);
-    const reference = String(b.reference || '').trim().toUpperCase().slice(0, 40);
-    if (!token && !reference) return res.status(400).json({ result: 'failed', ok: false, message: 'Scan a code, or type the reference from the pass.' });
+  /* Everyone booked for one event, with whether they are present, when they came in and who let them in. */
+  app.get('/api/event-admin/events/:id/people', ...watch, async (req, res) => {
+    if (!onCatalyst()) return res.json({ rows: [] });
     try {
-      const out = await noah.scanPass(req.params.id, {
-        token: token || undefined, reference: token ? undefined : reference, confirm: b.confirm === true,
-        deviceRef: String(b.deviceRef || '').slice(0, 60) || undefined, staffId: staffIdOf(req), actor: req.user.name,
-      });
-      if (out?.result === 'admitted') {
-        await audit(req, 'Admitted a member at the door', `${out.event?.name ?? 'Event'}: ${out.member?.name ?? 'member'}`,
-          { pass: out.pass?.reference ?? out.pass?.id ?? null, by: token ? 'QR code' : 'typed reference' });
-      }
-      res.json(out);
+      const [passes, members] = await Promise.all([passRows(), loadMembers()]);
+      const who = new Map(members.map((m) => [String(m.rowId), m]));
+      const rows = passes
+        .filter((p) => p.eventId === String(req.params.id))
+        .map((p) => {
+          const m = who.get(p.memberId);
+          const by = p.usedBy ? who.get(p.usedBy) : null;
+          return {
+            passId: p.id, memberId: p.memberId, name: m?.name ?? 'Member', number: memberNumber(m),
+            status: p.cancelled ? 'Cancelled' : p.present ? 'Present' : 'Not yet arrived',
+            bookedAt: p.bookedAt, arrivedAt: p.usedAt,
+            letInBy: p.usedBy ? (by?.name ?? `Staff ${p.usedBy}`) : '',
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json({ rows });
     } catch (err) {
-      /* A 4xx with an answer in the contract's shape is still a result to show; anything else is a failed scan. */
-      if (err instanceof NoahApiError && err.status >= 400 && err.status < 500 && err.code !== 'invalid_admin_key') {
-        return res.status(err.status).json({ result: 'failed', ok: false, message: err.message });
-      }
-      console.error(`[attendance] scan failed: ${err.message}`);
-      res.status(502).json({ result: 'failed', ok: false, message: 'The scan could not be recorded. Nobody was admitted: scan the code again.' });
+      console.error(`[attendance] people: ${err.message}`);
+      res.status(503).json({ error: 'The bookings could not be read just now.' });
     }
   });
 
-  /* ---------- attendance ---------- */
+  /* ---------- attendance: numbers, latest arrivals, CSV and history from the Noah API ---------- */
 
   app.get('/api/event-admin/events/:id/attendance', ...watch, viaNoah(async (req, res) => {
     res.json(await noah.eventAttendance(req.params.id));
@@ -142,22 +176,20 @@ export default function mountAttendance(app, { requireSession, requirePerm }) {
   app.get('/api/event-admin/bookings', ...view, async (req, res) => {
     if (!onCatalyst()) return res.json({ rows: [] });
     try {
-      const [passes, members, events] = await Promise.all([io.getRows('tbl:passes'), loadMembers(), storedRows('events')]);
-      const who = new Map(members.map((m) => [m.rowId, m]));
+      const [passes, members, events] = await Promise.all([passRows(), loadMembers(), storedRows('events')]);
+      const who = new Map(members.map((m) => [String(m.rowId), m]));
       const what = new Map(events.map((e) => [String(e.ROWID), e]));
       const eventId = String(req.query.eventId || '').trim();
-      const bool = (v) => v === true || v === 'true' || v === 1 || v === '1';
       const rows = passes
-        .filter((p) => !bool(p.archived) && (!eventId || String(p.eventId) === eventId))
+        .filter((p) => !eventId || p.eventId === eventId)
         .map((p) => {
-          const m = who.get(String(p.memberId));
-          const e = what.get(String(p.eventId));
-          const status = bool(p.inactive) ? 'Cancelled' : bool(p.passIsUsed) ? 'Attended' : 'Booked';
+          const m = who.get(p.memberId);
+          const e = what.get(p.eventId);
           return {
-            id: String(p.ROWID), eventId: String(p.eventId ?? ''), event: e ? String(e.name ?? '') : '',
-            memberId: String(p.memberId ?? ''), member: m?.name ?? 'Member', number: m?.id ?? '',
-            seat: String(p.seatLabel ?? ''), status,
-            bookedAt: String(p.created || p.CREATEDTIME || '').slice(0, 19), usedAt: p.passIsUsedTime ? String(p.passIsUsedTime).slice(0, 19) : '',
+            id: p.id, eventId: p.eventId, event: e ? String(e.name ?? '') : '',
+            memberId: p.memberId, member: m?.name ?? 'Member', number: memberNumber(m),
+            seat: p.seat, status: p.cancelled ? 'Cancelled' : p.present ? 'Attended' : 'Booked',
+            bookedAt: p.bookedAt, usedAt: p.usedAt,
           };
         })
         .sort((a, b) => b.bookedAt.localeCompare(a.bookedAt));

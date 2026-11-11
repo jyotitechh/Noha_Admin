@@ -12,7 +12,7 @@ const ME={id:'ST-001',name:'Anitha Varghese',title:'Office administrator',email:
 const PERM_GROUPS=[
  ['Membership',[['members.view','View member register'],['members.edit','Create and amend members'],['members.archive','Archive, restore and mark deceased'],['members.export','Import and export members'],['members.pii','Reveal contact details'],['pastoral.manage','Pastoral hierarchy and reassignment'],['approles.manage','Member app roles, feature access and chat rules']]],
  ['Giving and finance',[['giving.view','View receipts and giving'],['giving.receipt','Create, cancel and reissue receipts'],['giving.reconcile','Reconciliation and refunds'],['finance.view','View accounts, expenses and transactions'],['finance.post','Post vouchers and transactions'],['finance.approve','Approve payment batches']]],
- ['Events',[['events.view','View events and passes'],['events.manage','Create events, halls, passes and services'],['events.scan','Scan and confirm admission']]],
+ ['Events',[['events.view','View events and passes'],['events.manage','Create events, halls, passes and services'],['events.scan','Scan passes at the door in the Noah app, and correct attendance']]],
  ['Community',[['community.moderate','Moderate feed, prayer, praise and obituaries'],['rewards.approve','Approve reward withdrawals']]],
  ['Content',[['content.edit','Author content'],['content.publish','Publish content']]],
  ['Communications',[['comms.send','Send broadcast, push and email'],['comms.inbox','Answer member threads'],['comms.calls','Run call campaigns']]],

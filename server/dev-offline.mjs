@@ -69,6 +69,7 @@ globalThis.fetch = (url, init) => {
 
 const { S, T, tables, reset, seed, makeReady, setOutage, removeTable, restoreTable, contentTableId } = await import('./fake-catalyst.mjs');
 const { forgetTables } = await import('./content.js');
+const { forgetEventRows } = await import('./events.js');
 reset(seed());
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -146,6 +147,18 @@ http.createServer(async (req, res) => {
     if (!row) return err(res, 404, 'no_such_row', 'No such row in the fake.');
     Object.assign(row, set);
     S.clearCache();
+    return send(res, 200, { ok: true });
+  }
+
+  /* Put rows straight into a NOAH table (by name, e.g. 'events', 'passes'), for tests that need bookings. */
+  if (req.method === 'POST' && path === '/_fake/insert') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const { table, rows } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    const list = (tables[`tbl:${table}`] ||= []);
+    for (const r of rows || []) list.push({ CREATEDTIME: '2026-11-10 10:00:00', ...r, ROWID: String(r.ROWID) });
+    S.clearCache();
+    forgetEventRows();
     return send(res, 200, { ok: true });
   }
 

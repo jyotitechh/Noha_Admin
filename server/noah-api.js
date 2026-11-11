@@ -184,26 +184,13 @@ export const announceDue = ({ hours, actor } = {}) =>
 
 /* ---------- entry passes, the door scanner and attendance ----------
 
-   EVENTS-QR-CONTRACT.md. The console checks events.scan itself before calling any of these: the Noah API does not know the
-   console's roles. Every call names the staff member (X-Admin-Name, X-Admin-Staff-Id).
+   EVENTS-QR-CONTRACT.md. The console checks the permission itself before calling any of these: the Noah API does not know the
+   console's roles. Every call names the staff member (X-Admin-Name, X-Admin-Staff-Id). Door staff scan in the Noah app
+   (/staff/events/:id/scan with their own token), so the console never calls the scan endpoint itself.
 
-   POST /admin/events/:id/scan                { token | reference, confirm?, staffId, deviceRef? }
-        -> 200 { result, ok, message, event, pass, member, other? }  (result: valid admitted already_scanned invalid wrong_event
-           cancelled not_confirmed event_closed busy). 500 means the admission could not be recorded: a failed scan, never a success.
    GET  /admin/events/:id/attendance          -> { event, registered, confirmed, checkedIn, notYetArrived, cancelled, attendancePercent, capped, recent }
    GET  /admin/events/:id/attendance/export   -> CSV
    POST /admin/events/:id/attendance/correct  { passId | memberId, action: present | absent, reason, staffId } */
-export const scanPass = (eventId, { token, reference, confirm = false, deviceRef, staffId, actor } = {}) =>
-  call(`/admin/events/${encodeURIComponent(eventId)}/scan`, {
-    method: 'POST', actor, staffId,
-    body: {
-      ...(token ? { token } : { reference }),
-      ...(confirm ? { confirm: true } : {}),
-      ...(staffId ? { staffId: String(staffId) } : {}),
-      ...(deviceRef ? { deviceRef } : {}),
-    },
-  });
-
 export const eventAttendance = (eventId) => call(`/admin/events/${encodeURIComponent(eventId)}/attendance`);
 
 export const eventAttendanceCsv = (eventId) => call(`/admin/events/${encodeURIComponent(eventId)}/attendance/export`, { raw: true });

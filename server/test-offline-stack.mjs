@@ -679,6 +679,32 @@ section('Giving the roles a member holds in the app, and reading what the app se
 }
 
 /* ================================================================== */
+section('Attendance: every event, then who came to one');
+
+{
+  const fakeInsert = (table, rows) =>
+    fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table, rows }) }).then((r) => r.json());
+  const EV = '27145000000990001';
+  await fakeInsert('events', [{ ROWID: EV, name: 'Attendance check', eventType: 1, eventValue: '2026-11-20', startTime: '10:00', isArchived: false }]);
+  await fakeInsert('passes', [
+    { ROWID: '27145000000991001', eventId: EV, memberId: ANAND_ID, passIsUsed: true, passIsUsedTime: '2026-11-20 04:35:00', passIsUsedEmployeeId: OLD_ID, inactive: false },
+    { ROWID: '27145000000991002', eventId: EV, memberId: OLD_ID, passIsUsed: false, inactive: false },
+    { ROWID: '27145000000991003', eventId: EV, memberId: DRAFT_MEMBER_ID, passIsUsed: false, inactive: true },
+  ]);
+
+  const list = await call('GET', '/event-admin/attendance/events', null, BT);
+  const ev = list.body?.rows?.find((e) => e.id === EV);
+  check('Attendance lists the events with how many booked and came', list.status === 200 && ev?.booked === 2 && ev?.present === 1 && ev?.notArrived === 1 && ev?.cancelled === 1, JSON.stringify(ev));
+  const ppl = await call('GET', `/event-admin/events/${EV}/people`, null, BT);
+  const byName = Object.fromEntries((ppl.body?.rows || []).map((p) => [p.memberId, p]));
+  check('...one event shows everyone booked', ppl.status === 200 && ppl.body.rows.length === 3, ppl.text.slice(0, 200));
+  check('...who is present, when they came in and who let them in', byName[ANAND_ID]?.status === 'Present' && byName[ANAND_ID]?.arrivedAt === '2026-11-20 04:35:00' && /Old Member/.test(byName[ANAND_ID]?.letInBy || ''), JSON.stringify(byName[ANAND_ID]));
+  check('...who has not arrived yet, and who cancelled', byName[OLD_ID]?.status === 'Not yet arrived' && byName[DRAFT_MEMBER_ID]?.status === 'Cancelled');
+  check('finance cannot see attendance (403)', (await call('GET', `/event-admin/events/${EV}/people`, null, FT)).status === 403);
+  check('the console has no door scanner any more (404)', (await call('POST', `/event-admin/events/${EV}/scan`, { reference: 'KS-TEST-1' }, BT)).status === 404);
+}
+
+/* ================================================================== */
 section('Reading less, and seeing what was spent');
 
 {

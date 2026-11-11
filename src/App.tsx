@@ -49,7 +49,6 @@ const SCREENS: Record<string, ComponentType> = {
   'events/groups': lazy(() => import('@/modules/events/EventGroups')),
   'events/passes': lazy(() => import('@/modules/events/Bookings')),
   'events/attendance': lazy(() => import('@/modules/events/Attendance')),
-  'events/scanner': lazy(() => import('@/modules/events/Scanner')),
 
   'finance/receipts': lazy(() => import('@/modules/finance/Receipts')),
 
