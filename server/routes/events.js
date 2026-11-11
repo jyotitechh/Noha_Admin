@@ -10,8 +10,8 @@ import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers, pastoralChoices } from '../noah-schema.js';
 import {
-  EventError, onCatalyst, listEvents, getEvent, createEvent, updateEvent, archiveEvent,
-  listGroups, createGroup, updateGroup, archiveGroup, listLanguageGroups, createLanguageGroup, choices,
+  EventError, onCatalyst, listEvents, getEvent, createEvent, updateEvent, archiveEvent, restoreEvent, deleteEvent,
+  listGroups, createGroup, updateGroup, archiveGroup, restoreGroup, deleteGroup, listLanguageGroups, createLanguageGroup, choices,
 } from '../events.js';
 
 const maskMobile = (m = '') => String(m).replace(/(\d{2})\d+(\d{2})$/, '$1••••••$2');
@@ -74,7 +74,7 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
   /* ---------- events ---------- */
 
   app.get('/api/event-admin/events', ...view, guarded(async (req, res) => {
-    res.json({ rows: await listEvents({ q: String(req.query.q || ''), from: String(req.query.from || ''), to: String(req.query.to || '') }) });
+    res.json({ rows: await listEvents({ q: String(req.query.q || ''), from: String(req.query.from || ''), to: String(req.query.to || ''), archived: req.query.archived === '1' }) });
   }));
 
   app.get('/api/event-admin/events/:id', ...view, guarded(async (req, res) => {
@@ -103,10 +103,34 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
     res.json({ ok: true });
   }));
 
+  app.post('/api/event-admin/events/:id/restore', ...manage, guarded(async (req, res) => {
+    const done = await restoreEvent(req.params.id);
+    await audit(req, 'Restored an archived event', done.name);
+    res.json({ ok: true });
+  }));
+
+  app.delete('/api/event-admin/events/:id/permanently', ...manage, guarded(async (req, res) => {
+    const done = await deleteEvent(req.params.id);
+    await audit(req, 'Deleted an event', done.name);
+    res.json({ ok: true });
+  }));
+
   /* ---------- event groups ---------- */
 
-  app.get('/api/event-admin/groups', ...view, guarded(async (_req, res) => {
-    res.json({ rows: await listGroups() });
+  app.get('/api/event-admin/groups', ...view, guarded(async (req, res) => {
+    res.json({ rows: await listGroups({ archived: req.query.archived === '1' }) });
+  }));
+
+  app.post('/api/event-admin/groups/:id/restore', ...manage, guarded(async (req, res) => {
+    const done = await restoreGroup(req.params.id);
+    await audit(req, 'Restored an archived event group', done.name);
+    res.json({ ok: true });
+  }));
+
+  app.delete('/api/event-admin/groups/:id/permanently', ...manage, guarded(async (req, res) => {
+    const done = await deleteGroup(req.params.id);
+    await audit(req, 'Deleted an event group', done.name);
+    res.json({ ok: true });
   }));
 
   app.post('/api/event-admin/groups', ...manage, guarded(async (req, res) => {

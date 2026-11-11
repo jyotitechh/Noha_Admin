@@ -77,6 +77,15 @@ async function insertRow(k, row) {
   return mine.length ? String(mine.reduce((a, b) => (b > a ? b : a))) : '';
 }
 
+async function removeRow(k, rowId) {
+  if (!onCatalyst()) {
+    memory[k] = memory[k].filter((x) => x.ROWID !== String(rowId));
+    return;
+  }
+  await io.remove(ref(k), [String(rowId)]);
+  cache.delete(k);
+}
+
 async function updateRow(k, row) {
   if (!onCatalyst()) {
     const r = memory[k].find((x) => x.ROWID === String(row.ROWID));
@@ -271,8 +280,9 @@ async function validateEvent(body, selfId) {
   if (v.groupId && !(await rows('groups')).some((g) => isLive(g) && str(g.ROWID) === v.groupId)) errors.groupId = 'That event group no longer exists.';
   if (v.hallId && !(await rows('halls')).some((h) => isLive(h) && str(h.ROWID) === v.hallId)) errors.hallId = 'That hall no longer exists.';
   if (v.blockedEventIds.length) {
+    /* An event that has since been archived or deleted just drops out of the list. */
     const known = new Set((await rows('events')).filter(isLive).map((e) => str(e.ROWID)));
-    if (v.blockedEventIds.some((id) => !known.has(id))) errors.blockedEventIds = 'One of the blocked events no longer exists.';
+    v.blockedEventIds = v.blockedEventIds.filter((id) => known.has(id));
   }
 
   if (Object.keys(errors).length) throw Object.assign(new EventError(400, 'Some details need attention.'), { errors });
@@ -281,10 +291,19 @@ async function validateEvent(body, selfId) {
 
 /* ---------- events ---------- */
 
-/** Events whose day falls in [from, to] (inclusive, 'YYYY-MM-DD'), name containing `q`, soonest first. */
-export async function listEvents({ q = '', from = '', to = '' } = {}) {
+/** Events whose day falls in [from, to] (inclusive, 'YYYY-MM-DD'), name containing `q`, soonest first.
+    `archived` lists the archived ones instead, most recently archived first. */
+export async function listEvents({ q = '', from = '', to = '', archived = false } = {}) {
   const needle = q.trim().toLowerCase();
-  return (await rows('events'))
+  const all = await rows('events');
+  if (archived) {
+    return all.filter((r) => !isLive(r))
+      .sort((a, b) => str(b.archivedOn).localeCompare(str(a.archivedOn)))
+      .map(eventOut)
+      .filter((e) => !needle || e.name.toLowerCase().includes(needle))
+      .map(({ id, name, date, startTime, endTime, photo, locationName, visible, groupId }) => ({ id, name, date, startTime, endTime, photo, locationName, visible, groupId, archived: true }));
+  }
+  return all
     .filter(isLive)
     .map(eventOut)
     .filter((e) => (!needle || e.name.toLowerCase().includes(needle))
@@ -297,7 +316,7 @@ export async function listEvents({ q = '', from = '', to = '' } = {}) {
 export async function getEvent(id, nameOfMember) {
   const all = await rows('events');
   const r = all.find((x) => str(x.ROWID) === String(id));
-  if (!r || !isLive(r)) throw new EventError(404, 'That event is not there any more.');
+  if (!r) throw new EventError(404, 'That event is not there any more.');
   const e = eventOut(r);
   const [groups, halls, memberGroups] = await Promise.all([rows('groups'), rows('halls'), rows('memberGroups')]);
   const nameIn = (list, rid) => str(list.find((x) => str(x.ROWID) === rid)?.name) || null;
@@ -336,6 +355,30 @@ export async function archiveEvent(id) {
   return { name: str(r.name) };
 }
 
+export async function restoreEvent(id) {
+  const r = (await rows('events')).find((x) => str(x.ROWID) === String(id));
+  if (!r || isLive(r)) throw new EventError(404, 'That event is not in the archive.');
+  await updateRow('events', { ROWID: String(id), isArchived: false, archivedOn: null });
+  return { name: str(r.name) };
+}
+
+/** Delete an event for good. Only an archived one can be: archiving comes first. */
+export async function deleteEvent(id) {
+  const all = await rows('events');
+  const r = all.find((x) => str(x.ROWID) === String(id));
+  if (!r) throw new EventError(404, 'That event is not there any more.');
+  if (isLive(r)) throw new EventError(409, 'Archive the event first. Only an archived event can be deleted.');
+  await removeRow('events', id);
+  /* Nothing should keep pointing at it: take it off any list of events that block pass booking. */
+  for (const o of all) {
+    const blocked = idList(o.blockIfPassBookedFor);
+    if (blocked.includes(String(id))) {
+      await updateRow('events', { ROWID: str(o.ROWID), blockIfPassBookedFor: JSON.stringify(blocked.filter((b) => b !== String(id))) });
+    }
+  }
+  return { name: str(r.name) };
+}
+
 /* ---------- event groups ---------- */
 
 function groupOut(r, langs) {
@@ -352,11 +395,11 @@ function groupOut(r, langs) {
   };
 }
 
-export async function listGroups() {
+export async function listGroups({ archived = false } = {}) {
   const [groups, langs, events] = await Promise.all([rows('groups'), rows('langs'), rows('events')]);
   const count = new Map();
   for (const e of events.filter(isLive)) count.set(str(e.eventGroupId), (count.get(str(e.eventGroupId)) || 0) + 1);
-  return groups.filter(isLive).map((g) => ({ ...groupOut(g, langs), events: count.get(str(g.ROWID)) || 0 }))
+  return groups.filter((g) => isLive(g) !== archived).map((g) => ({ ...groupOut(g, langs), events: count.get(str(g.ROWID)) || 0, archived }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -403,6 +446,24 @@ export async function archiveGroup(id) {
   const inUse = (await rows('events')).filter(isLive).filter((e) => str(e.eventGroupId) === String(id)).length;
   if (inUse) throw new EventError(409, `${inUse} ${inUse === 1 ? 'event uses' : 'events use'} this group. Move ${inUse === 1 ? 'it' : 'them'} to another group first.`);
   await updateRow('groups', { ROWID: String(id), isArchived: true, archivedOn: stamp() });
+  return { name: str(r.name) };
+}
+
+export async function restoreGroup(id) {
+  const r = (await rows('groups')).find((x) => str(x.ROWID) === String(id));
+  if (!r || isLive(r)) throw new EventError(404, 'That event group is not in the archive.');
+  await updateRow('groups', { ROWID: String(id), isArchived: false, archivedOn: null });
+  return { name: str(r.name) };
+}
+
+/** Delete an event group for good. Only an archived one, and only when no event (archived ones included) uses it. */
+export async function deleteGroup(id) {
+  const r = (await rows('groups')).find((x) => str(x.ROWID) === String(id));
+  if (!r) throw new EventError(404, 'That event group is not there any more.');
+  if (isLive(r)) throw new EventError(409, 'Archive the event group first. Only an archived one can be deleted.');
+  const using = (await rows('events')).filter((e) => str(e.eventGroupId) === String(id)).length;
+  if (using) throw new EventError(409, `${using} ${using === 1 ? 'event still uses' : 'events still use'} this group, including archived ones. Delete ${using === 1 ? 'it' : 'them'} or move ${using === 1 ? 'it' : 'them'} to another group first.`);
+  await removeRow('groups', id);
   return { name: str(r.name) };
 }
 

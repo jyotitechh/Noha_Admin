@@ -127,6 +127,8 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
 
   const title = mode === 'edit' ? `Edit ${start.name || 'event'}` : mode === 'copy' ? 'Copy event' : 'Add event';
   const last = step === STEPS.length - 1;
+  /* Steps that hold a field the server or the checks refused: shown in red on the progress dots. */
+  const badSteps = new Set(Object.keys(errors).map(stepOf));
 
   return (
     <Drawer
@@ -134,16 +136,19 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
       onClose={onClose}
       width="wide"
       title={title}
-      sub={`Step ${step + 1} of ${STEPS.length} · ${STEPS[step].label}`}
+      sub={STEPS[step].label}
       footer={
         <>
           <Btn icon="chev-l" disabled={step === 0 || busy} onClick={() => go(step - 1)}>Back</Btn>
           <span className="sp" style={{ flex: 1 }} />
-          <div className="row gap6" aria-label="Steps">
+          <div className="row" style={{ gap: 8 }} role="group" aria-label="Progress">
             {STEPS.map((s, i) => (
-              <button key={s.id} type="button" title={s.label} aria-label={`Step ${i + 1}: ${s.label}`} aria-current={i === step ? 'step' : undefined}
+              <button key={s.id} type="button" title={`${i + 1}. ${s.label}`} aria-label={`Step ${i + 1} of ${STEPS.length}: ${s.label}`} aria-current={i === step ? 'step' : undefined}
                 onClick={() => go(i)}
-                style={{ width: 9, height: 9, borderRadius: 9, border: 0, padding: 0, cursor: 'pointer', background: i === step ? 'var(--brand)' : 'var(--line, #ccc)' }} />
+                style={{
+                  width: i === step ? 24 : 10, height: 10, borderRadius: 10, border: 0, padding: 0, cursor: 'pointer', transition: 'width .15s',
+                  background: badSteps.has(i) ? 'var(--bad)' : i === step ? 'var(--brand)' : i < step ? 'var(--brand-line, #E7C6F2)' : 'var(--line, #d4d4dc)',
+                }} />
             ))}
           </div>
           <span className="sp" style={{ flex: 1 }} />

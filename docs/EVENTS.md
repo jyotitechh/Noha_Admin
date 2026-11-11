@@ -49,7 +49,7 @@ API and the Flutter app must read them the same way.
 | Expenses | `expenseHall`, `expenseSound`, `lights`, `expenseMusician`, `expenseMedia`, `expenseBus`, `expenseTransport`, `expensePhotography`, `expenseTranslator` | double, rupees |
 | Who it is for | `filters` | JSON: `{"forPastor":true,"forLeader":false,"forVip":false,"forPrayerWarrior":false,"memberGroups":["<groups ROWID>"]}` |
 | Blocked events for pass booking | `blockIfPassBookedFor` | JSON list of `events` ROWIDs |
-| Archived | `isArchived`, `archivedOn` | nothing is deleted |
+| Archived | `isArchived`, `archivedOn` | see "Archive and delete" below |
 
 Not written by the console: `id`, `ministryId`, `createdBy`, the pass and fee columns, recurrence, seat layout and the
 target/result counters. Rows are linked by **ROWID**.
@@ -66,6 +66,20 @@ target/result counters. Rows are linked by **ROWID**.
 
 A group that events still use cannot be archived.
 
+## Archive and delete
+
+Archiving is how the office hides an event or an event group.
+
+- **Archive** sets `isArchived = true` and `archivedOn`. The row stays in the table. The console moves it to the
+  **Archived** view of Events or Event groups, where only the office sees it.
+- **The Noah API and the app must not show an archived event or group.** Everything that lists events for members has to
+  skip rows where `isArchived` is true. (The console cannot enforce that for the app.)
+- **Restore** (from the Archived view) sets `isArchived = false` again and the event is back.
+- **Delete** removes the row for good and is offered only on an archived event or group, after a confirmation. Deleting an
+  event also takes it off the "blocked for pass booking" list of any other event.
+- An event group cannot be archived while a live event uses it, and cannot be deleted while any event (archived ones
+  included) uses it.
+
 ## API (console)
 
 All under `/api/event-admin`, signed in. Reading needs `events.view`; changing needs `events.manage`.
@@ -75,7 +89,10 @@ All under `/api/event-admin`, signed in. Reading needs `events.view`; changing n
 | `GET /events?q=&from=YYYY-MM-DD&to=YYYY-MM-DD` | the list |
 | `GET /events/:id` | one event, with group, hall, preacher and blocked-event names |
 | `POST /events`, `PUT /events/:id`, `DELETE /events/:id` | add, change, archive |
-| `GET /groups`, `POST /groups`, `PUT /groups/:id`, `DELETE /groups/:id` | event groups |
+| `GET /events?archived=1` | the archived events |
+| `POST /events/:id/restore`, `DELETE /events/:id/permanently` | restore an archived event, delete it for good |
+| `GET /groups`, `POST /groups`, `PUT /groups/:id`, `DELETE /groups/:id` | event groups (`?archived=1` for the archived ones; `DELETE` archives) |
+| `POST /groups/:id/restore`, `DELETE /groups/:id/permanently` | restore an archived group, delete it for good |
 | `GET /language-groups`, `POST /language-groups` | language groups |
 | `GET /choices` | what the forms choose from |
 | `GET /members?q=` or `?ids=` | members, for the preacher and the teams |

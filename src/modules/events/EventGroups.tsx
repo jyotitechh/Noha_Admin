@@ -1,4 +1,8 @@
-/* Event groups: an event belongs to one. A group has an event language group ("Mumbai - English"), its pastors,
+/* Archiving a group takes it out of the choices when adding an event; it moves to the Archived view, where it can be
+   restored or deleted for good. A group that events still use cannot be archived, and one that archived events
+   still use cannot be deleted.
+
+   Event groups: an event belongs to one. A group has an event language group ("Mumbai - English"), its pastors,
    and the teams that collect donations and scan passes. Stored in Catalyst's `eventGroup` and
    `eventLanguageGroups` tables (server/events.js). */
 
@@ -6,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/state/auth';
 import { Confirm, Drawer, Modal, useToast } from '@/components/layers';
-import { Btn, Empty, Failed, Field, Loading } from '@/components/ui';
+import { Btn, Empty, Failed, Field, Loading, Seg } from '@/components/ui';
 import { FieldBox, MemberPicker, forgetChoices, useChoices } from './shared';
 
 interface Group {
@@ -26,22 +30,27 @@ export default function EventGroups() {
   const [bump, setBump] = useState(0);
   const choices = useChoices(bump);
 
+  const [show, setShow] = useState<'active' | 'archived'>('active');
   const [rows, setRows] = useState<Group[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [editing, setEditing] = useState<{ id?: string; v: GroupForm } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [findPastor, setFindPastor] = useState('');
-  const [archiving, setArchiving] = useState<Group | null>(null);
+  const [confirming, setConfirming] = useState<{ kind: 'archive' | 'delete'; group: Group } | null>(null);
   const [addingLang, setAddingLang] = useState(false);
   const [langName, setLangName] = useState('');
   const [langError, setLangError] = useState('');
 
-  const load = () => {
+  const load = (which: 'active' | 'archived' = show) => {
     setError(null);
-    api.get<{ rows: Group[] }>('/event-admin/groups').then((r) => setRows(r.rows)).catch((e) => setError(e));
+    api.get<{ rows: Group[] }>(`/event-admin/groups${which === 'archived' ? '?archived=1' : ''}`).then((r) => setRows(r.rows)).catch((e) => setError(e));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function switchTo(which: 'active' | 'archived') {
+    setShow(which); setRows(null); load(which);
+  }
 
   const set = <K extends keyof GroupForm>(k: K, value: GroupForm[K]) => {
     setEditing((e) => (e ? { ...e, v: { ...e.v, [k]: value } } : e));
@@ -65,15 +74,27 @@ export default function EventGroups() {
     }
   }
 
-  async function archive() {
-    if (!archiving) return;
+  async function confirmed() {
+    if (!confirming) return;
+    const { kind, group } = confirming;
     try {
-      await api.del(`/event-admin/groups/${archiving.id}`);
-      toast(`“${archiving.name}” is archived.`, 'ok');
-      setArchiving(null); forgetChoices(); setBump((n) => n + 1); load();
+      if (kind === 'archive') await api.del(`/event-admin/groups/${group.id}`);
+      else await api.del(`/event-admin/groups/${group.id}/permanently`);
+      toast(kind === 'archive' ? `“${group.name}” is archived.` : `“${group.name}” is deleted.`, 'ok');
+      setConfirming(null); forgetChoices(); setBump((n) => n + 1); load();
     } catch (e) {
       toast((e as Error).message, 'bad');
-      setArchiving(null);
+      setConfirming(null);
+    }
+  }
+
+  async function restore(g: Group) {
+    try {
+      await api.post(`/event-admin/groups/${g.id}/restore`);
+      toast(`“${g.name}” is back in Event groups.`, 'ok');
+      forgetChoices(); setBump((n) => n + 1); load();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
     }
   }
 
@@ -98,29 +119,39 @@ export default function EventGroups() {
 
   return (
     <div className="stack">
-      {manage && (
-        <div className="row gap8">
-          <span className="sp" style={{ flex: 1 }} />
-          <Btn icon="globe" onClick={() => setAddingLang(true)}>Add a language group</Btn>
-          <Btn variant="ok" icon="plus" onClick={() => { setErrors({}); setEditing({ v: blank() }); }}>Add event group</Btn>
-        </div>
-      )}
+      <div className="row wrap gap8">
+        <Seg<'active' | 'archived'> value={show} onChange={switchTo} options={[{ id: 'active', label: 'Event groups' }, { id: 'archived', label: 'Archived' }]} />
+        <span className="sp" style={{ flex: 1 }} />
+        {manage && show === 'active' && <Btn icon="globe" onClick={() => setAddingLang(true)}>Add a language group</Btn>}
+        {manage && show === 'active' && <Btn variant="ok" icon="plus" onClick={() => { setErrors({}); setEditing({ v: blank() }); }}>Add event group</Btn>}
+      </div>
+      {show === 'archived' && <p className="muted small mt0">Archived groups are not offered when adding an event. Restore one to bring it back, or delete it for good.</p>}
 
-      {error ? <Failed error={error} onRetry={load} /> : !rows ? <div className="card"><Loading what="event groups" /></div> : !rows.length ? (
-        <div className="card"><Empty icon="layers" title="No event groups yet">Add one, then choose it when you add an event.</Empty></div>
+      {error ? <Failed error={error} onRetry={() => load()} /> : !rows ? <div className="card"><Loading what="event groups" /></div> : !rows.length ? (
+        <div className="card">
+          {show === 'archived'
+            ? <Empty icon="archive" title="Nothing archived">Event groups you archive are kept here.</Empty>
+            : <Empty icon="layers" title="No event groups yet">Add one, then choose it when you add an event.</Empty>}
+        </div>
       ) : (
         <div className="card">
           <ul className="list">
             {rows.map((g) => (
-              <li key={g.id} className={manage ? 'click' : undefined}
-                onClick={manage ? () => { setErrors({}); setEditing({ id: g.id, v: { name: g.name, description: g.description, languageGroupId: g.languageGroupId, donationTeam: g.donationTeam, scanningTeam: g.scanningTeam, pastors: g.pastors } }); } : undefined}>
+              <li key={g.id} className={manage && show === 'active' ? 'click' : undefined}
+                onClick={manage && show === 'active' ? () => { setErrors({}); setEditing({ id: g.id, v: { name: g.name, description: g.description, languageGroupId: g.languageGroupId, donationTeam: g.donationTeam, scanningTeam: g.scanningTeam, pastors: g.pastors } }); } : undefined}>
                 <span className="grow">
                   <span className="t1">{g.name}</span>
                   <span className="t2">
                     {g.languageGroupName ?? 'No language group'} · {g.pastors.length} {g.pastors.length === 1 ? 'pastor' : 'pastors'} · {g.events} {g.events === 1 ? 'event' : 'events'}
                   </span>
                 </span>
-                {manage && <Btn sm variant="ghost" icon="archive" aria-label={`Archive ${g.name}`} onClick={(e) => { e.stopPropagation(); setArchiving(g); }}>Archive</Btn>}
+                {manage && show === 'active' && <Btn sm variant="ghost" icon="archive" aria-label={`Archive ${g.name}`} onClick={(e) => { e.stopPropagation(); setConfirming({ kind: 'archive', group: g }); }}>Archive</Btn>}
+                {manage && show === 'archived' && (
+                  <span className="row gap6">
+                    <Btn sm icon="restore" aria-label={`Restore ${g.name}`} onClick={() => restore(g)}>Restore</Btn>
+                    <Btn sm variant="danger" icon="trash" aria-label={`Delete ${g.name}`} onClick={() => setConfirming({ kind: 'delete', group: g })}>Delete</Btn>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -190,8 +221,17 @@ export default function EventGroups() {
         )}
       </Modal>
 
-      <Confirm open={!!archiving} onClose={() => setArchiving(null)} onConfirm={archive} title="Archive this event group?" confirmLabel="Archive" danger>
-        <p className="mt0"><b>{archiving?.name}</b> will no longer be offered when adding an event.</p>
+      <Confirm
+        open={!!confirming}
+        onClose={() => setConfirming(null)}
+        onConfirm={confirmed}
+        title={confirming?.kind === 'delete' ? 'Delete this event group for good?' : 'Archive this event group?'}
+        confirmLabel={confirming?.kind === 'delete' ? 'Delete for good' : 'Archive'}
+        danger
+      >
+        {confirming?.kind === 'delete'
+          ? <p className="mt0"><b>{confirming.group.name}</b> will be removed completely. This cannot be undone.</p>
+          : <p className="mt0"><b>{confirming?.group.name}</b> will no longer be offered when adding an event. You can find it in Archived, restore it, or delete it there.</p>}
       </Confirm>
     </div>
   );

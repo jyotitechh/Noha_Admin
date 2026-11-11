@@ -1,11 +1,14 @@
 /* Events: find them by name and date, open one, add, change, copy or archive it. Stored in Catalyst's `events`
-   table (server/events.js). */
+   table (server/events.js).
+
+   Archiving hides an event from everyone in the app and from this list; it moves to the Archived view, where the
+   office can bring it back (Restore) or delete it for good. Only an archived event can be deleted. */
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/state/auth';
 import { Confirm, Drawer, useToast } from '@/components/layers';
-import { Btn, Chip, Empty, Failed, Icon, Kv, Loading } from '@/components/ui';
+import { Btn, Chip, Empty, Failed, Icon, Kv, Loading, Seg } from '@/components/ui';
 import { EventFormDrawer, blankEvent, formOf } from './EventForm';
 import { dayLong, forgetChoices, time12, whenLong, type EventDetail, type EventForm, type EventRow } from './shared';
 
@@ -14,11 +17,14 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d
 const daysFromToday = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return isoDay(d); };
 const inr = (n: number) => '₹' + n.toLocaleString('en-IN');
 
+type Show = 'active' | 'archived';
+
 export default function EventAdmin() {
   const { can } = useAuth();
   const manage = can('events.manage');
   const { toast } = useToast();
 
+  const [show, setShow] = useState<Show>('active');
   const [q, setQ] = useState('');
   const [from, setFrom] = useState(daysFromToday(-7));
   const [to, setTo] = useState(daysFromToday(7));
@@ -28,14 +34,20 @@ export default function EventAdmin() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [form, setForm] = useState<{ mode: 'add' | 'edit' | 'copy'; id?: string; start: EventForm } | null>(null);
-  const [archiving, setArchiving] = useState(false);
+  const [confirming, setConfirming] = useState<{ kind: 'archive' | 'delete'; id: string; name: string } | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((which: Show = show) => {
     setError(null);
-    const p = new URLSearchParams({ q: q.trim(), from, to });
+    const p = new URLSearchParams({ q: q.trim() });
+    if (which === 'archived') p.set('archived', '1');
+    else { p.set('from', from); p.set('to', to); }
     api.get<{ rows: EventRow[] }>(`/event-admin/events?${p}`).then((r) => setRows(r.rows)).catch((e) => setError(e));
-  }, [q, from, to]);
+  }, [q, from, to, show]);
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function switchTo(which: Show) {
+    setShow(which); setRows(null); load(which);
+  }
 
   useEffect(() => {
     if (!openId) { setDetail(null); return; }
@@ -52,31 +64,55 @@ export default function EventAdmin() {
     }
   }
 
-  async function archive() {
-    if (!detail) return;
+  async function restore(id: string, name: string) {
     try {
-      await api.del(`/event-admin/events/${detail.id}`);
-      toast(`“${detail.name}” is archived.`, 'ok');
-      setArchiving(false); setOpenId(null); load();
+      await api.post(`/event-admin/events/${id}/restore`);
+      toast(`“${name}” is back in Events.`, 'ok');
+      setOpenId(null); load();
     } catch (e) {
       toast((e as Error).message, 'bad');
     }
   }
 
+  async function confirmed() {
+    if (!confirming) return;
+    const { kind, id, name } = confirming;
+    try {
+      if (kind === 'archive') await api.del(`/event-admin/events/${id}`);
+      else await api.del(`/event-admin/events/${id}/permanently`);
+      toast(kind === 'archive' ? `“${name}” is archived. It is hidden from the app.` : `“${name}” is deleted.`, 'ok');
+      setConfirming(null); setOpenId(null); load();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+      setConfirming(null);
+    }
+  }
+
+  const archivedView = show === 'archived';
+
   return (
     <div className="stack">
       <form className="row wrap gap8" onSubmit={(e) => { e.preventDefault(); load(); }}>
+        <Seg<Show> value={show} onChange={switchTo} options={[{ id: 'active', label: 'Events' }, { id: 'archived', label: 'Archived' }]} />
         <input className="inp" style={{ maxWidth: 260 }} value={q} placeholder="Event name" aria-label="Event name" onChange={(e) => setQ(e.target.value)} />
-        <label className="row gap6 small muted">From <input className="inp" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="row gap6 small muted">To <input className="inp" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        {!archivedView && (
+          <>
+            <label className="row gap6 small muted">From <input className="inp" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label className="row gap6 small muted">To <input className="inp" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          </>
+        )}
         <Btn variant="pri" icon="search">Go</Btn>
         <span className="sp" style={{ flex: 1 }} />
-        {manage && <Btn type="button" variant="ok" icon="plus" onClick={() => setForm({ mode: 'add', start: blankEvent() })}>Add event</Btn>}
+        {manage && !archivedView && <Btn type="button" variant="ok" icon="plus" onClick={() => setForm({ mode: 'add', start: blankEvent() })}>Add event</Btn>}
       </form>
 
-      {error ? <Failed error={error} onRetry={load} /> : !rows ? <div className="card"><Loading what="events" /></div> : !rows.length ? (
+      {archivedView && <p className="muted small mt0">Archived events are hidden from the app and only the office sees them here. Restore one to bring it back, or delete it for good.</p>}
+
+      {error ? <Failed error={error} onRetry={() => load()} /> : !rows ? <div className="card"><Loading what="events" /></div> : !rows.length ? (
         <div className="card">
-          <Empty icon="cal" title="No events in these dates">Change the dates or the name, then press Go.</Empty>
+          {archivedView
+            ? <Empty icon="archive" title="Nothing archived">Events you archive are kept here.</Empty>
+            : <Empty icon="cal" title="No events in these dates">Change the dates or the name, then press Go.</Empty>}
         </div>
       ) : (
         <div className="g2">
@@ -89,11 +125,13 @@ export default function EventAdmin() {
                 <b style={{ fontSize: 17 }}>{e.name}</b>
                 <span>{dayLong(e.date)}</span>
                 <span className="muted">{time12(e.startTime)} to {time12(e.endTime)}{e.locationName ? ` · ${e.locationName}` : ''}</span>
-                {!e.visible && <span><Chip tone="mute" icon="eye-off">Not visible in the app</Chip></span>}
-                <div className="row gap6 mt8">
-                  <Btn sm icon="eye" onClick={() => setOpenId(e.id)}>View</Btn>
-                  {manage && <Btn sm icon="edit" onClick={() => startFrom('edit', e.id)}>Edit</Btn>}
-                  {manage && <Btn sm icon="copy" onClick={() => startFrom('copy', e.id)}>Copy</Btn>}
+                {!archivedView && !e.visible && <span><Chip tone="mute" icon="eye-off">Not visible in the app</Chip></span>}
+                <div className="row wrap gap6 mt8">
+                  <Btn sm icon="eye" type="button" onClick={() => setOpenId(e.id)}>View</Btn>
+                  {manage && !archivedView && <Btn sm icon="edit" type="button" onClick={() => startFrom('edit', e.id)}>Edit</Btn>}
+                  {manage && !archivedView && <Btn sm icon="copy" type="button" onClick={() => startFrom('copy', e.id)}>Copy</Btn>}
+                  {manage && archivedView && <Btn sm icon="restore" type="button" onClick={() => restore(e.id, e.name)}>Restore</Btn>}
+                  {manage && archivedView && <Btn sm variant="danger" icon="trash" type="button" onClick={() => setConfirming({ kind: 'delete', id: e.id, name: e.name })}>Delete</Btn>}
                 </div>
               </div>
             </div>
@@ -106,14 +144,22 @@ export default function EventAdmin() {
         onClose={() => setOpenId(null)}
         width="wide"
         title={detail?.name ?? 'Event'}
-        sub={detail ? `${dayLong(detail.date)} · ${time12(detail.startTime)} to ${time12(detail.endTime)}` : ''}
+        sub={detail ? `${dayLong(detail.date)} · ${time12(detail.startTime)} to ${time12(detail.endTime)}${detail.archived ? ' · Archived' : ''}` : ''}
         footer={manage && detail ? (
-          <>
-            <Btn variant="danger" icon="archive" onClick={() => setArchiving(true)}>Archive</Btn>
-            <span className="sp" style={{ flex: 1 }} />
-            <Btn icon="copy" onClick={() => startFrom('copy', detail.id)}>Copy</Btn>
-            <Btn variant="pri" icon="edit" onClick={() => startFrom('edit', detail.id)}>Edit</Btn>
-          </>
+          detail.archived ? (
+            <>
+              <Btn variant="danger" icon="trash" onClick={() => setConfirming({ kind: 'delete', id: detail.id, name: detail.name })}>Delete for good</Btn>
+              <span className="sp" style={{ flex: 1 }} />
+              <Btn variant="pri" icon="restore" onClick={() => restore(detail.id, detail.name)}>Restore</Btn>
+            </>
+          ) : (
+            <>
+              <Btn variant="danger" icon="archive" onClick={() => setConfirming({ kind: 'archive', id: detail.id, name: detail.name })}>Archive</Btn>
+              <span className="sp" style={{ flex: 1 }} />
+              <Btn icon="copy" onClick={() => startFrom('copy', detail.id)}>Copy</Btn>
+              <Btn variant="pri" icon="edit" onClick={() => startFrom('edit', detail.id)}>Edit</Btn>
+            </>
+          )
         ) : undefined}
       >
         {!detail ? <Loading what="the event" /> : <EventView e={detail} />}
@@ -130,8 +176,17 @@ export default function EventAdmin() {
         />
       )}
 
-      <Confirm open={archiving} onClose={() => setArchiving(false)} onConfirm={archive} title="Archive this event?" confirmLabel="Archive" danger>
-        <p className="mt0"><b>{detail?.name}</b> will no longer be listed here or in the app.</p>
+      <Confirm
+        open={!!confirming}
+        onClose={() => setConfirming(null)}
+        onConfirm={confirmed}
+        title={confirming?.kind === 'delete' ? 'Delete this event for good?' : 'Archive this event?'}
+        confirmLabel={confirming?.kind === 'delete' ? 'Delete for good' : 'Archive'}
+        danger
+      >
+        {confirming?.kind === 'delete'
+          ? <p className="mt0"><b>{confirming?.name}</b> will be removed completely. This cannot be undone.</p>
+          : <p className="mt0"><b>{confirming?.name}</b> will be hidden from everyone in the app. You can find it in Archived, restore it, or delete it there.</p>}
       </Confirm>
     </div>
   );
@@ -149,7 +204,8 @@ function EventView({ e }: { e: EventDetail }) {
       {e.photo && <img src={e.photo} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 8, background: 'var(--bg-2, #f1f1f4)' }} />}
       {e.description && <p className="mt0">{e.description}</p>}
       <div className="row wrap gap6">
-        {e.visible ? <Chip tone="ok" icon="eye">Visible in the app</Chip> : <Chip tone="mute" icon="eye-off">Not visible in the app</Chip>}
+        {e.archived && <Chip tone="warn" icon="archive">Archived: hidden from the app</Chip>}
+        {!e.archived && (e.visible ? <Chip tone="ok" icon="eye">Visible in the app</Chip> : <Chip tone="mute" icon="eye-off">Not visible in the app</Chip>)}
         {e.showOnDashboard && <Chip tone="brand">On the dashboard</Chip>}
         {e.hideFromPublic && <Chip tone="plain">Hidden from public</Chip>}
         {e.hideFromLeaders && <Chip tone="plain">Hidden from leaders</Chip>}

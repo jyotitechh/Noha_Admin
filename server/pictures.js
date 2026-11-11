@@ -60,7 +60,7 @@ export function sniff(buf) {
 export async function storePicture(buf) {
   if (!stratusConfigured()) {
     throw new PictureError(409,
-      'Uploading from the computer is not set up yet. Paste a picture link instead, or ask for the Stratus bucket to be connected (STRATUS_BUCKET on the API).',
+      'Uploading a picture from the computer is not available right now. Paste a picture link instead.',
       { notSetUp: true });
   }
   if (!buf?.length) throw new PictureError(400, 'No picture came through. Choose the file again.');

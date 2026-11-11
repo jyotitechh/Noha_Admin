@@ -38,6 +38,7 @@ export interface EventDetail extends EventForm {
   id: string;
   groupName: string | null; hallName: string | null; preacher: Person | null;
   memberGroupNames: string[];
+  archived: boolean;
   blockedEvents: { id: string; name: string; date: string; startTime: string; endTime: string }[];
 }
 

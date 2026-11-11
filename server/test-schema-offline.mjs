@@ -1767,6 +1767,53 @@ section('Events, event groups and language groups');
   check('an archived event leaves the list but stays in the table',
     !(await EV.listEvents()).some((e) => e.id === first.id) && (await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id && r.isArchived === true));
   check('...and is gone from what still blocks it', (await EV.getEvent(second.id, async () => null)).blockedEvents.length === 0);
+
+  /* ---- the archive: hidden from everyone, kept for the office, restorable or deletable ---- */
+  const archivedList = await EV.listEvents({ archived: true });
+  check('the Archived list shows what was archived, and only that', archivedList.length === 1 && archivedList[0].id === first.id && archivedList[0].archived === true, JSON.stringify(archivedList));
+  check('...and the Events list does not', (await EV.listEvents()).every((e) => e.id !== first.id));
+  check('an archived event can still be opened by the office', (await EV.getEvent(first.id, async () => null)).archived === true);
+  check('...and searched by name in the archive', (await EV.listEvents({ archived: true, q: 'changed' })).length === 1 && (await EV.listEvents({ archived: true, q: 'nothing' })).length === 0);
+
+  check('an event that is not archived cannot be deleted', (await refused(EV.deleteEvent(second.id)))?.status === 409);
+  await EV.restoreEvent(first.id);
+  check('a restored event is back in the Events list', (await EV.listEvents()).some((e) => e.id === first.id) && (await EV.listEvents({ archived: true })).length === 0);
+  check('...and cannot be restored twice', (await refused(EV.restoreEvent(first.id)))?.status === 404);
+
+  /* An event that blocks another one is edited after the blocked one was archived: the stale id is just dropped. */
+  const third = await EV.createEvent({ ...base, name: 'Third', blockedEventIds: [first.id] });
+  await EV.archiveEvent(first.id);
+  await EV.updateEvent(third.id, { ...base, name: 'Third', blockedEventIds: [first.id] });
+  check('saving with an archived event still in the blocked list drops it', (await EV.getEvent(third.id, async () => null)).blockedEventIds.length === 0);
+
+  await EV.deleteEvent(first.id);
+  check('a deleted event is gone from the table, not just hidden', !(await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id));
+  check('...and from the archive', (await EV.listEvents({ archived: true })).length === 0);
+  check('...and a second delete finds nothing', (await refused(EV.deleteEvent(first.id)))?.status === 404);
+
+  /* groups */
+  const spare = await EV.createGroup({ name: 'Spare group', languageGroupId: lang.id });
+  check('a group that is not archived cannot be deleted', (await refused(EV.deleteGroup(spare.id)))?.status === 409);
+  await EV.archiveGroup(spare.id);
+  check('an archived group moves to the Archived list', (await EV.listGroups({ archived: true })).map((g) => g.name).join() === 'Spare group' && !(await EV.listGroups()).some((g) => g.name === 'Spare group'));
+  check('...and is no longer a choice in the forms', !(await EV.choices()).eventGroups.some((g) => g.name === 'Spare group'));
+  await EV.restoreGroup(spare.id);
+  check('a restored group is a choice again', (await EV.choices()).eventGroups.some((g) => g.name === 'Spare group'));
+  await EV.archiveGroup(spare.id);
+  await EV.deleteGroup(spare.id);
+  check('a deleted group is removed from the table', !(await EV.storedRows('groups')).some((r) => r.name === 'Spare group'));
+
+  /* the group the events use: archived events still count */
+  const lone = await EV.createGroup({ name: 'Lone group', languageGroupId: lang.id });
+  const tied = await EV.createEvent({ ...base, name: 'Tied', groupId: lone.id });
+  check('a group a live event uses cannot be archived', (await refused(EV.archiveGroup(lone.id)))?.status === 409);
+  await EV.archiveEvent(tied.id);
+  await EV.archiveGroup(lone.id);
+  const stillUsed = await refused(EV.deleteGroup(lone.id));
+  check('a group an archived event still uses cannot be deleted', stillUsed?.status === 409 && /archived ones/.test(stillUsed.message), stillUsed?.message);
+  await EV.deleteEvent(tied.id);
+  await EV.deleteGroup(lone.id);
+  check('...but can be once that event is deleted too', !(await EV.storedRows('groups')).some((r) => r.name === 'Lone group'));
 }
 
 /* ---------- result ---------- */
