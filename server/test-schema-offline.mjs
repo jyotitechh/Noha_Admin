@@ -1768,6 +1768,15 @@ section('Events, event groups and language groups');
     !(await EV.listEvents()).some((e) => e.id === first.id) && (await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id && r.isArchived === true));
   check('...and is gone from what still blocks it', (await EV.getEvent(second.id, async () => null)).blockedEvents.length === 0);
 
+  /* ---- Everyone is an empty filters column (the Noah API limits the audience for any filters text) ---- */
+  await EV.createEvent({ ...base, name: 'For everyone', filters: {} });
+  const everyoneRow = (await EV.storedRows('events')).find((r) => r.name === 'For everyone');
+  check('an event for everyone is saved with no filters at all', everyoneRow?.filters === '', JSON.stringify(everyoneRow?.filters));
+  const forEveryone = (await EV.listEvents()).find((e) => e.name === 'For everyone');
+  check('...and reads back as everyone', !!forEveryone && (await EV.getEvent(forEveryone.id, async () => null)).filters.pastor === false);
+  await EV.createEvent({ ...base, name: 'Group only', filters: { memberGroups: ['27145000000173001'] } });
+  check('an event for one member group still saves its filters', JSON.parse((await EV.storedRows('events')).find((r) => r.name === 'Group only')?.filters || '{}').memberGroups?.[0] === '27145000000173001');
+
   /* ---- booking (FOR-CONSOLE-EVENTS.md section 3) ---- */
   const booked = await EV.createEvent({ ...base, name: 'Bookable', passRequired: true, seats: 500 });
   const bookedRow = (await EV.storedRows('events')).find((r) => r.name === 'Bookable');

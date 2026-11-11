@@ -220,10 +220,15 @@ function eventIn(v) {
     hallId: v.hallId || null,
     /* passUsed is never written here: it is the count of passes taken, kept by the Noah API. A new event starts it at 0. */
     passRequired: v.passRequired, passAvailable: v.seats,
-    filters: JSON.stringify({
-      forPastor: v.filters.pastor, forLeader: v.filters.leader, forVip: v.filters.vip,
-      forPrayerWarrior: v.filters.prayerWarrior, memberGroups: v.filters.memberGroups,
-    }),
+    /* Everyone (no role, no group) is written as an EMPTY filters column, not as all-false JSON: the Noah API treats any
+       filters text as "limited to these" and then shows the event to nobody but those roles (its own diagnostics say
+       "filters limit the audience" even for all-false). */
+    filters: v.filters.pastor || v.filters.leader || v.filters.vip || v.filters.prayerWarrior || v.filters.memberGroups.length
+      ? JSON.stringify({
+        forPastor: v.filters.pastor, forLeader: v.filters.leader, forVip: v.filters.vip,
+        forPrayerWarrior: v.filters.prayerWarrior, memberGroups: v.filters.memberGroups,
+      })
+      : '',
     blockIfPassBookedFor: JSON.stringify(v.blockedEventIds),
   };
   for (const [k, col] of EXPENSES) row[col] = v.expenses[k] ?? null;
