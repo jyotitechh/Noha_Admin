@@ -11,7 +11,7 @@ import { Btn, Field, Note, Switch } from '@/components/ui';
 import { RichText } from '@/modules/content/RichText';
 import { PictureInput } from '@/modules/content/PictureInput';
 import { LocationPicker } from './LocationPicker';
-import { FieldBox, MemberPicker, TIMEZONES, afterSave, audienceText, announceTone, dayLong, time12, useChoices, type Announce, type EventForm as Form, type EventRow } from './shared';
+import { FieldBox, MemberPicker, TIMEZONES, Time12, afterSave, audienceText, announceTone, dayLong, time12, useChoices, type Announce, type EventForm as Form, type EventRow } from './shared';
 
 const STEPS = [
   { id: 'details', label: 'Details' },
@@ -94,7 +94,7 @@ export function EventFormDrawer({ open, mode, eventId, start, taken = 0, onClose
     const e: Record<string, string> = {};
     if (!v.name.trim()) e.name = 'Give the event a name.';
     if (!v.date) e.date = 'Choose the event date.';
-    if (!v.publishAt) e.publishAt = 'Choose when it is published.';
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v.publishAt)) e.publishAt = 'Choose the publish date and time.';
     if (!v.startTime) e.startTime = 'Choose the start time.';
     if (!v.endTime) e.endTime = 'Choose the end time.';
     else if (v.startTime && v.endTime <= v.startTime) e.endTime = 'The end time must be after the start time.';
@@ -211,15 +211,25 @@ export function EventFormDrawer({ open, mode, eventId, start, taken = 0, onClose
                 <Field label="Event date *" error={errors.date}>
                   <input className={'inp' + (errors.date ? ' err' : '')} type="date" value={v.date} onChange={(e) => set('date', e.target.value)} />
                 </Field>
-                <Field label="Publish date and time *" error={errors.publishAt}>
-                  <input className={'inp' + (errors.publishAt ? ' err' : '')} type="datetime-local" value={v.publishAt} onChange={(e) => set('publishAt', e.target.value)} />
-                </Field>
-                <Field label="Start time *" error={errors.startTime}>
-                  <input className={'inp' + (errors.startTime ? ' err' : '')} type="time" value={v.startTime} onChange={(e) => set('startTime', e.target.value)} />
-                </Field>
-                <Field label="End time *" error={errors.endTime}>
-                  <input className={'inp' + (errors.endTime ? ' err' : '')} type="time" value={v.endTime} onChange={(e) => set('endTime', e.target.value)} />
-                </Field>
+                <FieldBox label="Publish date and time *" error={errors.publishAt}>
+                  {(() => {
+                    const [pd = '', pt = ''] = v.publishAt.split('T');
+                    const join = (d: string, t: string) => set('publishAt', d && t ? `${d}T${t}` : d ? `${d}T` : t ? `T${t}` : '');
+                    return (
+                      <div className="row wrap" style={{ gap: 8 }}>
+                        <input className={'inp' + (errors.publishAt ? ' err' : '')} style={{ maxWidth: 180 }} type="date" aria-label="Publish date" value={pd}
+                          onChange={(e) => join(e.target.value, pt)} />
+                        <Time12 label="Publish time" value={pt} invalid={!!errors.publishAt} onChange={(t) => join(pd, t)} />
+                      </div>
+                    );
+                  })()}
+                </FieldBox>
+                <FieldBox label="Start time *" error={errors.startTime}>
+                  <Time12 label="Start time" value={v.startTime} invalid={!!errors.startTime} onChange={(t) => set('startTime', t)} />
+                </FieldBox>
+                <FieldBox label="End time *" error={errors.endTime}>
+                  <Time12 label="End time" value={v.endTime} invalid={!!errors.endTime} onChange={(t) => set('endTime', t)} />
+                </FieldBox>
               </div>
               <Field label="Timezone" error={errors.timezone}>
                 <select className="sel" value={v.timezone} onChange={(e) => set('timezone', e.target.value)}>

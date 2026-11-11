@@ -114,6 +114,46 @@ export const TIMEZONES = (() => {
   return [...common, ...all.filter((z) => !common.includes(z))];
 })();
 
+/**
+ * A time on a 12-hour clock: hour, minute and AM / PM. The browser's own time box follows the computer's clock setting and
+ * often shows 24 hours, so this is drawn here. `value` and what `onChange` gives are still 'HH:mm' on a 24-hour clock (the
+ * form and the database stay as they are), or '' while nothing is chosen.
+ */
+export function Time12({ value, onChange, invalid, label }: { value: string; onChange: (v: string) => void; invalid?: boolean; label: string }) {
+  const m = /^(\d{2}):(\d{2})$/.exec(value);
+  const h24 = m ? Number(m[1]) : null;
+  const hour = h24 === null ? '' : String(((h24 + 11) % 12) + 1);
+  const minute = m ? m[2] : '';
+  const ampm = h24 === null ? '' : h24 < 12 ? 'AM' : 'PM';
+  /* Every 5 minutes, plus the stored minute if it is not one of them. */
+  const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+  if (minute && !minutes.includes(minute)) minutes.push(minute), minutes.sort();
+
+  const make = (h: string, mi: string, p: string) => {
+    if (!h) return onChange('');
+    const n = Number(h) % 12 + ((p || 'AM') === 'PM' ? 12 : 0);
+    onChange(`${String(n).padStart(2, '0')}:${mi || '00'}`);
+  };
+  const cls = 'sel' + (invalid ? ' err' : '');
+  return (
+    <div className="row" style={{ gap: 6 }} role="group" aria-label={label}>
+      <select className={cls} style={{ width: 74 }} aria-label={`${label}: hour`} value={hour} onChange={(e) => make(e.target.value, minute, ampm)}>
+        <option value="">--</option>
+        {Array.from({ length: 12 }, (_, i) => String(i + 1)).map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span className="muted">:</span>
+      <select className={cls} style={{ width: 74 }} aria-label={`${label}: minute`} value={minute} disabled={!hour} onChange={(e) => make(hour, e.target.value, ampm)}>
+        {!minute && <option value="">--</option>}
+        {minutes.map((mi) => <option key={mi} value={mi}>{mi}</option>)}
+      </select>
+      <select className={cls} style={{ width: 78 }} aria-label={`${label}: AM or PM`} value={ampm || 'AM'} disabled={!hour} onChange={(e) => make(hour, minute, e.target.value)}>
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+}
+
 /** A labelled block for a control that holds buttons (the member picker, a picture). <Field> is a <label>, and a
     click inside a label is passed on to the first button in it: choosing a member would press its Remove at once. */
 export function FieldBox({ label, hint, error, children }: { label: ReactNode; hint?: ReactNode; error?: ReactNode; children: ReactNode }) {
