@@ -13,6 +13,7 @@ import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
 import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
+import { syncRoleScanners } from '../scanner-role.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -592,15 +593,17 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     }
 
     try {
-      /* Pastor goes through the Noah API when it can: it also sets the flags the
-         office's own tools read. Every other role is a plain column, written
-         directly. If the API is not set up, or does not know the member, the
-         column is written straight away and the reply says so. */
+      /* Pastor and the door scanner go through the Noah API when it can: it also
+         sets the flags the app and the office's own tools read (the scanner is
+         users.is_employee). Every other role is a plain column, written directly.
+         If the API is not set up, or does not know the member, the column is
+         written straight away and the reply says so. */
       let via = 'table';
       let warning;
-      if (roleId === 'pastor' && noahConfigured()) {
+      const noahKey = memberRole(roleId)?.noahKey;
+      if (noahKey && noahConfigured()) {
         try {
-          await noah.setMemberRoles(memberRowId, { pastor: on }, { actor: req.user.name });
+          await noah.setMemberRoles(memberRowId, { [noahKey]: on }, { actor: req.user.name });
           via = 'noah-api';
           clearCache();
         } catch (err) {
@@ -611,17 +614,18 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
           warning = 'The Noah API did not know that member, so the role was written to the table directly. The app picks it up within about 20 seconds.';
         }
       }
-      if (roleId === 'pastor' && !noahConfigured()) {
+      if (noahKey && !noahConfigured()) {
         warning = 'The Noah API key is not set, so the role was written to the table directly. The app picks it up within about 20 seconds.';
       }
 
-      const row = via === 'noah-api' ? await memberRolesRow(memberRowId) : await patchMemberRoles(memberRowId, patch);
+      /* The scanner's own column is kept in step too, so the console reads the same whichever place it looks. */
+      const row = via === 'noah-api' && roleId !== 'passScan' ? await memberRolesRow(memberRowId) : await patchMemberRoles(memberRowId, patch);
       const summary = appRoleSummary(row);
       const label = memberRole(roleId)?.label ?? restrictionById(roleId)?.label ?? roleId;
 
       /* Said ok, but the table disagrees: do not report success for something
          that is not there. */
-      if (via === 'noah-api' && roleId === 'pastor' && summary.roles.includes('pastor') !== on) {
+      if (via === 'noah-api' && noahKey && summary.roles.includes(roleId) !== on) {
         return res.status(502).json({ error: 'The Noah API said it was done, but the member table does not show it yet. Refresh in a moment and check.' });
       }
 
@@ -859,7 +863,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
   /* ================= staff and permissions ================= */
 
-  app.patch('/api/roles/:id', ...guard('staff.manage'), (req, res) => {
+  app.patch('/api/roles/:id', ...guard('staff.manage'), async (req, res) => {
     const role = db.ROLES.find((r) => r.id === req.params.id);
     if (!role) return notFound(res);
     const { perm, on } = req.body || {};
@@ -868,7 +872,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     if (on && !had) role.perms.push(perm);
     if (!on && had) role.perms = role.perms.filter((p) => p !== perm);
     log(req, 'Changed role permissions', 'Staff and permissions', role.name, { [perm]: had }, { [perm]: !!on });
-    res.json({ ok: true, role });
+    /* Scanning passes in the console and in the app move together (FOR-CONSOLE-EVENTS.md 5b). */
+    const warning = perm === 'events.scan' && had !== !!on && live()
+      ? await syncRoleScanners(role.id, !!on, { actor: req.user.name })
+      : null;
+    res.json({ ok: true, role, ...(warning ? { warning } : {}) });
   });
 
   /* Staff access (granting, changing, suspending, revoking) lives in

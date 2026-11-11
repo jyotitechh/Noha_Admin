@@ -34,6 +34,7 @@ export const MEMBER_ROLES = [
     id: 'pastor',
     label: 'Pastor',
     memberType: 'pastor',
+    noahKey: 'pastor',
     desc: 'Leads a congregation. Sees their members and answers their messages.',
     opens: ['Their congregation’s member list', 'Member threads', 'Pastoral endorsement for Jodie'],
     care: 'A pastor can read things about other members. Give it deliberately.',
@@ -55,10 +56,13 @@ export const MEMBER_ROLES = [
   },
   {
     id: 'passScan',
-    label: 'Pass scanner',
+    label: 'Door staff / Pass scanner',
     column: 'isPassScan',
-    desc: 'Scans passes at the gate on event days.',
-    opens: ['Pass scanning'],
+    /* Given through the Noah API ({ scanner: true }), which keeps it on the member's login as users.is_employee. */
+    alsoColumn: 'is_employee',
+    noahKey: 'scanner',
+    desc: 'Scans members\' QR passes at the door from the Noah app (a scan icon on the Events tab). Not an office role.',
+    opens: ['Pass scanning at the door'],
   },
   {
     id: 'busCoordinator',
@@ -148,7 +152,7 @@ export function rolesFromRow(row, { approved = false } = {}) {
   const held = MEMBER_ROLES.filter((r) =>
     r.memberType
       ? String(row.memberType || '').toLowerCase() === r.memberType
-      : truthy(row[r.column]),
+      : truthy(row[r.column]) || (r.alsoColumn ? truthy(row[r.alsoColumn]) : false),
   ).map((r) => r.id);
   /* An approved member is a church member whether or not the flag was set. */
   return held.includes('member') ? held : ['member', ...held];

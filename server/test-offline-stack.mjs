@@ -633,6 +633,37 @@ section('Giving the roles a member holds in the app, and reading what the app se
   check('taking pastor away works too', take.status === 200 && !take.body?.roles?.includes('pastor'), take.text.slice(0, 160));
   await call('POST', `/app-roles/${ANAND_ID}/prayerWarrior`, { on: false }, BT);
   check('finance cannot give roles (403)', (await call('POST', `/app-roles/${ANAND_ID}/pastor`, { on: true }, FT)).status === 403);
+
+  /* The door scanner in the app (FOR-CONSOLE-EVENTS.md 5b): { scanner } on the Noah API, kept in step with events.scan. */
+  const appRolesOf = async (id) => (await call('GET', '/app-roles/people', null, BT)).body?.rows?.find((r) => r.memberRowId === id)?.roles || [];
+  const cat = (await call('GET', '/app-roles/catalogue', null, BT)).body;
+  check('App roles offers "Door staff / Pass scanner"', cat?.roles?.some((r) => r.id === 'passScan' && r.label === 'Door staff / Pass scanner'), JSON.stringify(cat?.roles?.map((r) => r.label)));
+  const oldRow = () => call('GET', '/data/STAFF', null, BT).then((r) => r.body.rows.find((x) => x.name === 'Old Member' && x.status !== 'Revoked'));
+  const OLD_NOW = (await oldRow())?.id;
+  check('a staff member whose role does not scan has no door-scanner role', !(await appRolesOf(OLD_ID)).includes('passScan'), JSON.stringify(await appRolesOf(OLD_ID)));
+  const toScan = await call('POST', `/staff/${OLD_NOW}/role`, { role: 'events' }, BT);
+  if (NO_KEY) {
+    check('without the Noah API key a role change still works and says nothing about the app', toScan.status === 200 && !toScan.body?.warning, toScan.text.slice(0, 160));
+  } else {
+    check('given a console role with events.scan, they get the door-scanner role in the app', toScan.status === 200 && !toScan.body?.warning && (await appRolesOf(OLD_ID)).includes('passScan'), toScan.text.slice(0, 160));
+    await call('POST', `/staff/${OLD_NOW}/status`, { to: 'Suspended' }, BT);
+    check('...suspended, it is taken away', !(await appRolesOf(OLD_ID)).includes('passScan'));
+    await call('POST', `/staff/${OLD_NOW}/status`, { to: 'Active' }, BT);
+    check('...enabled again, it comes back', (await appRolesOf(OLD_ID)).includes('passScan'));
+    await call('POST', `/staff/${OLD_NOW}/role`, { role: 'comms' }, BT);
+    check('...moved to a role without events.scan, it is taken away', !(await appRolesOf(OLD_ID)).includes('passScan'));
+    const gridOn = await call('PATCH', '/roles/comms', { perm: 'events.scan', on: true }, BT);
+    check('switching events.scan on for a whole role gives it to that role\'s staff', gridOn.status === 200 && !gridOn.body?.warning && (await appRolesOf(OLD_ID)).includes('passScan'), gridOn.text.slice(0, 160));
+    const gridOff = await call('PATCH', '/roles/comms', { perm: 'events.scan', on: false }, BT);
+    check('...and switching it off takes it away', gridOff.status === 200 && !(await appRolesOf(OLD_ID)).includes('passScan'));
+  }
+  await call('POST', `/staff/${OLD_NOW}/role`, { role: 'comms' }, BT);
+
+  const giveScan = await call('POST', `/app-roles/${OLD_ID}/passScan`, { on: true }, BT);
+  check('the door-scanner role can be given on App roles', giveScan.status === 200 && giveScan.body?.roles?.includes('passScan'), giveScan.text.slice(0, 200));
+  if (!NO_KEY) check('...through the Noah API ({ scanner: true }, kept as users.is_employee)', giveScan.body?.via === 'noah-api' && !giveScan.body?.warning, JSON.stringify([giveScan.body?.via, giveScan.body?.warning]));
+  const takeScan = await call('POST', `/app-roles/${OLD_ID}/passScan`, { on: false }, BT);
+  check('...and taken away', takeScan.status === 200 && !takeScan.body?.roles?.includes('passScan'), takeScan.text.slice(0, 200));
 }
 
 /* ================================================================== */

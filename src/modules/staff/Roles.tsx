@@ -26,8 +26,9 @@ export default function Roles() {
     const key = role.id + perm;
     setBusy(key);
     try {
-      await api.patch(`/roles/${role.id}`, { perm, on });
+      const res = await api.patch<{ warning?: string }>(`/roles/${role.id}`, { perm, on });
       q.reload();
+      if (res?.warning) toast(res.warning, 'warn');
       /* If you changed your own role, refresh what you can see. */
       if (user?.role === role.id) await viewAs(role.id);
       toast(

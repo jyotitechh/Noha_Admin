@@ -72,8 +72,9 @@ function GiveAccess({ open, onClose, roles, onDone }: {
     if (!picked || !role) return;
     setBusy(true);
     try {
-      await api.post('/staff/grant', { memberRowId: picked.rowId, role, title: title.trim() || undefined });
+      const res = await api.post<{ warning?: string }>('/staff/grant', { memberRowId: picked.rowId, role, title: title.trim() || undefined });
       toast(`${picked.name} can now sign in with ${picked.mobile}.`);
+      if (res?.warning) toast(res.warning, 'warn');
       close();
       onDone();
     } catch (e) {
@@ -196,9 +197,11 @@ export default function Accounts() {
   async function act(s: Staff, path: string, body: object, done: string, tone: 'ok' | 'warn' = 'ok') {
     setBusy(s.id);
     try {
-      await api.post(`/staff/${s.id}/${path}`, body);
+      const res = await api.post<{ warning?: string }>(`/staff/${s.id}/${path}`, body);
       setBump((n) => n + 1);
       toast(done, tone);
+      /* The door-scanner role in the app follows events.scan; say so if it could not be set. */
+      if (res?.warning) toast(res.warning, 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {

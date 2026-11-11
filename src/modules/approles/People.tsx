@@ -72,7 +72,7 @@ export default function People() {
     setPending((p) => ({ ...p, [role.id]: on }));
     setBusy(role.id);
     try {
-      const res = await api.post<Person & { changed: string }>(`/app-roles/${person.memberRowId}/${role.id}`, { on });
+      const res = await api.post<Person & { changed: string; warning?: string }>(`/app-roles/${person.memberRowId}/${role.id}`, { on });
       /* Keep the drawer showing the truth the server just returned. */
       setOpen({ ...person, ...res });
       people.reload();
@@ -82,6 +82,7 @@ export default function People() {
           : `${role.label} removed from ${person.name}.`,
         on ? 'ok' : 'warn',
       );
+      if (res.warning) toast(res.warning, 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {

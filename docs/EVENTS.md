@@ -84,6 +84,21 @@ The console's server checks the permission before every call, and names the staf
 A scan the Noah API could not record is shown as a failed scan. The form now saves `passRequired` and `passAvailable` (seats), writes
 `passUsed: 0` only when an event is created, and the audience is "Everyone" unless roles are picked.
 
+### Door staff scanning in the Noah app (the `scanner` app role)
+
+Door staff can also scan inside the member app (Events tab, a scan icon) when they hold the app role `scanner`
+(`FOR-CONSOLE-EVENTS.md` 5b). The Noah API keeps it on the member's login as `users.is_employee`. The app's own calls
+(`/staff/events`, `/staff/events/:id/scan`, `/staff/events/:id/attendance`) need nothing from the console.
+
+* **App roles > Door staff / Pass scanner** (`passScan` in `server/roles.js`) gives or takes it with
+  `POST /admin/members/:id/roles { "scanner": true | false }`. The console's own `membersExtra.isPassScan` column is kept in step,
+  and either flag counts as holding the role. Without the Noah API key only the column is written, and the screen says so.
+* **Kept in step with `events.scan`** (`server/scanner-role.js`): a staff member whose console access starts to include `events.scan`
+  (given access, approved request, role changed, re-enabled, or the permission switched on for their role in the grid) gets
+  `scanner: true`; when it stops (role changed, suspended, revoked, or the permission switched off) they get `scanner: false`.
+  If the Noah API refuses, the console change is still saved and the screen shows a warning to set it by hand on App roles.
+  The permission grid lives in memory, so a grid change made before a restart is not re-applied to the app roles after it.
+
 ## Telling members about an event
 
 The console writes events to the table itself, so it asks the Noah API to announce them (`server/event-announce.js`;

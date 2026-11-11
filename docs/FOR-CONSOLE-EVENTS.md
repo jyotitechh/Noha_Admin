@@ -67,6 +67,23 @@ Everything is in `docs/EVENTS-QR-CONTRACT.md`. In short, the console builds:
 The audit notes are written to the existing `taskLogs` table (rows have `taskId` empty), or to `logs` if that legacy table is ever created. Nothing new has to be created.
 `GET /admin/diagnostics/audit` says which table is used.
 
+## 5b. Door staff scan inside the Noah app: the scanner role (App roles screen)
+
+Staff can scan entry passes **in the member app** (Events tab, a scan icon), without the console. Who gets it is decided in the console:
+
+* A new role on the **App roles** screen: **Door staff / Pass scanner**. It uses the call the screen already uses for pastor and admin, with one more key:
+  `POST /admin/members/<member id>/roles` with `{ "scanner": true }` to give it, `{ "scanner": false }` to take it away. The answer lists the member's roles
+  (`["scanner"]`). It is stored on the member's login as `users.is_employee` (the old system's staff flag), so nothing new is created.
+* The role is **not** an admin and does **not** skip registration: the person still registers and is approved like any member. The app shows the scan icon only to
+  a signed-in member who holds `scanner` (or is an office admin / super admin).
+* **Keep this in step with the console's own permission.** The console decides `events.scan` for its staff accounts; the app role is a separate switch that the Noah API
+  can read. When a staff member is given `events.scan` and also uses the app, the console should also call the roles API with `scanner: true` for that member (and
+  `false` when `events.scan` is taken away). Suggested defaults: Super administrator and Events coordinator **yes**, Membership officer optional, everyone else no.
+* What the app calls (the signed-in staff member's own token; the Noah API checks the role, nothing to do for the console): `GET /staff/events` (events that can be scanned now),
+  `POST /staff/events/<id>/scan` (same body and answers as the console's scan: look, then `"confirm": true` to admit), `GET /staff/events/<id>/attendance` (the counter).
+  Every admission is recorded against the staff member who was signed in (`attendance.createdBy`, `passes.passIsUsedEmployeeId`, and the audit note).
+* The console's attendance numbers, CSV and audit view show these admissions at once, because they are the same records.
+
 ## 6. Handy checks (admin key only, nothing about people)
 
 | Call | Tells you |

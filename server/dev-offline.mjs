@@ -368,8 +368,13 @@ http.createServer(async (req, res) => {
       const u = tables[T.users].find((x) => x.ROWID === String(mem.userId));
       if (u) u.is_admin = !!body.admin;
     }
+    if ('scanner' in body) {
+      const u = tables[T.users].find((x) => x.ROWID === String(mem.userId));
+      if (u) u.is_employee = !!body.scanner;
+    }
     S.clearCache();
-    return send(res, 200, { id: mem.ROWID, pastor: mem.memberType === 'pastor' });
+    const u = tables[T.users].find((x) => x.ROWID === String(mem.userId));
+    return send(res, 200, { id: mem.ROWID, pastor: mem.memberType === 'pastor', roles: [mem.memberType === 'pastor' && 'pastor', u?.is_employee && 'scanner'].filter(Boolean) });
   }
   err(res, 404, 'not_found', 'No such endpoint.');
 }).listen(Number(NOAH_PORT), '127.0.0.1');

@@ -22,6 +22,7 @@
 import { db, find, roleById, audit } from '../db.js';
 import { live, isNoah, listMembers, writeAudit } from '../store.js';
 import { refreshSessions } from '../auth.js';
+import { accountScans, syncAppScanner } from '../scanner-role.js';
 import {
   loadStaffDirectory, staffCandidates, grantConsoleAccess, updateConsoleStaff, consoleStaffEnabled, ensureStaffBackend,
   accessRequests, declineAccessRequest,
@@ -85,7 +86,8 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
     try {
       await grantConsoleAccess({ memberRowId: member.rowId, role, by: req.user.name, title: title || roleById(role).name });
       await record(req, `Approved an access request: ${roleById(role).name}`, member.name, { status: 'Requested', note: open.note }, { role, status: 'Active' });
-      res.status(201).json({ ok: true, name: member.name, role });
+      const warning = accountScans(role) ? await syncAppScanner(member.rowId, true, { actor: req.user.name }) : null;
+      res.status(201).json({ ok: true, name: member.name, role, ...(warning ? { warning } : {}) });
     } catch (err) {
       res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
     }
@@ -146,7 +148,8 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
       });
       await record(req, `Gave console access: ${roleById(role).name}`, member.name,
         existing ? { status: existing.status, role: existing.role } : null, { role, mobile: member.mobile });
-      res.status(201).json({ ok: true, id, name: member.name, mobile: member.mobile, role });
+      const warning = accountScans(role) ? await syncAppScanner(member.rowId, true, { actor: req.user.name }) : null;
+      res.status(201).json({ ok: true, id, name: member.name, mobile: member.mobile, role, ...(warning ? { warning } : {}) });
     } catch (err) {
       res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
     }
@@ -203,7 +206,9 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
       await record(req, `Changed console role: ${roleById(staff.role).name} to ${roleById(role).name}`, staff.name, { role: staff.role }, { role });
       /* If they are signed in right now, their role changes with it. */
       refreshSessions(staff.id, { role });
-      res.json({ ok: true, id: staff.id, role });
+      const before = accountScans(staff.role, staff.status); const after = accountScans(role, staff.status);
+      const warning = before !== after ? await syncAppScanner(staff.memberRowId, after, { actor: req.user.name }) : null;
+      res.json({ ok: true, id: staff.id, role, ...(warning ? { warning } : {}) });
     } catch (err) {
       res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
     }
@@ -233,7 +238,9 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
         { status: staff.status }, { status: to }, req.body?.remark || '');
       /* Suspending ends their session now; it must not wait for it to expire. */
       if (to === 'Suspended') refreshSessions(staff.id);
-      res.json({ ok: true, id: staff.id, status: to });
+      const before = accountScans(staff.role, staff.status); const after = accountScans(staff.role, to);
+      const warning = before !== after ? await syncAppScanner(staff.memberRowId, after, { actor: req.user.name }) : null;
+      res.json({ ok: true, id: staff.id, status: to, ...(warning ? { warning } : {}) });
     } catch (err) {
       res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
     }
@@ -251,7 +258,8 @@ export default function mountStaff(app, { requireSession, requirePerm }) {
       await updateConsoleStaff(staff.rowId, { status: 'Revoked' });
       await record(req, 'Revoked console access', staff.name, { status: staff.status, role: staff.role }, { status: 'Revoked' }, req.body?.remark || '');
       refreshSessions(staff.id);
-      res.json({ ok: true, id: staff.id, status: 'Revoked' });
+      const warning = accountScans(staff.role, staff.status) ? await syncAppScanner(staff.memberRowId, false, { actor: req.user.name }) : null;
+      res.json({ ok: true, id: staff.id, status: 'Revoked', ...(warning ? { warning } : {}) });
     } catch (err) {
       res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
     }

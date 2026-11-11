@@ -77,6 +77,20 @@ console must show that as a **failed scan**, never as a success. The pass is put
 by a check after writing: the earliest attendance record counts and a later one is withdrawn, so one booking is never admitted twice.
 `GET /admin/diagnostics/lock` (admin key only) reports whether the lock itself is working.
 
+## 2b. The same scan from the member app (door staff)
+
+A member whose roles include `scanner` (set on the App roles screen: `POST /admin/members/:id/roles` with `{ "scanner": true }`, stored as `users.is_employee`), or an office
+admin / super admin, signed in to the app, can do the scan from the phone. These use that person's own token (`X-Noah-Token`); the role is checked by the Noah API.
+
+| Call | Does |
+|---|---|
+| `GET /staff/events` | `{ events: [ { id, name, start, end, place } ] }`: events open for scanning now (published, not archived, starting within 36 hours or not yet closed) |
+| `POST /staff/events/:id/scan` | exactly the console's scan (section 2): `{ token \| reference }` to look, `+ "confirm": true` to admit. `staffId` is the signed-in member; the name is read from their record; `deviceRef` is sent by the app |
+| `GET /staff/events/:id/attendance` | the counter: `{ event, registered, confirmed, checkedIn, notYetArrived, cancelled, attendancePercent }` (no list of people) |
+
+The `scanner` role is not an office role: it opens only these three calls. It does not skip registration. Taking it away (`"scanner": false`) stops the app from showing the
+scan icon and refuses the calls at once.
+
 ## 3. The QR code
 
 Each pass has one code, `KSP1.<pass id>.<signature>`. The signature is a keyed hash (the server's secret) of the pass, the event and

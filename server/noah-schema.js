@@ -826,11 +826,13 @@ export async function createRegistrationInNoah(v) {
 /** The member's roles as one row, or null when there is no such member. */
 export async function memberRolesRow(memberRowId, { create = false } = {}) {
   if (create) await ensureExtra(memberRowId);
-  const { members, extras } = await snapshot();
+  const { members, extras, users } = await snapshot();
   const m = members.find((x) => same(x.ROWID, memberRowId));
   if (!m) return null;
   const x = extras.find((e) => same(e.id, memberRowId));
-  return { ...(x || {}), memberType: m.memberType ?? null, memberRowId: String(m.ROWID) };
+  /* The door-scanner role lives on the member's login (users.is_employee), where the Noah API keeps it. */
+  const u = users.find((y) => same(y.ROWID, m.userId));
+  return { ...(x || {}), memberType: m.memberType ?? null, is_employee: u?.is_employee ?? null, memberRowId: String(m.ROWID) };
 }
 
 /** Apply a set of role changes. `memberType` belongs to members; everything
@@ -851,13 +853,15 @@ export async function patchMemberRoles(memberRowId, patch) {
 
 /** Everyone's roles, keyed by member row id, for the list screens. */
 export async function allMemberRoles() {
-  const { members, extras } = await snapshot();
+  const { members, extras, users } = await snapshot();
   const extraOf = new Map(extras.map((x) => [String(x.id), x]));
+  const userOf = new Map(users.map((u) => [String(u.ROWID), u]));
   const out = new Map();
   for (const m of members) {
     out.set(String(m.ROWID), {
       ...(extraOf.get(String(m.ROWID)) || {}),
       memberType: m.memberType ?? null,
+      is_employee: userOf.get(String(m.userId))?.is_employee ?? null,
       memberRowId: String(m.ROWID),
     });
   }
@@ -1002,7 +1006,7 @@ export async function surveyTables() {
 /* Columns this code reads or writes, per table. `check:schema` looks for each
    in a real row. If the Catalyst developer renames one, this says which. */
 export const EXPECTED_COLUMNS = {
-  users: ['number', 'countryCode', 'is_member', 'is_admin', 'is_super_admin', 'archived'],
+  users: ['number', 'countryCode', 'is_member', 'is_admin', 'is_super_admin', 'is_employee', 'archived'],
   members: [
     'id', 'userId', 'countryCode', 'mobileNumber1', 'isUnVerified', 'verifiedOn', 'memberId',
     'salutation', 'firstName', 'middleName', 'lastName', 'emailId1', 'gender', 'dateOfBirth',

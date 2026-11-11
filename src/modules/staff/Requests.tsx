@@ -42,8 +42,9 @@ export default function Requests() {
   async function approve(r: Request) {
     setBusy(r.memberRowId);
     try {
-      await api.post(`/staff/requests/${r.memberRowId}/approve`, { role: role[r.memberRowId] });
+      const res = await api.post<{ warning?: string }>(`/staff/requests/${r.memberRowId}/approve`, { role: role[r.memberRowId] });
       done(`${r.name} now has access. They can sign in with their own number.`);
+      if (res?.warning) toast(res.warning, 'warn');
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
