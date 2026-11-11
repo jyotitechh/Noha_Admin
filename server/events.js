@@ -60,6 +60,9 @@ async function rows(k) {
   return got;
 }
 
+/** Forget what was read, so the next read is fresh: for rows the Noah API changes itself, such as passUsed. */
+export const forgetEventRows = () => cache.clear();
+
 /** The stored rows of one table, exactly as kept. For tests. */
 export const storedRows = (k) => rows(k);
 
@@ -182,6 +185,10 @@ function eventOut(r) {
     termsFormatted: str(r.formattedTermsAndConditions),
     translation: str(r.translation),
     hallId: str(r.hallId),
+    /* Booking: a pass is needed, and how many seats (empty = no limit). passUsed is the Noah API's count of passes taken. */
+    passRequired: asBool(r.passRequired),
+    seats: num(r.passAvailable),
+    passUsed: num(r.passUsed) ?? 0,
     expenses: Object.fromEntries(EXPENSES.map(([k, col]) => [k, num(r[col])])),
     filters: f,
     blockedEventIds: idList(r.blockIfPassBookedFor),
@@ -211,6 +218,8 @@ function eventIn(v) {
     formattedDescription: v.about, photo: v.photo,
     terms: v.terms, formattedTermsAndConditions: v.termsFormatted, translation: v.translation,
     hallId: v.hallId || null,
+    /* passUsed is never written here: it is the count of passes taken, kept by the Noah API. A new event starts it at 0. */
+    passRequired: v.passRequired, passAvailable: v.seats,
     filters: JSON.stringify({
       forPastor: v.filters.pastor, forLeader: v.filters.leader, forVip: v.filters.vip,
       forPrayerWarrior: v.filters.prayerWarrior, memberGroups: v.filters.memberGroups,
@@ -268,6 +277,8 @@ async function validateEvent(body, selfId) {
     termsFormatted: cleanHtml(body.termsFormatted || ''),
     translation: text(body.translation, 10000),
     hallId: text(body.hallId, 30),
+    passRequired: !!body.passRequired,
+    seats: body.seats === '' || body.seats === null || body.seats === undefined ? null : Number(body.seats),
     expenses: Object.fromEntries(EXPENSES.map(([k]) => [k, ex[k] === '' || ex[k] === null || ex[k] === undefined ? null : Number(ex[k])])),
     filters: {
       pastor: !!fl.pastor, leader: !!fl.leader, vip: !!fl.vip, prayerWarrior: !!fl.prayerWarrior,
@@ -290,6 +301,7 @@ async function validateEvent(body, selfId) {
       errors.locationName = 'Choose the place again from the search.';
     }
   }
+  if (v.seats !== null && (!Number.isInteger(v.seats) || v.seats < 0 || v.seats > 1000000)) errors.seats = 'A whole number of seats, or leave it empty for no limit.';
   if (v.meetingLink && !LINK.test(v.meetingLink)) errors.meetingLink = 'A link starting with https://';
   if (v.photo && !LINK.test(v.photo)) errors.photo = 'A picture link starting with https://';
   for (const [k, , label] of EXPENSES) {
@@ -372,7 +384,7 @@ async function rememberPlace(v) {
 
 export async function createEvent(body) {
   const v = await validateEvent(body, '');
-  const id = await insertRow('events', { ...eventIn(v), isArchived: false, createdOn: stamp() });
+  const id = await insertRow('events', { ...eventIn(v), passUsed: 0, isArchived: false, createdOn: stamp() });
   await rememberPlace(v);
   return { id, name: v.name };
 }

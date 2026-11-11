@@ -44,6 +44,8 @@ const EXPLAIN = {
   server_misconfigured: 'The Noah service is not fully configured. The Catalyst developer needs to look at it.',
   session_invalid: 'Noah refused the request without an admin key.',
   event_not_found: 'Noah has no event with that id.',
+  audit_unavailable: 'Attendance cannot be corrected yet: the appAttendanceAudit table is not in the Data Store.',
+  pass_not_found: 'That pass is not one of this event\'s passes.',
   event_archived: 'That event is archived, so members are not told about it.',
   event_hidden: 'That event is hidden from members, so they are not told about it.',
   not_published_yet: 'That event is not published yet.',
@@ -60,7 +62,7 @@ export class NoahApiError extends Error {
   }
 }
 
-async function call(path, { method = 'GET', body, actor, raw = false } = {}) {
+async function call(path, { method = 'GET', body, actor, staffId, raw = false } = {}) {
   if (!noahConfigured()) {
     throw new NoahApiError(503, 'not_configured',
       'The Noah API is not configured. Set NOAH_API_BASE and NOAH_ADMIN_API_KEY in .env.local.');
@@ -72,6 +74,8 @@ async function call(path, { method = 'GET', body, actor, raw = false } = {}) {
       'X-Admin-Key': KEY(),
       /* Who is acting, for Noah's own logs. */
       ...(actor ? { 'X-Admin-Name': actor } : {}),
+      /* The staff member's id (digits), stored with a scan or a correction. */
+      ...(staffId ? { 'X-Admin-Staff-Id': String(staffId) } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -177,6 +181,44 @@ export const announceEvent = (id, { force = false, actor } = {}) =>
 
 export const announceDue = ({ hours, actor } = {}) =>
   call('/admin/events/announce-due', { method: 'POST', actor, body: hours ? { hours } : {} });
+
+/* ---------- entry passes, the door scanner and attendance ----------
+
+   EVENTS-QR-CONTRACT.md. The console checks events.scan itself before calling any of these: the Noah API does not know the
+   console's roles. Every call names the staff member (X-Admin-Name, X-Admin-Staff-Id).
+
+   POST /admin/events/:id/scan                { token | reference, confirm?, staffId, deviceRef? }
+        -> 200 { result, ok, message, event, pass, member, other? }  (result: valid admitted already_scanned invalid wrong_event
+           cancelled not_confirmed event_closed busy). 500 means the admission could not be recorded: a failed scan, never a success.
+   GET  /admin/events/:id/attendance          -> { event, registered, confirmed, checkedIn, notYetArrived, cancelled, attendancePercent, capped, recent }
+   GET  /admin/events/:id/attendance/export   -> CSV
+   POST /admin/events/:id/attendance/correct  { passId | memberId, action: present | absent, reason, staffId } */
+export const scanPass = (eventId, { token, reference, confirm = false, deviceRef, staffId, actor } = {}) =>
+  call(`/admin/events/${encodeURIComponent(eventId)}/scan`, {
+    method: 'POST', actor, staffId,
+    body: {
+      ...(token ? { token } : { reference }),
+      ...(confirm ? { confirm: true } : {}),
+      ...(staffId ? { staffId: String(staffId) } : {}),
+      ...(deviceRef ? { deviceRef } : {}),
+    },
+  });
+
+export const eventAttendance = (eventId) => call(`/admin/events/${encodeURIComponent(eventId)}/attendance`);
+
+export const eventAttendanceCsv = (eventId) => call(`/admin/events/${encodeURIComponent(eventId)}/attendance/export`, { raw: true });
+
+export const attendanceAudit = (eventId, limit = 100) =>
+  call(`/admin/events/${encodeURIComponent(eventId)}/attendance/audit?limit=${Number(limit) || 100}`);
+
+/** The newest events, each with whether it is shown to members and why not (FOR-CONSOLE-EVENTS.md). */
+export const eventDiagnostics = () => call('/admin/diagnostics/events');
+
+export const correctAttendance = (eventId, { passId, memberId, action, reason, staffId, actor } = {}) =>
+  call(`/admin/events/${encodeURIComponent(eventId)}/attendance/correct`, {
+    method: 'POST', actor, staffId,
+    body: { ...(passId ? { passId } : { memberId }), action, reason, ...(staffId ? { staffId: String(staffId) } : {}) },
+  });
 
 /* ---------- roles ----------
 

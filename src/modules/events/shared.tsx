@@ -46,6 +46,8 @@ export interface EventForm {
   maxAge: number | null; meetingLink: string; zoomId: string; zoomPassword: string;
   about: string; photo: string; terms: string; termsFormatted: string; translation: string;
   hallId: string;
+  /** A member books a pass to attend; seats is the number of passes (null = no limit). */
+  passRequired: boolean; seats: number | null;
   expenses: Record<string, number | null>;
   filters: { pastor: boolean; leader: boolean; vip: boolean; prayerWarrior: boolean; memberGroups: string[] };
   blockedEventIds: string[];
@@ -53,6 +55,8 @@ export interface EventForm {
 
 export interface EventDetail extends EventForm {
   id: string;
+  /** Passes taken so far, kept by the Noah API. */
+  passUsed: number;
   groupName: string | null; hallName: string | null; preacher: Person | null;
   memberGroupNames: string[];
   archived: boolean;
@@ -76,6 +80,14 @@ export function useChoices(bump = 0) {
   return c;
 }
 export const forgetChoices = () => { choicesOnce = null; };
+
+/** Who an event is for, in words: "Everyone", or "Only: pastors, leaders". Any role picked means those roles only (the Noah API's rule). */
+export const audienceText = (f: EventForm['filters'], groupNames: string[] = []) => {
+  const roles = [f.pastor && 'pastors', f.leader && 'leaders', f.vip && 'VIPs', f.prayerWarrior && 'prayer warriors'].filter(Boolean) as string[];
+  const groups = groupNames.length ? ` in ${groupNames.join(', ')}` : f.memberGroups.length ? ` in ${f.memberGroups.length} member group${f.memberGroups.length === 1 ? '' : 's'}` : '';
+  if (!roles.length) return groups ? `Members${groups}` : 'Everyone';
+  return `Only: ${roles.join(', ')}${groups}`;
+};
 
 /** '2026-11-07' -> 'Saturday, 7 Nov 2026'. */
 export const dayLong = (d: string) =>

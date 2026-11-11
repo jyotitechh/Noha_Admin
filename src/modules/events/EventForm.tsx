@@ -11,7 +11,7 @@ import { Btn, Field, Note, Switch } from '@/components/ui';
 import { RichText } from '@/modules/content/RichText';
 import { PictureInput } from '@/modules/content/PictureInput';
 import { LocationPicker } from './LocationPicker';
-import { FieldBox, MemberPicker, TIMEZONES, afterSave, announceTone, dayLong, time12, useChoices, type Announce, type EventForm as Form, type EventRow } from './shared';
+import { FieldBox, MemberPicker, TIMEZONES, afterSave, audienceText, announceTone, dayLong, time12, useChoices, type Announce, type EventForm as Form, type EventRow } from './shared';
 
 const STEPS = [
   { id: 'details', label: 'Details' },
@@ -28,6 +28,7 @@ const STEPS = [
 /** Which page a field the server refused is on. */
 const stepOf = (field: string) => {
   if (field.startsWith('expenses') || field === 'hallId') return 6;
+  if (field === 'seats') return 0;
   const at: Record<string, number> = { preacherId: 0, about: 1, photo: 2, terms: 3, termsFormatted: 4, translation: 5, filters: 7, blockedEventIds: 8 };
   return at[field] ?? 0;
 };
@@ -43,6 +44,7 @@ export const blankEvent = (): Form => ({
   startTime: '', endTime: '', timezone: 'Asia/Kolkata', hideFromDonation: false, visible: true,
   maxAge: null, meetingLink: '', zoomId: '', zoomPassword: '',
   about: '', photo: '', terms: '', termsFormatted: '', translation: '', hallId: '',
+  passRequired: true, seats: null,
   expenses: {}, filters: { pastor: false, leader: false, vip: false, prayerWarrior: false, memberGroups: [] },
   blockedEventIds: [],
 });
@@ -53,8 +55,10 @@ export function formOf(e: Form): Form {
   return Object.fromEntries(Object.keys(b).map((k) => [k, (e as unknown as Record<string, unknown>)[k] ?? (b as unknown as Record<string, unknown>)[k]])) as unknown as Form;
 }
 
-export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }: {
+export function EventFormDrawer({ open, mode, eventId, start, taken = 0, onClose, onSaved }: {
   open: boolean;
+  /** Passes members have already taken (editing only). */
+  taken?: number;
   mode: 'add' | 'edit' | 'copy';
   eventId?: string;
   start: Form;
@@ -69,8 +73,10 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
   const [busy, setBusy] = useState(false);
   const [others, setOthers] = useState<EventRow[]>([]);
   const [findEvent, setFindEvent] = useState('');
+  /* "Only some roles" picked, before any role is ticked. */
+  const [onlySome, setOnlySome] = useState(false);
 
-  useEffect(() => { if (open) { setV(start); setStep(0); setErrors({}); } }, [open, start]);
+  useEffect(() => { if (open) { setV(start); setStep(0); setErrors({}); setOnlySome(false); } }, [open, start]);
   useEffect(() => {
     if (!open) return;
     api.get<{ rows: EventRow[] }>('/event-admin/events').then((r) => setOthers(r.rows)).catch(() => setOthers([]));
@@ -221,6 +227,23 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
                 </select>
               </Field>
 
+              <div className="sect-title">Booking</div>
+              <div className="card pad stack" style={{ gap: 10 }}>
+                <div className="row" style={{ alignItems: 'center' }}>
+                  <span className="grow">
+                    Members book a pass to attend
+                    <span className="xs muted" style={{ display: 'block' }}>Off: the event is only shown in the app and cannot be booked.</span>
+                  </span>
+                  <Switch checked={v.passRequired} onChange={(on) => set('passRequired', on)} label="Members book a pass to attend" />
+                </div>
+                {v.passRequired && (
+                  <Field label="Seats" hint={taken ? `${taken} ${taken === 1 ? 'pass' : 'passes'} taken so far. Leave empty for no limit.` : 'The number of passes members can book. Leave empty for no limit.'} error={errors.seats}>
+                    <input className={'inp' + (errors.seats ? ' err' : '')} type="number" min={0} style={{ maxWidth: 200 }} value={v.seats ?? ''}
+                      onChange={(e) => set('seats', e.target.value === '' ? null : Number(e.target.value))} />
+                  </Field>
+                )}
+              </div>
+
               <FieldBox label="Location" error={errors.locationName}>
                 <LocationPicker
                   map={choices.map}
@@ -296,16 +319,36 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
 
           {step === 7 && (
             <>
-              <div className="sect-title">Event filters</div>
+              <div className="sect-title">Who can see it</div>
               <div className="card pad stack" style={{ gap: 10 }}>
-                {([['pastor', 'For pastors'], ['leader', 'For leaders'], ['vip', 'For VIPs'], ['prayerWarrior', 'For prayer warriors']] as const).map(([k, label]) => (
-                  <div key={k} className="row" style={{ alignItems: 'center' }}>
-                    <span className="grow">{label}</span>
-                    <Switch checked={v.filters[k]} onChange={(on) => setFilter(k, on)} label={label} />
-                  </div>
-                ))}
+                {(() => {
+                  const someRoles = v.filters.pastor || v.filters.leader || v.filters.vip || v.filters.prayerWarrior || onlySome;
+                  return (
+                    <>
+                      <label className="row" style={{ gap: 8, alignItems: 'center' }}>
+                        <input type="radio" name="audience" checked={!someRoles}
+                          onChange={() => { setOnlySome(false); setV((x) => ({ ...x, filters: { ...x.filters, pastor: false, leader: false, vip: false, prayerWarrior: false } })); }} />
+                        <span><b>Everyone</b> <span className="muted small">every approved member</span></span>
+                      </label>
+                      <label className="row" style={{ gap: 8, alignItems: 'center' }}>
+                        <input type="radio" name="audience" checked={someRoles} onChange={() => setOnlySome(true)} />
+                        <span><b>Only some roles</b> <span className="muted small">ordinary members will not see it</span></span>
+                      </label>
+                      {someRoles && (
+                        <div className="row wrap" style={{ gap: 14, paddingLeft: 26 }}>
+                          {([['pastor', 'Pastors'], ['leader', 'Leaders'], ['vip', 'VIPs'], ['prayerWarrior', 'Prayer warriors']] as const).map(([k, label]) => (
+                            <label key={k} className="row" style={{ gap: 6, alignItems: 'center' }}>
+                              <input type="checkbox" checked={v.filters[k]} onChange={(e) => setFilter(k, e.target.checked)} /> {label}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+                <div className="small"><b>Shown to:</b> {audienceText(v.filters, choices.memberGroups.filter((g) => v.filters.memberGroups.includes(g.id)).map((g) => g.name))}</div>
               </div>
-              <div className="sect-title">Member groups</div>
+              <div className="sect-title">Member groups <span className="muted small">(optional: only members of these groups)</span></div>
               {choices.memberGroups.length ? (
                 <div className="card pad stack" style={{ gap: 8 }}>
                   {choices.memberGroups.map((g) => (

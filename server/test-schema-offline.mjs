@@ -1768,6 +1768,21 @@ section('Events, event groups and language groups');
     !(await EV.listEvents()).some((e) => e.id === first.id) && (await EV.storedRows('events')).some((r) => String(r.ROWID) === first.id && r.isArchived === true));
   check('...and is gone from what still blocks it', (await EV.getEvent(second.id, async () => null)).blockedEvents.length === 0);
 
+  /* ---- booking (FOR-CONSOLE-EVENTS.md section 3) ---- */
+  const booked = await EV.createEvent({ ...base, name: 'Bookable', passRequired: true, seats: 500 });
+  const bookedRow = (await EV.storedRows('events')).find((r) => r.name === 'Bookable');
+  check('a bookable event is saved with passRequired, its seats, and passUsed at 0', bookedRow?.passRequired === true && bookedRow.passAvailable === 500 && bookedRow.passUsed === 0, JSON.stringify({ r: bookedRow?.passRequired, a: bookedRow?.passAvailable, u: bookedRow?.passUsed }));
+  /* Members booked in the app: the Noah API raises passUsed in the table itself. */
+  if (EV.onCatalyst()) await S.io.update('tbl:events', { ROWID: String(bookedRow.ROWID), passUsed: 37 }); else bookedRow.passUsed = 37;
+  EV.forgetEventRows();
+  await EV.updateEvent(booked.id, { ...base, name: 'Bookable', passRequired: true, seats: 600 });
+  const afterEdit = (await EV.storedRows('events')).find((r) => r.name === 'Bookable');
+  check('...an edit changes the seats but never resets the passes taken', afterEdit.passAvailable === 600 && afterEdit.passUsed === 37);
+  check('...and the form reads them back', (await EV.getEvent(booked.id, async () => null)).passUsed === 37);
+  check('seats that are not a whole number are refused', !!(await refused(EV.createEvent({ ...base, name: 'Bad seats', passRequired: true, seats: 2.5 })))?.errors?.seats);
+  const shownOnly = await EV.createEvent({ ...base, name: 'Shown only', passRequired: false });
+  check('an event that needs no pass is saved as such', (await EV.getEvent(shownOnly.id, async () => null)).passRequired === false);
+
   /* ---- the place on the map ---- */
   const PL = await import('./places.js');
   const realFetchP = globalThis.fetch;

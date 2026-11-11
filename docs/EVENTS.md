@@ -67,6 +67,23 @@ target/result counters. Rows are linked by **ROWID**.
 
 A group that events still use cannot be archived.
 
+## Door scanner, attendance and bookings
+
+Built from the Noah API developer's `docs/EVENTS-QR-CONTRACT.md` and `docs/FOR-CONSOLE-EVENTS.md` (`server/routes/attendance.js`,
+`src/modules/events/Scanner.tsx`, `Attendance.tsx`, `Bookings.tsx`).
+
+| Screen | Who | What it calls |
+|---|---|---|
+| **Event scanner** | `events.scan` | `POST /admin/events/:id/scan` to look, then with `confirm: true` to admit. Camera: the browser's BarcodeDetector, else jsQR; or the typed reference |
+| **Attendance** | `events.view` or `events.scan` | `GET /admin/events/:id/attendance` (every 5 s while Live), `.../attendance/export` (CSV), `.../attendance/audit` |
+| Correct attendance | `events.scan` | `POST /admin/events/:id/attendance/correct`, a reason is required |
+| **Bookings** | `events.view` | Catalyst's `passes` table, read only |
+| "In the app" on an event | `events.view` | `GET /admin/diagnostics/events`: whether the app shows it and why not |
+
+The console's server checks the permission before every call, and names the staff member (`X-Admin-Name`, `X-Admin-Staff-Id` / `staffId`).
+A scan the Noah API could not record is shown as a failed scan. The form now saves `passRequired` and `passAvailable` (seats), writes
+`passUsed: 0` only when an event is created, and the audience is "Everyone" unless roles are picked.
+
 ## Telling members about an event
 
 The console writes events to the table itself, so it asks the Noah API to announce them (`server/event-announce.js`;

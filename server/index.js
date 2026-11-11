@@ -34,6 +34,7 @@ import mountChanges from './routes/changes.js';
 import mountContent from './routes/content.js';
 import mountFamily from './routes/family.js';
 import mountEvents from './routes/events.js';
+import mountAttendance from './routes/attendance.js';
 import { startEventSweep } from './event-announce.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
@@ -494,6 +495,7 @@ mountChanges(app, { requireSession, requirePerm });
 mountContent(app, { requireSession, requirePerm });
 mountFamily(app, { requireSession, requirePerm });
 mountEvents(app, { requireSession, requirePerm });
+mountAttendance(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 

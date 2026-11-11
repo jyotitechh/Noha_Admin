@@ -94,6 +94,8 @@ const familyRequests = [
 const told = new Set();
 /* Events the fake Noah API has already announced. */
 const announced = new Set();
+/* The door, per event: when the one test pass was admitted, and the audit trail. */
+const doorState = {};
 const send = (res, status, body, headers = {}) => {
   const isBuf = Buffer.isBuffer(body);
   res.writeHead(status, { 'content-type': isBuf ? 'application/octet-stream' : 'application/json', ...headers });
@@ -313,6 +315,49 @@ http.createServer(async (req, res) => {
     const r = announceOne(e, body.force === true);
     if (r.error) return send(res, r.error[0], { error: { code: r.error[1], message: r.error[2], ...(r.error[3] || {}) } });
     return send(res, 200, r.ok);
+  }
+  /* EVENTS-QR-CONTRACT.md: one booking per event, reference KS-TEST-1, token KSP1.<pass>.sig */
+  if ((m = path.match(/^\/admin\/events\/(\d+)\/(scan|attendance|attendance\/export|attendance\/audit|attendance\/correct)$/))) {
+    const [, eventId, what] = m;
+    const ev = eventsTable().find((x) => x.ROWID === eventId);
+    if (!ev) return err(res, 404, 'event_not_found', 'No such event.');
+    const st = (doorState[eventId] ||= { admittedAt: null, trail: [] });
+    const member = { id: M.approved, name: 'Anand Rao', number: 'M0001', photoFileId: null };
+    const pass = { id: '900' + eventId.slice(-6), reference: 'KS-TEST-1', bookedAt: '2026-11-10T10:00:00.000Z', attendedAt: st.admittedAt };
+    const base = { event: { id: eventId, name: ev.name, start: ev.startTimeUtc || null }, pass, member };
+    if (what === 'scan') {
+      const ok = body.token === `KSP1.${pass.id}.sig` || body.reference === 'KS-TEST-1';
+      if (!ok) return send(res, 200, { result: 'invalid', ok: false, message: 'Invalid QR: this QR code is not recognised.' });
+      if (st.admittedAt) return send(res, 200, { result: 'already_scanned', ok: false, message: 'Already Scanned: this member has already been marked present.', ...base });
+      if (!body.confirm) return send(res, 200, { result: 'valid', ok: true, message: 'Valid Pass: entry verified successfully.', ...base });
+      st.admittedAt = new Date().toISOString();
+      st.trail.unshift({ at: st.admittedAt, action: body.token ? 'admit_qr' : 'admit_reference', result: 'admitted', staff: { id: body.staffId || null, name: req.headers['x-admin-name'] || '' }, deviceRef: body.deviceRef || null, reason: null, passId: pass.id, member: { id: member.id, name: member.name } });
+      return send(res, 200, { result: 'admitted', ok: true, message: 'Admitted: attendance has been recorded.', ...base, pass: { ...pass, attendedAt: st.admittedAt } });
+    }
+    if (what === 'attendance') {
+      const inn = st.admittedAt ? 1 : 0;
+      return send(res, 200, { event: { id: eventId, name: ev.name, start: ev.startTimeUtc || null, scanningOpen: true }, registered: 1, confirmed: 1, checkedIn: inn, notYetArrived: 1 - inn, cancelled: 0, attendancePercent: inn * 100, capped: false, recent: st.admittedAt ? [{ at: st.admittedAt, manual: false, member: { id: member.id, name: member.name } }] : [] });
+    }
+    if (what === 'attendance/export') {
+      res.writeHead(200, { 'content-type': 'text/csv' });
+      return res.end(`Reference,Member number,Name,Status,Booked at,Scanned at,Scanned by (staff id)\nKS-TEST-1,M0001,Anand Rao,${st.admittedAt ? 'Present' : 'Booked'},2026-11-10T10:00:00Z,${st.admittedAt || ''},\n`);
+    }
+    if (what === 'attendance/audit') return send(res, 200, { trail: st.trail });
+    if (what === 'attendance/correct') {
+      if (String(body.reason || '').trim().length < 3) return err(res, 400, 'reason_required', 'A reason is required.');
+      st.admittedAt = body.action === 'present' ? new Date().toISOString() : null;
+      st.trail.unshift({ at: new Date().toISOString(), action: body.action === 'present' ? 'correct_present' : 'correct_absent', result: 'ok', staff: { id: body.staffId || null, name: req.headers['x-admin-name'] || '' }, deviceRef: null, reason: body.reason, passId: pass.id, member: { id: member.id, name: member.name } });
+      return send(res, 200, { ok: true, pass: { ...pass, attendedAt: st.admittedAt } });
+    }
+  }
+  if (req.method === 'GET' && path === '/admin/diagnostics/events') {
+    return send(res, 200, { events: eventsTable().slice(-10).map((e) => {
+      const f = (() => { try { return JSON.parse(e.filters || '{}'); } catch { return {}; } })();
+      const notes = [];
+      if (f.forPastor || f.forLeader || f.forVip || f.forPrayerWarrior) notes.push('Only for some roles: an ordinary member does not see it.');
+      if (!e.passRequired) notes.push('No pass is needed, so it cannot be booked.');
+      return { id: e.ROWID, name: e.name, shownToMembers: !e.isArchived && !e.isInvisible && !e.hideFromPublic, notes };
+    }) });
   }
   /* ADMIN_SETUP.md: POST /admin/members/:id/roles { pastor?, admin? }, only what changes. */
   if (req.method === 'POST' && (m = path.match(/^\/admin\/members\/(\d+)\/roles$/))) {

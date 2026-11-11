@@ -11,7 +11,8 @@ import { Confirm, Drawer, useToast } from '@/components/layers';
 import { Btn, Chip, Empty, Failed, Icon, Kv, Loading, Seg } from '@/components/ui';
 import { EventFormDrawer, blankEvent, formOf } from './EventForm';
 import { mapLink } from './LocationPicker';
-import { announceTone, dayLong, forgetChoices, time12, whenLong, type Announce, type EventDetail, type EventForm, type EventRow } from './shared';
+import { useNavigate } from 'react-router-dom';
+import { announceTone, audienceText, dayLong, forgetChoices, time12, whenLong, type Announce, type EventDetail, type EventForm, type EventRow } from './shared';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -24,6 +25,7 @@ export default function EventAdmin() {
   const { can } = useAuth();
   const manage = can('events.manage');
   const { toast } = useToast();
+  const nav = useNavigate();
 
   const [show, setShow] = useState<Show>('active');
   const [q, setQ] = useState('');
@@ -34,7 +36,7 @@ export default function EventAdmin() {
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EventDetail | null>(null);
-  const [form, setForm] = useState<{ mode: 'add' | 'edit' | 'copy'; id?: string; start: EventForm } | null>(null);
+  const [form, setForm] = useState<{ mode: 'add' | 'edit' | 'copy'; id?: string; start: EventForm; taken?: number } | null>(null);
   const [confirming, setConfirming] = useState<{ kind: 'archive' | 'delete'; id: string; name: string } | null>(null);
   const [telling, setTelling] = useState(false);
   const [tellAgain, setTellAgain] = useState<{ id: string; name: string } | null>(null);
@@ -61,7 +63,7 @@ export default function EventAdmin() {
   async function startFrom(mode: 'edit' | 'copy', id: string) {
     try {
       const e = detail?.id === id ? detail : await api.get<EventDetail>(`/event-admin/events/${id}`);
-      setForm({ mode, id: mode === 'edit' ? id : undefined, start: formOf(e) });
+      setForm({ mode, id: mode === 'edit' ? id : undefined, start: formOf(e), taken: mode === 'edit' ? e.passUsed : 0 });
     } catch (err) {
       toast((err as Error).message, 'bad');
     }
@@ -180,7 +182,7 @@ export default function EventAdmin() {
           )
         ) : undefined}
       >
-        {!detail ? <Loading what="the event" /> : <EventView e={detail} />}
+        {!detail ? <Loading what="the event" /> : <EventView e={detail} onAttendance={() => nav(`/events/attendance?event=${detail.id}`)} />}
       </Drawer>
 
       {form && (
@@ -189,6 +191,7 @@ export default function EventAdmin() {
           mode={form.mode}
           eventId={form.id}
           start={form.start}
+          taken={form.taken}
           onClose={() => setForm(null)}
           onSaved={(id) => { setForm(null); forgetChoices(); load(); setOpenId(null); setTimeout(() => setOpenId(id), 0); }}
         />
@@ -220,10 +223,33 @@ export default function EventAdmin() {
   );
 }
 
-const yesNo = (b: boolean) => (b ? 'Yes' : 'No');
 const dash = (s: string | number | null | undefined) => (s === null || s === undefined || s === '' ? '—' : s);
 
-function EventView({ e }: { e: EventDetail }) {
+/** What the Noah API says about the event: shown to members or not, and why. */
+function InApp({ id }: { id: string }) {
+  const [state, setState] = useState<{ shown?: boolean; notes: string[]; unknown?: string } | null>(null);
+  useEffect(() => {
+    setState(null);
+    api.get<{ found: boolean; event: { shownToMembers?: boolean; notes?: unknown } | null }>(`/event-admin/events/${id}/in-app`)
+      .then((r) => {
+        if (!r.found || !r.event) { setState({ notes: [], unknown: 'The app has not looked at this event yet.' }); return; }
+        const n = r.event.notes;
+        const notes = Array.isArray(n) ? n.map((x) => (typeof x === 'string' ? x : String((x as { message?: string })?.message ?? JSON.stringify(x)))) : n ? [String(n)] : [];
+        setState({ shown: r.event.shownToMembers, notes });
+      })
+      .catch(() => setState({ notes: [], unknown: 'Could not ask the app just now.' }));
+  }, [id]);
+  if (!state) return <p className="muted small mt0">Checking the app…</p>;
+  if (state.unknown) return <p className="muted small mt0">{state.unknown}</p>;
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      {state.shown ? <Chip tone="ok" icon="mobile">Shown in the app</Chip> : <Chip tone="warn" icon="eye-off">Not shown in the app</Chip>}
+      {state.notes.length > 0 && <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{state.notes.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+    </div>
+  );
+}
+
+function EventView({ e, onAttendance }: { e: EventDetail; onAttendance: () => void }) {
   const spent = Object.entries(e.expenses).filter(([, n]) => n !== null && n !== undefined) as [string, number][];
   const labels: Record<string, string> = { hall: 'Hall', sound: 'Sound', lights: 'Lights', musician: 'Musicians', media: 'Media', bus: 'Bus', transport: 'Transport', photography: 'Photography', translator: 'Translator' };
 
@@ -260,17 +286,21 @@ function EventView({ e }: { e: EventDetail }) {
         ['Translation', dash(e.translation)],
       ]} />
 
+      <div className="sect-title">In the app</div>
+      <InApp id={e.id} />
+
+      <div className="sect-title">Booking</div>
+      <Kv rows={[
+        ['Members book a pass', e.passRequired ? 'Yes' : 'No: shown only, cannot be booked'],
+        ...(e.passRequired ? [['Seats', e.seats ? `${e.seats} (${e.passUsed} taken)` : `No limit (${e.passUsed} taken)`] as [string, string]] : []),
+      ]} />
+      {e.passRequired && <div><Btn sm icon="users" onClick={onAttendance}>Attendance</Btn></div>}
+
       <div className="sect-title">Expenses</div>
       {spent.length ? <Kv rows={spent.map(([k, n]) => [labels[k] ?? k, inr(n)])} /> : <p className="muted small mt0">None entered.</p>}
 
       <div className="sect-title">Who it is for</div>
-      <Kv rows={[
-        ['For pastors', yesNo(e.filters.pastor)],
-        ['For leaders', yesNo(e.filters.leader)],
-        ['For VIPs', yesNo(e.filters.vip)],
-        ['For prayer warriors', yesNo(e.filters.prayerWarrior)],
-        ['Member groups', e.memberGroupNames.length ? e.memberGroupNames.join(', ') : '—'],
-      ]} />
+      <p className="mt0"><b>{audienceText(e.filters, e.memberGroupNames)}</b></p>
 
       {e.about && (
         <details className="card pad">
