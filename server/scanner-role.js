@@ -9,7 +9,9 @@
 
 import * as noah from './noah-api.js';
 import { db } from './db.js';
-import { clearCache, loadStaffDirectory } from './noah-schema.js';
+import { clearCache, loadStaffDirectory, allMemberRoles } from './noah-schema.js';
+
+const truthy = (v) => v === true || v === 'true' || v === 1 || v === '1';
 
 /** Does this console role include scanning passes (in the permission grid as it is now)? Unknown roles never do. */
 export const roleScans = (roleId) => !!db.ROLES.find((r) => r.id === roleId)?.perms?.includes('events.scan');
@@ -33,6 +35,30 @@ export async function syncAppScanner(memberRowId, on, { actor } = {}) {
       ? 'Console access is saved, but the door-scanner role in the app could not be given. Give it on App roles (Door staff / Pass scanner).'
       : 'Console access is saved, but the door-scanner role in the app could not be taken away. Take it away on App roles.';
   }
+}
+
+/**
+ * Active staff whose console access includes events.scan but who cannot scan in the app yet (their login's
+ * users.is_employee, the flag the app reads, is not set). Staff given access before the two were kept in step
+ * are the usual case. Only ever adds: someone given the role by hand on App roles is never listed or changed.
+ */
+export async function scannerGaps() {
+  const [staff, roleRows] = await Promise.all([loadStaffDirectory(db.ROLES.map((r) => r.id)), allMemberRoles()]);
+  const seen = new Set();
+  return staff
+    .filter((s) => s.memberRowId && accountScans(s.role, s.status))
+    .filter((s) => !truthy(roleRows.get(String(s.memberRowId))?.is_employee))
+    .filter((s) => !seen.has(s.memberRowId) && seen.add(s.memberRowId))
+    .map((s) => ({ memberRowId: s.memberRowId, name: s.name }));
+}
+
+/** Give the app's scanner role to everyone `scannerGaps` lists. */
+export async function fillScannerGaps({ actor } = {}) {
+  if (!noah.noahConfigured()) return { given: 0, failed: [], noKey: true };
+  const gaps = await scannerGaps();
+  const failed = [];
+  for (const g of gaps) if (await syncAppScanner(g.memberRowId, true, { actor })) failed.push(g.name);
+  return { given: gaps.length - failed.length, failed };
 }
 
 /**

@@ -98,6 +98,8 @@ Door staff can also scan inside the member app (Events tab, a scan icon) when th
   `scanner: true`; when it stops (role changed, suspended, revoked, or the permission switched off) they get `scanner: false`.
   If the Noah API refuses, the console change is still saved and the screen shows a warning to set it by hand on App roles.
   The permission grid lives in memory, so a grid change made before a restart is not re-applied to the app roles after it.
+* **Staff given access before this** are listed on App roles ("N staff members can scan passes in the console but not yet in the
+  Noah app") with a button that gives them `scanner: true` (`POST /api/app-roles/sync-scanners`). It only adds; nobody loses the role.
 
 ## Telling members about an event
 

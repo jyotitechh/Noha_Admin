@@ -13,7 +13,7 @@ import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
 import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
-import { syncRoleScanners } from '../scanner-role.js';
+import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -569,10 +569,31 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
             hasRolesRow: !!row,
           };
         });
-      res.json({ rows, total: rows.length, offset: 0, limit: rows.length });
+      /* Staff who can scan in the console but not yet in the app (see server/scanner-role.js). */
+      const gaps = await scannerGaps().catch(() => []);
+      res.json({ rows, total: rows.length, offset: 0, limit: rows.length, scannerGaps: gaps });
     } catch (err) {
       const explained = explainCatalyst(err);
       res.status(503).json({ error: explained?.message ?? err.message, ...(explained ? { code: explained.code } : {}) });
+    }
+  });
+
+  /* Give the app's door-scanner role to every active staff member whose console access includes events.scan. */
+  app.post('/api/app-roles/sync-scanners', ...guard(['approles.manage', 'staff.manage']), async (req, res) => {
+    if (!live()) return res.status(409).json({ error: 'Member roles need the Catalyst connection.' });
+    try {
+      const out = await fillScannerGaps({ actor: req.user.name });
+      if (out.noKey) return res.status(409).json({ error: 'The Noah API key is not set, so the app role cannot be given from here.' });
+      await writeAudit({
+        actor: req.user.name, role: staffRole(req.session.role).name,
+        action: 'Gave the door-scanner role in the app to staff who can scan passes',
+        module: 'App roles', record: `${out.given} staff`,
+        before: null, after: out, ip: '10.20.4.17',
+      });
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      const explained = explainCatalyst(err);
+      res.status(502).json({ error: explained?.message ?? err.message });
     }
   });
 

@@ -75,6 +75,8 @@ export const MEMBER_ROLES = [
     id: 'translator',
     label: 'Translator',
     column: 'isTranslator',
+    /* A number column in the office's table (1 / 0), not true / false: Catalyst refuses `true` for it. */
+    numeric: true,
     desc: 'Translates content into other languages.',
     opens: ['Translation work'],
   },
@@ -175,7 +177,7 @@ export function patchForRole(roleId, on) {
     /* memberType holds one value, so removing pastor returns them to member. */
     return { memberType: on ? role.memberType : 'member' };
   }
-  return { [role.column]: !!on };
+  return { [role.column]: role.numeric ? (on ? 1 : 0) : !!on };
 }
 
 export function patchForRestriction(id, on, comment) {

@@ -194,6 +194,13 @@ check('…joined by id = member ROWID', tables[T.membersExtra].at(-1).id === M.o
 const all = await S.allMemberRoles();
 check('everyone\'s roles are listed, including members with no extra row', all.size === seed().members.length && all.get(M.blank).memberType === null);
 
+/* isTranslator is a number column in the office's table: Catalyst refuses true / false for it. */
+check('translator is written as 1 / 0 (an int column), not true / false', patchForRole('translator', true).isTranslator === 1 && patchForRole('translator', false).isTranslator === 0);
+check('…and read back from a 1 as a translator', rolesFromRow({ isTranslator: '1' }).includes('translator') && !rolesFromRow({ isTranslator: '0' }).includes('translator'));
+/* The door scanner the app reads is users.is_employee (set by the Noah API); either flag counts. */
+check('the door scanner is read from the login\'s is_employee', rolesFromRow({ is_employee: true }).includes('passScan') && appRoleSummary({ is_employee: true }).canScanPasses === true);
+check('…or from the console\'s own isPassScan', rolesFromRow({ isPassScan: true }).includes('passScan'));
+
 /* ================================================================== */
 section('A decision written straight to the tables (the fallback)');
 

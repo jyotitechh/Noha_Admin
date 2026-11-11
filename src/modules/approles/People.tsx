@@ -39,7 +39,27 @@ export default function People() {
   const { toast } = useToast();
 
   const cat = useQuery(() => api.get<{ roles: RoleDef[]; restrictions: RoleDef[] }>('/app-roles/catalogue'), []);
-  const people = useQuery(() => api.get<{ rows: Person[]; notInProject?: boolean; message?: string }>('/app-roles/people'), []);
+  const people = useQuery(() => api.get<{
+    rows: Person[]; notInProject?: boolean; message?: string;
+    scannerGaps?: { memberRowId: string; name: string }[];
+  }>('/app-roles/people'), []);
+  const gaps = people.data?.scannerGaps ?? [];
+  const [syncing, setSyncing] = useState(false);
+
+  /* Staff who can scan passes in the console, but whose app does not show the scan icon yet. */
+  async function syncScanners() {
+    setSyncing(true);
+    try {
+      const res = await api.post<{ given: number; failed: string[] }>('/app-roles/sync-scanners', {});
+      toast(`${res.given} staff can now scan passes in the Noah app.`, 'ok');
+      if (res.failed.length) toast(`Could not give it to: ${res.failed.join(', ')}. Try again, or give it on their row.`, 'warn');
+      people.reload();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const roles = cat.data?.roles ?? [];
   const restrictions = cat.data?.restrictions ?? [];
@@ -157,6 +177,20 @@ export default function People() {
           detail="see private prayer requests" />
         <Kpi label="Ordinary members" value={stats.plain} icon="user" detail="no extra roles" />
       </Kpis>
+
+      {gaps.length > 0 && (
+        <Note tone="warn">
+          <div className="row wrap gap8" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>
+              {gaps.length === 1 ? '1 staff member' : `${gaps.length} staff members`} can scan passes in the console but not yet in the Noah app
+              ({gaps.map((g) => g.name).join(', ')}).
+            </span>
+            <button className="btn sm" disabled={syncing} onClick={syncScanners}>
+              {syncing ? 'Giving…' : 'Give them the door-scanner role'}
+            </button>
+          </div>
+        </Note>
+      )}
 
       {people.loading && !people.data ? (
         <div className="card"><Loading what="people and roles" /></div>

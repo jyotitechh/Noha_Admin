@@ -659,6 +659,18 @@ section('Giving the roles a member holds in the app, and reading what the app se
   }
   await call('POST', `/staff/${OLD_NOW}/role`, { role: 'comms' }, BT);
 
+  /* Staff given access before the two were kept in step (here: the office's own super administrator). */
+  const before = (await call('GET', '/app-roles/people', null, BT)).body?.scannerGaps || [];
+  check('App roles lists staff who can scan in the console but not yet in the app', before.length > 0 && !before.some((g) => g.memberRowId === OLD_ID), JSON.stringify(before));
+  check('...the fix needs approles.manage or staff.manage (finance: 403)', (await call('POST', '/app-roles/sync-scanners', {}, FT)).status === 403);
+  const fill = await call('POST', '/app-roles/sync-scanners', {}, BT);
+  if (NO_KEY) {
+    check('...without the Noah API key it says it cannot (409)', fill.status === 409, fill.text.slice(0, 160));
+  } else {
+    check('...one press gives them the door-scanner role', fill.status === 200 && fill.body?.given === before.length && !fill.body?.failed?.length, fill.text.slice(0, 160));
+    check('...and the list is empty after', ((await call('GET', '/app-roles/people', null, BT)).body?.scannerGaps || []).length === 0);
+  }
+
   const giveScan = await call('POST', `/app-roles/${OLD_ID}/passScan`, { on: true }, BT);
   check('the door-scanner role can be given on App roles', giveScan.status === 200 && giveScan.body?.roles?.includes('passScan'), giveScan.text.slice(0, 200));
   if (!NO_KEY) check('...through the Noah API ({ scanner: true }, kept as users.is_employee)', giveScan.body?.via === 'noah-api' && !giveScan.body?.warning, JSON.stringify([giveScan.body?.via, giveScan.body?.warning]));
