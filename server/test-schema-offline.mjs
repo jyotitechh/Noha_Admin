@@ -1810,6 +1810,37 @@ section('Events, event groups and language groups');
   const typed = await EV.createEvent({ ...base, name: 'Typed place', locationName: 'Church hall', locationAddress: 'Near the station' });
   check('an event with a place typed in, and no position, is still fine and is not saved as a place', !!typed.id && (await EV.storedRows('locations')).length === 1);
 
+  /* ---- a picture upload must end up viewable ---- */
+  {
+    const PIC = await import('./pictures.js');
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('tiny-test-picture')]);
+    const seenPic = [];
+    const bucket = (readStatus) => {
+      globalThis.fetch = async (url, init = {}) => {
+        const u = String(url);
+        if (u.includes('/oauth/v2/token')) return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }), { status: 200 });
+        seenPic.push({ u, method: init.method || 'GET', range: init.headers?.Range });
+        return init.method === 'PUT' ? new Response('', { status: 200 }) : new Response(readStatus === 206 ? 'x' : '{"code":"access_forbidden"}', { status: readStatus });
+      };
+    };
+    const quietPic = console.error;
+    await withEnv({ STRATUS_BUCKET: 'karuna-pics-test', STRATUS_BASE_URL: 'http://stratus.test' }, async () => {
+      try {
+        bucket(206);
+        const ok = await PIC.storePicture(png);
+        check('a picture in a public bucket is stored and answers with its link', /^http:\/\/stratus\.test\/pictures\/\d{4}\/[0-9a-f-]{36}\.png$/.test(ok.url), ok.url);
+        check('...and is read back once to be sure it can be seen', seenPic.some((c) => c.method === 'GET' && c.u === ok.url && c.range === 'bytes=0-0'));
+
+        bucket(403);
+        console.error = () => {};
+        const refusedPic = await refused(PIC.storePicture(png));
+        console.error = quietPic;
+        check('a bucket that takes the file but refuses to show it is reported, not left as a broken picture',
+          refusedPic?.status === 502 && refusedPic.extra?.notPublic === true && /not public/.test(refusedPic.message) && !/Stratus|bucket|karuna-pics/.test(refusedPic.message), refusedPic?.message);
+      } finally { globalThis.fetch = realFetchP; console.error = quietPic; }
+    });
+  }
+
   /* ---- telling members: the Noah API announces, the console asks ---- */
   const AN = await import('./event-announce.js');
   const askedNoah = [];

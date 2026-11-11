@@ -12,6 +12,29 @@ import { apiUrl, getToken } from '@/lib/api';
 const MAX_MB = 5;
 const IS_PICTURE_LINK = /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i;
 
+/** Phones take 4 to 12 MB photographs; a banner needs a fraction of that. Anything over 1 MB (a picture that is not a GIF) is drawn
+    smaller (at most 1600 pixels either way) and sent as a JPEG. A picture that cannot be read here is sent as it is. */
+async function shrink(file: File): Promise<File> {
+  if (file.size <= 1024 * 1024 || file.type === 'image/gif') return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
 export function PictureInput({ value, onChange, invalid, label }: {
   value: string; onChange: (v: string) => void; invalid?: boolean; label: string;
 }) {
@@ -20,14 +43,15 @@ export function PictureInput({ value, onChange, invalid, label }: {
   const [problem, setProblem] = useState('');
   const pick = useRef<HTMLInputElement>(null);
 
-  async function upload(file: File | undefined) {
-    if (!file) return;
+  async function upload(chosen: File | undefined) {
+    if (!chosen) return;
     setProblem('');
-    if (!file.type.startsWith('image/')) { setProblem('That is not a picture. Drop a JPEG, PNG, WebP or GIF.'); return; }
-    if (file.size > MAX_MB * 1048576) { setProblem(`That picture is ${(file.size / 1048576).toFixed(1)} MB. The most allowed is ${MAX_MB} MB.`); return; }
+    if (!chosen.type.startsWith('image/')) { setProblem('That is not a picture. Drop a JPEG, PNG, WebP or GIF.'); return; }
 
     setBusy(true);
     try {
+      const file = await shrink(chosen);
+      if (file.size > MAX_MB * 1048576) { setProblem(`That picture is ${(file.size / 1048576).toFixed(1)} MB. The most allowed is ${MAX_MB} MB.`); return; }
       const res = await fetch(apiUrl('/uploads/picture'), {
         method: 'POST',
         headers: { authorization: 'Bearer ' + getToken(), 'Content-Type': file.type },
@@ -53,7 +77,9 @@ export function PictureInput({ value, onChange, invalid, label }: {
         onDrop={(e) => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files?.[0]); }}
       >
         {IS_PICTURE_LINK.test(value) || /zohostratus\./i.test(value) ? (
-          <img src={value} alt={label} className="dropzone-img" />
+          <img src={value} alt={label} className="dropzone-img"
+            onError={() => setProblem('This picture cannot be shown. Check the link, or choose the file again.')}
+            onLoad={() => setProblem((p) => (p.startsWith('This picture cannot be shown') ? '' : p))} />
         ) : null}
         <div className="dropzone-msg">
           {busy ? 'Uploading…' : (

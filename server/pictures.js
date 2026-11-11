@@ -94,5 +94,21 @@ export async function storePicture(buf) {
     if (res.status === 404) throw new PictureError(502, `Stratus has no bucket called "${bucket()}". Check STRATUS_BUCKET.`);
     throw new PictureError(502, `Stratus answered ${res.status}. ${text}`.trim());
   }
+
+  /* A picture the app and this console cannot open is no use. A bucket that is not public takes the upload and then
+     refuses every read, which looks like a broken picture and no error. Ask for the first byte, as anyone would. */
+  try {
+    const seen = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal: AbortSignal.timeout(8000) });
+    await seen.body?.cancel().catch(() => {});
+    if (seen.status === 401 || seen.status === 403) {
+      console.error(`[pictures] stored ${key}, but the bucket "${bucket()}" refuses public reads (${seen.status}). Make it a public bucket in Catalyst > Stratus.`);
+      throw new PictureError(502,
+        'The picture was stored, but it cannot be shown to anyone yet, because the storage is not public. Paste a picture link instead, and ask the administrator to make the picture storage public.',
+        { notPublic: true });
+    }
+  } catch (err) {
+    if (err instanceof PictureError) throw err;
+    /* The check itself could not be made (a slow network): do not fail an upload that went through. */
+  }
   return { url, bytes: buf.length, type: kind.mime };
 }

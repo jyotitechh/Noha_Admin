@@ -354,6 +354,8 @@ http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     const f = stored.get(key);
     if (!f) { res.writeHead(404); return res.end(); }
+    /* PRIVATE_BUCKET=1: a bucket that takes uploads and refuses every public read. */
+    if (process.env.OFFLINE_PRIVATE_BUCKET) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end('{"status":403,"code":"access_forbidden"}'); }
     res.writeHead(200, { 'content-type': f.type });
     return res.end(f.buf);
   }
