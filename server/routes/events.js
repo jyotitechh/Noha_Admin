@@ -9,7 +9,7 @@
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers, pastoralChoices } from '../noah-schema.js';
-import { searchPlaces, PlaceError } from '../places.js';
+import { searchPlaces, reversePlace, PlaceError } from '../places.js';
 import { announce } from '../event-announce.js';
 import {
   EventError, onCatalyst, listEvents, getEvent, createEvent, updateEvent, archiveEvent, restoreEvent, deleteEvent,
@@ -61,7 +61,10 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
   app.get('/api/event-admin/choices', ...view, guarded(async (_req, res) => {
     const c = await choices();
     const pastors = onCatalyst() ? (await pastoralChoices()).pastors.map((p) => ({ id: p.rowId, name: p.name })) : [];
-    res.json({ ...c, pastors, source: onCatalyst() ? 'catalyst' : 'sample' });
+    /* The map the location picker shows. Mappls's web key has to be in the browser (that is how its map works), so it is
+       restricted to the console's own domains in the Mappls console; it is only sent to signed-in staff. */
+    const mapplsKey = String(process.env.MAPPLS_KEY || '').trim();
+    res.json({ ...c, pastors, source: onCatalyst() ? 'catalyst' : 'sample', map: mapplsKey ? { provider: 'mappls', key: mapplsKey } : { provider: 'osm' } });
   }));
 
   app.get('/api/event-admin/members', ...view, guarded(async (req, res) => {
@@ -78,6 +81,11 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
      can add or change events may. */
   app.get('/api/event-admin/places', ...manage, guarded(async (req, res) => {
     res.json({ rows: await searchPlaces(String(req.query.q || '')) });
+  }));
+
+  /* The address at a pin dropped on the map. */
+  app.get('/api/event-admin/places/reverse', ...manage, guarded(async (req, res) => {
+    res.json({ place: await reversePlace(String(req.query.lat ?? ''), String(req.query.lon ?? '')) });
   }));
 
   /* ---------- events ---------- */

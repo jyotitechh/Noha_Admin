@@ -56,6 +56,44 @@ function shape(r) {
   };
 }
 
+/** What is at a point the office dropped a pin on: the nearest named place, with its address. Null when nothing is there. */
+export async function reversePlace(latIn, lonIn) {
+  const lat = Number(latIn); const lon = Number(lonIn);
+  if (!(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180) || latIn === '' || lonIn === '') throw new PlaceError(400, 'That is not a point on the map.');
+  const key = `@${coord(lat)},${coord(lon)}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < KEEP_MS) return hit.rows[0] ?? null;
+
+  const url = new URL(base() + '/reverse');
+  url.searchParams.set('lat', String(lat));
+  url.searchParams.set('lon', String(lon));
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('zoom', '18');
+  url.searchParams.set('accept-language', 'en');
+
+  const found = await spaced(async () => {
+    let res;
+    try {
+      res = await fetch(url, { headers: { 'User-Agent': 'KarunaSadanAdminConsole/1.0', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+    } catch (err) {
+      console.error(`[places] reverse failed: ${err.message}`);
+      throw new PlaceError(503, 'The address of that point could not be found just now. Try again in a moment.');
+    }
+    if (!res.ok) {
+      console.error(`[places] reverse answered ${res.status}`);
+      throw new PlaceError(503, 'The address of that point could not be found just now. Try again in a moment.');
+    }
+    const body = await res.json().catch(() => null);
+    if (!body || body.error || !Number.isFinite(Number(body.lat))) return null;
+    /* The pin is where the office put it, not the centre of the building the map found. */
+    return { ...shape(body), lat: coord(lat), lon: coord(lon) };
+  });
+
+  cache.set(key, { at: Date.now(), rows: found ? [found] : [] });
+  return found;
+}
+
 /** Places matching what was typed, best first. At most six. */
 export async function searchPlaces(query) {
   const q = String(query ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);

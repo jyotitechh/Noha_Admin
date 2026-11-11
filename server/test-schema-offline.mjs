@@ -1794,6 +1794,18 @@ section('Events, event groups and language groups');
   try { await PL.searchPlaces('somewhere new'); } catch (e) { placeFail = e; } finally { globalThis.fetch = realFetchP; console.error = quietP; delete process.env.PLACES_BASE_URL; }
   check('a map service that will not answer is a plain failure', placeFail?.status === 503 && /not available/.test(placeFail.message) && !/429/.test(placeFail.message), placeFail?.message);
 
+  /* What is at a pin dropped on the map. */
+  process.env.PLACES_BASE_URL = 'http://places.test';
+  asked = [];
+  globalThis.fetch = async (url) => { asked.push(String(url)); return new Response(JSON.stringify({ osm_type: 'way', osm_id: 77, lat: '19.0181', lon: '72.8430', name: 'Shivaji Park', display_name: 'Shivaji Park, Dadar West, Mumbai, Maharashtra, India', address: { suburb: 'Dadar West', city: 'Mumbai', state: 'Maharashtra', country: 'India' } }), { status: 200 }); };
+  let atPin;
+  try { atPin = await PL.reversePlace('19.0176543', '72.8421987'); } finally { globalThis.fetch = realFetchP; }
+  check('a pin dropped on the map is named from the map', atPin?.name === 'Shivaji Park' && atPin.area === 'Dadar West' && /\/reverse\?lat=19\.0176543&lon=72\.8421987/.test(asked[0] || ''), JSON.stringify(atPin));
+  check('...and keeps the exact spot the office chose, not the middle of the park', atPin?.lat === '19.017654' && atPin.lon === '72.842199');
+  check('a point that is not on the map is refused', (await refused(PL.reversePlace('120', '10')))?.status === 400 && (await refused(PL.reversePlace('', '')))?.status === 400);
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Unable to geocode' }), { status: 200 });
+  try { check('a point with nothing named near it comes back empty, not as an error', (await PL.reversePlace('0.5', '-30.5')) === null); } finally { globalThis.fetch = realFetchP; delete process.env.PLACES_BASE_URL; }
+
   const where = { locationId: 'way:555', locationName: 'St. Joseph Church', locationAddress: 'St. Joseph Church, Dadar West, Mumbai, Maharashtra, India', locationLat: '19.017812', locationLon: '72.847846', locationParts: { area: 'Dadar West', city: 'Mumbai', state: 'Maharashtra', country: 'India' } };
   const placed = await EV.createEvent({ ...base, name: 'At the church', ...where });
   const placedRow = (await EV.storedRows('events')).find((r) => r.name === 'At the church');

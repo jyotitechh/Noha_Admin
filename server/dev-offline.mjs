@@ -340,6 +340,12 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({ access_token: 'offline-access-token', expires_in: 3600 }));
   }
+  /* A stand-in for "what is at this point" (Nominatim's /reverse): always a hall in Dadar. */
+  if (key === '/reverse') {
+    const sp = new URL(req.url, 'http://x').searchParams;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ osm_type: 'way', osm_id: 2001, lat: sp.get('lat'), lon: sp.get('lon'), name: 'Dadar Community Hall', display_name: 'Dadar Community Hall, Dadar West, Mumbai, Maharashtra, India', address: { suburb: 'Dadar West', city: 'Mumbai', state: 'Maharashtra', country: 'India' } }));
+  }
   /* A stand-in for the map search (Nominatim's /search). */
   if (key === '/search') {
     const q = (new URL(req.url, 'http://x').searchParams.get('q') || '').toLowerCase();

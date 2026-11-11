@@ -223,6 +223,7 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
 
               <FieldBox label="Location" error={errors.locationName}>
                 <LocationPicker
+                  map={choices.map}
                   saved={choices.savedLocations}
                   value={v.locationName || v.locationAddress
                     ? { id: v.locationId, name: v.locationName, address: v.locationAddress, lat: v.locationLat, lon: v.locationLon }

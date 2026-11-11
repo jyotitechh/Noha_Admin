@@ -98,6 +98,10 @@ one line under it), and the form then shows only a compact card: the name, the a
 - The search is OpenStreetMap's (Nominatim), asked from the server (`server/places.js`, `GET /api/event-admin/places?q=`).
   It needs no key. The public service asks for one request a second at most, so searches are spaced and remembered for ten
   minutes. `PLACES_BASE_URL` points it at another Nominatim. Google Places or Mapbox would replace `searchPlaces` and nothing else.
+- **Choose on the map** opens a big map (most of the screen): search, click the map or drag the pin to the exact spot, then
+  **Use this place**. With `MAPPLS_KEY` set on the API it is the Mappls (MapmyIndia) map and its Place Picker; without it, or if
+  Mappls cannot load, it is OpenStreetMap (Leaflet) with the address at the pin from `GET /api/event-admin/places/reverse`.
+  The Mappls key is a browser key: restrict it to the console's domains in the Mappls console.
 - A place picked on the map is also written to `locations` (`name`, `area`, `city`, `state`, `country`, `lat`, `lng`, `locationId`),
   once, so the next event can choose it under "Saved places".
 - The event itself carries the place (columns above), so the app can show it, and can open a map from `locationLat` and

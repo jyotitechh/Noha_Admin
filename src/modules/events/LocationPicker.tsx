@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Btn, Icon } from '@/components/ui';
 import type { Place } from './shared';
+import { MapPickerModal, type MapConfig } from './MapPickerModal';
 
 export interface Chosen {
   id: string; name: string; address: string; lat: string; lon: string;
@@ -28,10 +29,20 @@ export const mapSrc = (lat: string, lon: string) => {
 };
 export const mapLink = (lat: string, lon: string) => `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
 
-export function LocationPicker({ value, saved, onChange }: {
-  value: Chosen | null; saved: Place[]; onChange: (c: Chosen | null) => void;
+export function LocationPicker({ value, saved, onChange, map }: {
+  value: Chosen | null; saved: Place[]; onChange: (c: Chosen | null) => void; map?: MapConfig;
 }) {
   const [changing, setChanging] = useState(false);
+  const [onMap, setOnMap] = useState(false);
+  const bigMap = (
+    <MapPickerModal
+      open={onMap}
+      start={value && value.lat && value.lon ? value : null}
+      config={map ?? { provider: 'osm' }}
+      onClose={() => setOnMap(false)}
+      onPick={(c) => { onChange(c); setOnMap(false); setChanging(false); setQ(''); setHits([]); }}
+    />
+  );
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Place[]>([]);
   const [busy, setBusy] = useState(false);
@@ -69,6 +80,7 @@ export function LocationPicker({ value, saved, onChange }: {
             <b>{v.name || where}</b>
             {where && v.name && <div className="muted small">{where}</div>}
           </div>
+          <Btn sm type="button" icon="pin" onClick={() => setOnMap(true)}>On the map</Btn>
           <Btn sm type="button" onClick={() => setChanging(true)}>Change</Btn>
           <Btn sm type="button" variant="ghost" onClick={() => onChange(null)}>Remove</Btn>
         </div>
@@ -77,7 +89,8 @@ export function LocationPicker({ value, saved, onChange }: {
             <iframe title="Map" src={mapSrc(v.lat, v.lon)} style={{ width: '100%', height: 170, border: 0, borderRadius: 8 }} />
             <a className="small" href={mapLink(v.lat, v.lon)} target="_blank" rel="noreferrer">Open on the map</a>
           </>
-        ) : <span className="muted small">Not placed on the map. Press Change to search for it.</span>}
+        ) : <span className="muted small">Not placed on the map. Press On the map to put a pin on it.</span>}
+        {bigMap}
       </div>
     );
   }
@@ -92,6 +105,7 @@ export function LocationPicker({ value, saved, onChange }: {
       <div className="row gap8">
         <input className="inp grow" value={q} autoComplete="off" aria-label="Search for a place" placeholder="Search a place or an address"
           onChange={(e) => setQ(e.target.value)} />
+        <Btn type="button" icon="pin" onClick={() => setOnMap(true)}>Choose on the map</Btn>
         {hasValue && <Btn type="button" onClick={() => { setChanging(false); setQ(''); }}>Cancel</Btn>}
       </div>
 
@@ -128,7 +142,8 @@ export function LocationPicker({ value, saved, onChange }: {
           )}
         </div>
       )}
-      {!q.trim() && !savedShown.length && <span className="hint">Type at least three letters.</span>}
+      {!q.trim() && !savedShown.length && <span className="hint">Type at least three letters, or choose it on the map.</span>}
+      {bigMap}
     </div>
   );
 }

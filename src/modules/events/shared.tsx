@@ -25,6 +25,8 @@ export interface Choices {
   memberGroups: Option[];
   pastors: Option[];
   savedLocations: Place[];
+  /** Which map the place picker shows: Mappls when the API has a key, else OpenStreetMap. */
+  map?: { provider: 'mappls' | 'osm'; key?: string };
   expenses: { key: string; label: string }[];
   source: 'catalyst' | 'sample';
 }
