@@ -10,6 +10,7 @@ import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { loadMembers, pastoralChoices } from '../noah-schema.js';
 import { searchPlaces, PlaceError } from '../places.js';
+import { announce } from '../event-announce.js';
 import {
   EventError, onCatalyst, listEvents, getEvent, createEvent, updateEvent, archiveEvent, restoreEvent, deleteEvent,
   listGroups, createGroup, updateGroup, archiveGroup, restoreGroup, deleteGroup, listLanguageGroups, createLanguageGroup, choices,
@@ -95,14 +96,29 @@ export default function mountEvents(app, { requireSession, requirePerm }) {
     await checkPreacher(req.body);
     const made = await createEvent(req.body || {});
     await audit(req, 'Added an event', made.name);
-    res.json({ ok: true, ...made });
+    const told = await announce(made.id, { actor: req.user.name });
+    if (told.status === 'sent') await audit(req, 'Told members about an event', made.name, { notified: told.notified, members: told.members });
+    res.json({ ok: true, ...made, announce: told });
   }));
 
   app.put('/api/event-admin/events/:id', ...manage, guarded(async (req, res) => {
     await checkPreacher(req.body);
     const done = await updateEvent(req.params.id, req.body || {});
     await audit(req, 'Changed an event', done.name);
-    res.json({ ok: true, id: done.id, name: done.name });
+    /* Saving is when a hidden event may have been made visible; an event already announced answers "already". */
+    const told = await announce(done.id, { actor: req.user.name });
+    if (told.status === 'sent') await audit(req, 'Told members about an event', done.name, { notified: told.notified, members: told.members });
+    res.json({ ok: true, id: done.id, name: done.name, announce: told });
+  }));
+
+  /* "Tell members" on an event: announce it now. `force` tells everyone again. */
+  app.post('/api/event-admin/events/:id/announce', ...manage, guarded(async (req, res) => {
+    const force = req.body?.force === true;
+    const e = await getEvent(req.params.id, async () => null);
+    if (e.archived) throw new EventError(409, 'That event is archived. Restore it first.');
+    const told = await announce(req.params.id, { force, actor: req.user.name });
+    if (told.status === 'sent') await audit(req, force ? 'Told members about an event again' : 'Told members about an event', e.name, { notified: told.notified, members: told.members });
+    res.json({ ok: true, announce: told });
   }));
 
   app.delete('/api/event-admin/events/:id', ...manage, guarded(async (req, res) => {

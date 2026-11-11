@@ -92,6 +92,8 @@ const familyRequests = [
 ];
 /* Registrations whose member the fake Noah API has already told. */
 const told = new Set();
+/* Events the fake Noah API has already announced. */
+const announced = new Set();
 const send = (res, status, body, headers = {}) => {
   const isBuf = Buffer.isBuffer(body);
   res.writeHead(status, { 'content-type': isBuf ? 'application/octet-stream' : 'application/json', ...headers });
@@ -287,6 +289,30 @@ http.createServer(async (req, res) => {
     }
     S.clearCache();
     return send(res, 200, { id: r.id, state: r.state, notified: { pushed: 2, emailed: false } });
+  }
+  /* Noah backend README, "Telling members about a new event". An event is announced once; 3 approved members match, 2 have a phone. */
+  const eventsTable = () => tables['tbl:events'] || [];
+  const publishMs = (e) => new Date(String(e.publishDateTime || '').replace(' ', 'T').slice(0, 19) + '+05:30').getTime();
+  const announceOne = (e, force) => {
+    if (e.isArchived === true || e.isArchived === 'true') return { error: [409, 'event_archived', 'archived'] };
+    if (e.isInvisible === true || e.hideFromPublic === true) return { error: [409, 'event_hidden', 'hidden'] };
+    if (publishMs(e) > Date.now()) return { error: [409, 'not_published_yet', 'not published yet', { publishAt: new Date(publishMs(e)).toISOString() }] };
+    if (announced.has(e.ROWID) && !force) return { ok: { alreadySent: true } };
+    announced.add(e.ROWID);
+    return { ok: { event: { id: e.ROWID, name: e.name }, members: 3, notified: 2 } };
+  };
+  if (req.method === 'POST' && path === '/admin/events/announce-due') {
+    const hours = Math.min(24, Math.max(1, Number(body.hours) || 24));
+    const due = eventsTable().filter((e) => publishMs(e) <= Date.now() && publishMs(e) > Date.now() - hours * 3600_000 && !announced.has(e.ROWID));
+    const done = due.map((e) => ({ e, r: announceOne(e, false) })).filter((x) => x.r.ok?.event);
+    return send(res, 200, { announced: done.length, events: done.map((x) => x.e.ROWID) });
+  }
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/events\/(\d+)\/announce$/))) {
+    const e = eventsTable().find((x) => x.ROWID === m[1]);
+    if (!e) return err(res, 404, 'event_not_found', 'No such event.');
+    const r = announceOne(e, body.force === true);
+    if (r.error) return send(res, r.error[0], { error: { code: r.error[1], message: r.error[2], ...(r.error[3] || {}) } });
+    return send(res, 200, r.ok);
   }
   /* ADMIN_SETUP.md: POST /admin/members/:id/roles { pastor?, admin? }, only what changes. */
   if (req.method === 'POST' && (m = path.match(/^\/admin\/members\/(\d+)\/roles$/))) {

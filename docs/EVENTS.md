@@ -67,6 +67,29 @@ target/result counters. Rows are linked by **ROWID**.
 
 A group that events still use cannot be archived.
 
+## Telling members about an event
+
+The console writes events to the table itself, so it asks the Noah API to announce them (`server/event-announce.js`;
+the Noah backend README, "Telling members about a new event"). The API sends the push and writes the member's notification
+row; it announces an event **once**.
+
+| When | What the console does |
+|---|---|
+| An event is added or saved | `POST /admin/events/:id/announce`. The office sees the result in the save message, for example "Members told: 36 of 40 got a notification." |
+| The publish time is later | the API refuses with `not_published_yet`; the console says "Members will be told when it is published (…)" and the sweep sends it then |
+| The event is hidden (`isInvisible` or `hideFromPublic`) or archived | nothing is sent |
+| Every 5 minutes | `POST /admin/events/announce-due`: announces every event whose publish time passed in the last 24 hours and was not announced yet |
+| The office presses **Tell members** on an event | announce now; if members were already told it asks before telling everyone again (`force`) |
+
+- The sweep runs inside the console's API on a timer. It is on in production and off on a developer's machine, so a local run never
+  announces to real members. `EVENT_SWEEP=on|off` forces it and `EVENT_SWEEP_MINUTES` (1 to 60, default 5) sets how often. If the host
+  stops the API when it is idle, a Catalyst cron that calls the Noah API's `announce-due` with the admin key does the same job.
+- A failure to announce never fails the save: the event is saved and the office is told members could not be told, with **Tell members** to retry.
+- Who is told, and the push text, are the Noah API's: approved members with a registered phone, narrowed by the event's `filters`; the push
+  is `{ title: "New event", body: "<name> · <day, time> · <place>", data: { type: "event_published", eventId } }`.
+- Console calls: `POST /api/event-admin/events/:id/announce { force? }` (`events.manage`), and the save routes carry `announce: { status, text }`.
+- Every announcement that reaches members is in the audit log ("Told members about an event").
+
 ## The place on the map
 
 The Location field is a search, not typed text. The office types a place or address, picks one from a short list (a name and

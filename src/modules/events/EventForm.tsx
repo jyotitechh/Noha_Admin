@@ -11,7 +11,7 @@ import { Btn, Field, Note, Switch } from '@/components/ui';
 import { RichText } from '@/modules/content/RichText';
 import { PictureInput } from '@/modules/content/PictureInput';
 import { LocationPicker } from './LocationPicker';
-import { FieldBox, MemberPicker, TIMEZONES, dayLong, time12, useChoices, type EventForm as Form, type EventRow } from './shared';
+import { FieldBox, MemberPicker, TIMEZONES, afterSave, announceTone, dayLong, time12, useChoices, type Announce, type EventForm as Form, type EventRow } from './shared';
 
 const STEPS = [
   { id: 'details', label: 'Details' },
@@ -106,9 +106,9 @@ export function EventFormDrawer({ open, mode, eventId, start, onClose, onSaved }
     setBusy(true);
     try {
       const r = mode === 'edit' && eventId
-        ? await api.put<{ id: string }>(`/event-admin/events/${eventId}`, v)
-        : await api.post<{ id: string }>('/event-admin/events', v);
-      toast(mode === 'edit' ? `“${v.name}” is saved.` : `“${v.name}” is added.`, 'ok');
+        ? await api.put<{ id: string; announce?: Announce }>(`/event-admin/events/${eventId}`, v)
+        : await api.post<{ id: string; announce?: Announce }>('/event-admin/events', v);
+      toast((mode === 'edit' ? `“${v.name}” is saved.` : `“${v.name}” is added.`) + afterSave(r.announce), announceTone(r.announce));
       onSaved(r.id);
     } catch (e) {
       const err = e as ApiError;

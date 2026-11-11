@@ -40,6 +40,7 @@ All of these go through the Noah API with the office's admin key, so the member 
 | "Tell the member" on an already decided registration | `POST /admin/registrations/:id/notify` | same as the decision | same as the decision |
 | Approve / reject a profile change request | `POST /admin/profile-requests/:id/decide` | "Your change was accepted / declined" | refresh the profile; show the note on a decline |
 | Approve / reject a family request | `POST /admin/family-requests/:id/decide` | both people are told | refresh Me > Family |
+| **A new event** is saved, or its publish time arrives | `POST /admin/events/:id/announce`, and a sweep of `POST /admin/events/announce-due` every 5 minutes | "New event": `<name> · <day, time> · <place>`, with `data: { type: "event_published", eventId }` | open the Events tab (or the event) |
 
 The Noah API answers the console with `notified: { pushed: <phones reached>, emailed: <bool> }`, or
 `{ alreadySent: true }` if the member was already told (a member is told once per decision).
@@ -84,7 +85,7 @@ members should hear about. The "when" column is the moment the console writes th
 
 | Area | When | Suggested notification | Who gets it |
 |---|---|---|---|
-| **Events** | a new event whose publish time has arrived | "New event: {name}, {date}" | members the event is for (see below) |
+| **Events** | a new event whose publish time has arrived | **Done**: "New event", `type: event_published`, once per event | members the event is for (see below) |
 | Events | an event's date, time or place is changed | "{name} has changed: {new time or place}" | members who hold a pass, or all it is for |
 | Events | an event is **archived** | nothing, or "{name} was cancelled" if the office says so | the app just stops showing it |
 | Community | a post, reel, profile photo, praise report or prayer request is approved or rejected | "Your post is live" / "Your post was not approved" | the author |
@@ -161,7 +162,7 @@ Use one shape for every notification, so the app has one handler.
 | `registration_video_returned` | the registration | registration step 6 |
 | `profile_change_decided` | the change request | Me > My information |
 | `family_request_decided` | the family request | Me > Family |
-| `event_published` | the event | the event page |
+| `event_published` | the event (`data.eventId`) | the Events tab or the event page (**sent today**) |
 | `event_changed` | the event | the event page |
 | `post_decided` | the post | the post, or Me > My posts |
 | `thread_message` | the thread | the conversation |
@@ -284,6 +285,6 @@ broadcast is opened).
 1. Which notification types in section 4 are in the first release?
 2. The Noah API endpoints for registering and archiving a device token, listing notifications and marking one read.
 3. The value of `notifiable_type`, and whether `data` already has a fixed shape.
-4. Who sends "new event" at publish time: a scheduled Catalyst job in the Noah API, or the console when the event is saved?
+4. ~~Who sends "new event" at publish time?~~ **Settled:** the console asks the Noah API to announce an event when it is saved, and every 5 minutes it asks the Noah API to announce any event whose publish time has passed (`POST /admin/events/announce-due`). Each event is announced once.
 5. Should members be able to turn categories off (events, community, messages) in settings? If yes, where is the choice stored?
 6. Quiet hours and language: are push texts translated into the member's language?

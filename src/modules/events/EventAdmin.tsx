@@ -11,7 +11,7 @@ import { Confirm, Drawer, useToast } from '@/components/layers';
 import { Btn, Chip, Empty, Failed, Icon, Kv, Loading, Seg } from '@/components/ui';
 import { EventFormDrawer, blankEvent, formOf } from './EventForm';
 import { mapLink } from './LocationPicker';
-import { dayLong, forgetChoices, time12, whenLong, type EventDetail, type EventForm, type EventRow } from './shared';
+import { announceTone, dayLong, forgetChoices, time12, whenLong, type Announce, type EventDetail, type EventForm, type EventRow } from './shared';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -36,6 +36,8 @@ export default function EventAdmin() {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [form, setForm] = useState<{ mode: 'add' | 'edit' | 'copy'; id?: string; start: EventForm } | null>(null);
   const [confirming, setConfirming] = useState<{ kind: 'archive' | 'delete'; id: string; name: string } | null>(null);
+  const [telling, setTelling] = useState(false);
+  const [tellAgain, setTellAgain] = useState<{ id: string; name: string } | null>(null);
 
   const load = useCallback((which: Show = show) => {
     setError(null);
@@ -62,6 +64,20 @@ export default function EventAdmin() {
       setForm({ mode, id: mode === 'edit' ? id : undefined, start: formOf(e) });
     } catch (err) {
       toast((err as Error).message, 'bad');
+    }
+  }
+
+  /** Tell members about an event now. If they were already told, ask before telling everyone again. */
+  async function tell(id: string, name: string, force = false) {
+    setTelling(true);
+    try {
+      const r = await api.post<{ announce: Announce }>(`/event-admin/events/${id}/announce`, force ? { force: true } : {});
+      if (r.announce.status === 'already') setTellAgain({ id, name });
+      else toast(r.announce.text, announceTone(r.announce));
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setTelling(false);
     }
   }
 
@@ -157,6 +173,7 @@ export default function EventAdmin() {
             <>
               <Btn variant="danger" icon="archive" onClick={() => setConfirming({ kind: 'archive', id: detail.id, name: detail.name })}>Archive</Btn>
               <span className="sp" style={{ flex: 1 }} />
+              <Btn icon="send" disabled={telling} onClick={() => tell(detail.id, detail.name)}>{telling ? 'Telling…' : 'Tell members'}</Btn>
               <Btn icon="copy" onClick={() => startFrom('copy', detail.id)}>Copy</Btn>
               <Btn variant="pri" icon="edit" onClick={() => startFrom('edit', detail.id)}>Edit</Btn>
             </>
@@ -176,6 +193,16 @@ export default function EventAdmin() {
           onSaved={(id) => { setForm(null); forgetChoices(); load(); setOpenId(null); setTimeout(() => setOpenId(id), 0); }}
         />
       )}
+
+      <Confirm
+        open={!!tellAgain}
+        onClose={() => setTellAgain(null)}
+        onConfirm={() => { const t = tellAgain; setTellAgain(null); if (t) tell(t.id, t.name, true); }}
+        title="Tell everyone again?"
+        confirmLabel="Tell again"
+      >
+        <p className="mt0">Members were already told about <b>{tellAgain?.name}</b>. Telling them again sends the notification to everyone a second time.</p>
+      </Confirm>
 
       <Confirm
         open={!!confirming}

@@ -34,6 +34,7 @@ import mountChanges from './routes/changes.js';
 import mountContent from './routes/content.js';
 import mountFamily from './routes/family.js';
 import mountEvents from './routes/events.js';
+import { startEventSweep } from './event-announce.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
    Catalyst AppSail is started, so it never depends on a variable being injected), then
@@ -566,4 +567,5 @@ app.listen(PORT, () => {
     : `  Test sign-in is off (${testLoginStatus().why}).`);
   console.log(`  Real staff sign in with their mobile number; see docs/CONSOLE-ACCESS.md.
 `);
+  startEventSweep();
 });

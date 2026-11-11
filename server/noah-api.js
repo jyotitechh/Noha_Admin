@@ -43,14 +43,20 @@ const EXPLAIN = {
   change_by_hand: 'That is the member\'s sign-in mobile number, so it cannot be approved here. Change it by hand in users and members, then turn the request down with a note such as "Changed".',
   server_misconfigured: 'The Noah service is not fully configured. The Catalyst developer needs to look at it.',
   session_invalid: 'Noah refused the request without an admin key.',
+  event_not_found: 'Noah has no event with that id.',
+  event_archived: 'That event is archived, so members are not told about it.',
+  event_hidden: 'That event is hidden from members, so they are not told about it.',
+  not_published_yet: 'That event is not published yet.',
 };
 
 export class NoahApiError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, details) {
     super(EXPLAIN[code] || message || `Noah API ${status}`);
     this.name = 'NoahApiError';
     this.status = status;
     this.code = code;
+    /* What else the API said about the refusal, such as the publish time of an event that is not published yet. */
+    this.details = details || null;
   }
 }
 
@@ -90,7 +96,7 @@ async function call(path, { method = 'GET', body, actor, raw = false } = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 300) }; }
 
   if (!res.ok) {
-    throw new NoahApiError(res.status, data?.error?.code, data?.error?.message);
+    throw new NoahApiError(res.status, data?.error?.code, data?.error?.message, data?.error);
   }
   return data;
 }
@@ -155,6 +161,22 @@ export function describeNotified(n) {
   if (n.emailed) return { text: 'No phone could be reached, so they were emailed.', ok: true, known: true };
   return { text: 'The member could not be reached: no phone with the app and no email.', ok: false, known: true };
 }
+
+/* ---------- events ----------
+
+   The console writes events to the table itself, so it asks Noah to tell the members (see server/event-announce.js).
+
+   POST /admin/events/:id/announce  { force? }  -> { event, members, notified } | { alreadySent: true }
+        404 event_not_found, 409 event_archived, 409 event_hidden, 409 not_published_yet (carries publishAt)
+   POST /admin/events/announce-due  { hours? }  -> what it announced; every event whose publish time passed in the last
+        24 hours (or `hours`, 1 to 24) and was not announced yet.
+
+   An event is announced once: `force` tells everyone again. */
+export const announceEvent = (id, { force = false, actor } = {}) =>
+  call(`/admin/events/${encodeURIComponent(id)}/announce`, { method: 'POST', actor, body: force ? { force: true } : {} });
+
+export const announceDue = ({ hours, actor } = {}) =>
+  call('/admin/events/announce-due', { method: 'POST', actor, body: hours ? { hours } : {} });
 
 /* ---------- roles ----------
 

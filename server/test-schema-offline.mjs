@@ -1810,6 +1810,74 @@ section('Events, event groups and language groups');
   const typed = await EV.createEvent({ ...base, name: 'Typed place', locationName: 'Church hall', locationAddress: 'Near the station' });
   check('an event with a place typed in, and no position, is still fine and is not saved as a place', !!typed.id && (await EV.storedRows('locations')).length === 1);
 
+  /* ---- telling members: the Noah API announces, the console asks ---- */
+  const AN = await import('./event-announce.js');
+  const askedNoah = [];
+  const noahSays = (status, body) => { globalThis.fetch = async (url, init) => { askedNoah.push({ url: String(url), init }); return new Response(JSON.stringify(body), { status }); }; };
+  const noahEnv = { NOAH_API_BASE: 'https://noah.test/server/noah_api', NOAH_ADMIN_API_KEY: 'k-test' };
+  const quietN = console.error;
+
+  await withEnv({ NOAH_API_BASE: undefined, NOAH_ADMIN_API_KEY: undefined }, async () => {
+    check('with the Noah API not connected, saying so is the answer, not an error', (await AN.announce('1')).status === 'off');
+  });
+  await withEnv(noahEnv, async () => {
+    try {
+      noahSays(200, { event: { id: '9' }, members: 40, notified: 36 });
+      const sent = await AN.announce('900123', { actor: 'Test' });
+      const call = askedNoah.at(-1);
+      check('an event is announced with a POST to its own address and the admin key', call.url === 'https://noah.test/server/noah_api/admin/events/900123/announce' && call.init.method === 'POST' && call.init.headers['X-Admin-Key'] === 'k-test', call.url);
+      check('...who is acting goes along, and no force unless asked', call.init.headers['X-Admin-Name'] === 'Test' && call.init.body === '{}');
+      check('...and the office reads how many were told', sent.status === 'sent' && sent.notified === 36 && /36 of 40/.test(sent.text), JSON.stringify(sent));
+      noahSays(200, { event: { id: '9' }, members: 4, notified: 4 });
+      await AN.announce('900123', { force: true });
+      check('"tell again" sends force', JSON.parse(askedNoah.at(-1).init.body).force === true);
+      noahSays(200, { alreadySent: true });
+      check('an event already announced says so', (await AN.announce('900123')).status === 'already');
+      noahSays(200, { event: { id: '9' }, members: 0, notified: 0 });
+      check('...nobody to tell is said plainly', (await AN.announce('900123')).status === 'none');
+      noahSays(200, { event: { id: '9' }, members: 12, notified: 0 });
+      check('...and so is nobody reachable', /no phone could be reached/.test((await AN.announce('900123')).text));
+      noahSays(409, { error: { code: 'not_published_yet', message: 'x', publishAt: '2026-11-20T10:00:00.000Z' } });
+      const later = await AN.announce('900123');
+      check('an event saved for later is "scheduled", with when', later.status === 'scheduled' && /20 Nov 2026/.test(later.text) && /3:30 pm IST/i.test(later.text), later.text);
+      noahSays(409, { error: { code: 'event_hidden', message: 'x' } });
+      check('a hidden event is not announced, quietly', (await AN.announce('900123')).status === 'hidden');
+      noahSays(404, { error: { code: 'event_not_found', message: 'x' } });
+      check('an event the Noah API cannot find is reported', (await AN.announce('900123')).status === 'failed');
+      console.error = () => {};
+      noahSays(500, { error: { code: 'boom', message: 'database exploded' } });
+      const broke = await AN.announce('900123');
+      console.error = quietN;
+      check('a failure never throws, and does not show the API\'s own words', broke.status === 'failed' && !/exploded/.test(broke.text) && /saved/.test(broke.text), broke.text);
+
+      noahSays(200, { announced: 2, events: ['1', '2'] });
+      const sweep = await AN.sweepOnce({ hours: 6 });
+      check('the sweep asks for the events that came due', askedNoah.at(-1).url.endsWith('/admin/events/announce-due') && JSON.parse(askedNoah.at(-1).init.body).hours === 6 && sweep.announced === 2);
+      console.error = () => {};
+      noahSays(503, { error: { code: 'server_misconfigured' } });
+      const failedSweep = await AN.sweepOnce();
+      console.error = quietN;
+      check('...and a failed sweep is logged and does not stop the server', failedSweep === null);
+    } finally { globalThis.fetch = realFetchP; console.error = quietN; }
+
+    await withEnv({ EVENT_SWEEP: undefined, NODE_ENV: 'test' }, async () => {
+      check('the timer is off on a developer\'s machine', AN.startEventSweep() === null);
+    });
+    await withEnv({ EVENT_SWEEP: 'on', EVENT_SWEEP_MINUTES: '5' }, async () => {
+      const log = console.log; console.log = () => {};
+      const timer = AN.startEventSweep();
+      console.log = log;
+      check('...and on when asked for', !!timer);
+      if (timer) clearInterval(timer);
+    });
+    await withEnv({ EVENT_SWEEP: 'off', NODE_ENV: 'production' }, async () => {
+      check('...and off when switched off, even in production', AN.startEventSweep() === null);
+    });
+  });
+  await withEnv({ EVENT_SWEEP: 'on', NOAH_API_BASE: undefined, NOAH_ADMIN_API_KEY: undefined }, async () => {
+    check('without the Noah API there is no timer at all', AN.startEventSweep() === null);
+  });
+
   /* ---- the archive: hidden from everyone, kept for the office, restorable or deletable ---- */
   const archivedList = await EV.listEvents({ archived: true });
   check('the Archived list shows what was archived, and only that', archivedList.length === 1 && archivedList[0].id === first.id && archivedList[0].archived === true, JSON.stringify(archivedList));

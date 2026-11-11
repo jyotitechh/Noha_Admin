@@ -6,6 +6,13 @@ import { Icon } from '@/components/ui';
 
 export interface Option { id: string; name: string }
 
+/** What happened when members were told about an event. 'already' and 'hidden' need no words after a save. */
+export interface Announce { status: 'sent' | 'none' | 'already' | 'scheduled' | 'hidden' | 'off' | 'failed'; text: string; members?: number; notified?: number }
+
+/** The sentence to add to "saved": nothing when there is nothing worth saying. */
+export const afterSave = (a?: Announce) => (!a || a.status === 'already' || a.status === 'hidden' ? '' : ' ' + a.text);
+export const announceTone = (a?: Announce): 'ok' | 'warn' => (a?.status === 'failed' || a?.status === 'off' ? 'warn' : 'ok');
+
 /** A place from the map search, or one saved from an earlier event. */
 export interface Place {
   id: string; name: string; area: string; city: string; state: string; country: string; address: string; lat: string; lon: string;
