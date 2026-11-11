@@ -845,16 +845,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     res.json({ ok: true, event: e });
   });
 
-  app.post('/api/passes/:id/scan', ...guard('events.scan'), (req, res) => {
-    const p = find('PASSES', req.params.id);
-    if (!p) return notFound(res);
-    if (p.scanned) return res.status(409).json({ error: 'That pass was already scanned.', pass: p });
-    p.scanned = true;
-    p.scannedAt = now();
-    db.SCANS.unshift({ id: 'SC-' + ri(9000, 9999), pass: p.id, name: p.name, at: now(), gate: req.body?.gate || 'Gate 1', result: 'Admitted' });
-    log(req, 'Scanned pass', 'Events', p.id, { scanned: false }, { scanned: true });
-    res.json({ ok: true, pass: p });
-  });
+  /* No pass scanning in the console: door staff scan in the Noah app. */
 
   /* ================= Jodie verification ================= */
 

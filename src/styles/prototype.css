@@ -541,13 +541,6 @@ table.t{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
 .health .hi b{display:block;font-size:13px}
 .health .hi span{display:block;font-size:12px;color:var(--ink-3)}
 
-/* scan */
-.scanbox{border:2px dashed var(--line-2);border-radius:14px;padding:18px;text-align:center;background:var(--wash)}
-.scanres{border-radius:12px;padding:14px 16px;display:flex;gap:12px;align-items:center;margin-top:12px}
-.scanres.ok{background:var(--ok-bg);border:1px solid var(--ok-line)}
-.scanres.bad{background:var(--bad-bg);border:1px solid var(--bad-line)}
-.scanres svg{font-size:26px}
-.scanres.ok svg{color:var(--ok)}.scanres.bad svg{color:var(--bad)}
 
 /* timeline */
 .tl{list-style:none;margin:0;padding:0;position:relative}
