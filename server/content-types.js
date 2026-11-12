@@ -231,7 +231,7 @@ export const TYPES = [
       { key: 'link', label: 'Link', kind: 'url', hint: 'A web address the post points to.' },
       when('scheduleDate', 'Show on', { hint: 'Leave empty to show it as soon as it is approved.' }),
       { key: 'isPinned', label: 'Pinned to the top', kind: 'toggle' },
-      { key: 'isApproved', label: 'Approved', kind: 'toggle', hint: 'Members see it on the feed once it is approved. For a post the office writes. A post a member uploaded is approved under Community > Noahgram, which also tells the member; switching it here would tell them nothing.' },
+      { key: 'isApproved', label: 'Approved', kind: 'toggle', hint: 'Members see it on the feed once it is approved. For a post the office writes. A post a member uploaded is approved under Media > Noahgram, which also tells the member; switching it here would tell them nothing.' },
     ],
   },
   {

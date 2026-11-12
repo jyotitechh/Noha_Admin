@@ -75,7 +75,7 @@ export function queues() {
     /* --- ported from the prototype --- */
     ...jodieStages,
     {
-      id: 'mod', l: 'Noahgram posts and reels to approve', area: 'Community', icon: 'chats', to: '/community/queue',
+      id: 'mod', l: 'Noahgram posts and reels to approve', area: 'Media', icon: 'chats', to: '/media/noahgram',
       perm: 'community.moderate', owner: 'Community moderator', sla: 12,
       count: () => 0, oldest: () => null,   /* counted from the Noah API below; the sample data has none */
     },

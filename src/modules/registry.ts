@@ -135,12 +135,10 @@ export const MODULES: ModuleDef[] = [
     id: 'community', title: 'Community', group: 'noah', icon: 'chats', sec: '5.4',
     perm: ['community.moderate', 'rewards.approve'],
     desc: 'Everything members post, and everything that needs a moderator before it appears.',
-    badges: ['prayer-inbox', 'mod', 'flags', 'praise', 'obits', 'feedback', 'rewards'],
+    badges: ['prayer-inbox', 'flags', 'praise', 'obits', 'feedback', 'rewards'],
     tabs: [
       { id: 'prayer-inbox', label: 'App prayer requests', perm: 'community.moderate', status: 'built',
         desc: 'Requests raised from the prayer pop-up in the app. Each one is held until you approve it, and the audience the member chose is honoured.' },
-      { id: 'queue', label: 'Noahgram', perm: 'community.moderate', status: 'built',
-        desc: 'The pictures and reels members post. Each one waits here until you approve it; you can also take a live post down and remove comments.' },
       { id: 'flagged', label: 'Flagged', perm: 'community.moderate', status: 'built',
         desc: 'What other members have reported.' },
       { id: 'praise', label: 'Praise', perm: 'community.moderate', status: 'built', desc: 'Praise reports and testimonies.' },
@@ -168,11 +166,15 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
-    id: 'media', title: 'Media', group: 'noah', icon: 'image', sec: '5.6', perm: 'content.edit',
-    desc: 'Noahgram and Noah Tube: what is posted, what is approved, and the video library.',
+    id: 'media', title: 'Media', group: 'noah', icon: 'image', sec: '5.6', perm: ['content.edit', 'community.moderate'],
+    desc: 'Noahgram and Noah Tube: what members post, what is approved, and the video library.',
+    badges: ['mod'],
     tabs: [
-      { id: 'noahgram', label: 'Noahgram', status: 'built', desc: 'The feed: posts to approve, and the categories they sit in.' },
-      { id: 'noahtube', label: 'Noah Tube', status: 'built', desc: 'The video library, and the shelves it is arranged on.' },
+      { id: 'noahgram', label: 'Noahgram', perm: 'community.moderate', status: 'built',
+        desc: 'The pictures and reels members post. Each one waits here until you approve it; you can also take a live post down and remove comments.' },
+      { id: 'noahgram-posts', label: 'Office posts and categories', perm: 'content.edit', status: 'built',
+        desc: 'Posts the office writes for the feed, and the categories posts sit in.' },
+      { id: 'noahtube', label: 'Noah Tube', perm: 'content.edit', status: 'built', desc: 'The video library, and the shelves it is arranged on.' },
     ],
   },
   {

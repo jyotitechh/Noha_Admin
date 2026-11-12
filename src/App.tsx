@@ -28,7 +28,7 @@ const SCREENS: Record<string, ComponentType> = {
   'members/register': lazy(() => import('@/modules/members/Register')),
 
   'community/prayer-inbox': lazy(() => import('@/modules/community/PrayerInbox')),
-  'community/queue': lazy(() => import('@/modules/community/Noahgram')),
+  'media/noahgram': lazy(() => import('@/modules/media/Noahgram')),
   'community/flagged': lazy(() => import('@/modules/community/Flagged')),
   'community/praise': lazy(() => import('@/modules/community/Praise')),
 
@@ -40,7 +40,7 @@ const SCREENS: Record<string, ComponentType> = {
   'content/dictionary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Dictionary }))),
   'content/commentary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Commentary }))),
   'content/announce': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Announce }))),
-  'media/noahgram': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Noahgram }))),
+  'media/noahgram-posts': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Noahgram }))),
   'media/noahtube': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.NoahTube }))),
   'school/bibleschool': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.BibleSchool }))),
   'school/courses': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Courses }))),

@@ -51,7 +51,7 @@ export default function mountNoahgram(app, { requireSession, requirePerm }) {
       await writeAudit({
         actor: req.user.name, role: roleById(req.session.role).name,
         action: decision === 'approve' ? 'Approved a Noahgram post' : 'Took down a Noahgram post',
-        module: 'Community', record: String(req.params.id),
+        module: 'Media', record: String(req.params.id),
         before: null, after: { decision, via: 'noah-api' }, remark: note, ip: req.ip || '',
       });
       res.json({ ok: true, decision, result });
@@ -100,7 +100,7 @@ export default function mountNoahgram(app, { requireSession, requirePerm }) {
       await writeAudit({
         actor: req.user.name, role: roleById(req.session.role).name,
         action: { remove: 'Removed a Noahgram comment', hide: 'Hid a Noahgram comment', show: 'Showed a Noahgram comment again' }[action],
-        module: 'Community', record: String(req.params.id),
+        module: 'Media', record: String(req.params.id),
         before: null, after: { post: out.postId, comment: out.text }, remark: String(req.body?.note || '').trim().slice(0, 300), ip: req.ip || '',
       });
       res.json({ ok: true, action });

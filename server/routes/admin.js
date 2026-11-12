@@ -80,7 +80,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
             icon: 'edit', to: '/members/registrations', sub: 'started, not submitted',
           },
           gram && {
-            id: 'noahgram', label: 'Noahgram waiting', value: gram.length, icon: 'chats', to: '/community/queue',
+            id: 'noahgram', label: 'Noahgram waiting', value: gram.length, icon: 'chats', to: '/media/noahgram',
             tone: gram.length ? 'warn' : undefined,
             sub: `${gram.filter((p) => p.reel).length} reels, ${gram.filter((p) => !p.reel).length} pictures`,
           },
@@ -123,7 +123,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         held('community.moderate') && {
           id: 'moderation', label: 'Waiting on a moderator',
           value: db.MODQ.filter((q) => q.state === 'Pending').length + db.PRAYER_INBOX.filter((p) => p.state === 'Pending').length,
-          icon: 'chats', to: '/community/queue', tone: 'warn',
+          icon: 'chats', to: '/media/noahgram', tone: 'warn',
         },
         held('jodie.verify') && {
           id: 'jodie', label: 'Jodie stages to verify',

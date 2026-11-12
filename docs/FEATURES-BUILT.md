@@ -63,7 +63,7 @@ Membership and a row in Work queues count the waiting ones.
 ## 2a. Noahgram moderation
 
 **What.** Members post pictures and reels in the app. Every one **waits for the office**: nobody sees it, on the feed or on its
-share link, until it is approved. **Community > Noahgram** is where the office decides.
+share link, until it is approved. **Media > Noahgram** is where the office decides.
 
 **How.**
 - **Waiting** lists the posts and reels, longest-waiting first, each with a thumbnail, who posted it (their own name, no title) and
@@ -73,7 +73,7 @@ share link, until it is approved. **Community > Noahgram** is where the office d
 - **Live on the feed** lists what members can see now, with likes, comments and views. Open one to **take it down** (the same
   turn-down: off the feed, its link stops working, the author is told), or to **hide or remove a comment**. Removing a comment
   also lowers the post's comment count; a hidden one stays listed, marked, and can be shown again.
-- A badge on Community, a row in Work queues and a Dashboard card count the waiting ones. Every decision is in the audit log.
+- A badge on Media, a row in Work queues and a Dashboard card count the waiting ones. Every decision is in the audit log.
 
 Decisions go through the Noah API (`/admin/noahgram/...`), never through the table, because only the API tells the author.
 Comments have no API call, so they are written to the `comments` table. A picture or video is read through the console's own
