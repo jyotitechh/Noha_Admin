@@ -56,11 +56,9 @@ export const flong = (d: MaybeDate) =>
 
 const MIN = 6e4;
 
-/* The sample data is pinned to Friday 9 October 2026, 10:30 IST and moves
-   forward in real time from the moment the page loaded, matching the API. */
-const PINNED = new Date(2026, 9, 9, 10, 30, 0);
-const LOADED = Date.now();
-export const now = () => new Date(+PINNED + (Date.now() - LOADED));
+/* The real clock. It used to be pinned to 9 October 2026 (the prototype's sample day), which made every record dated
+   after that read "1 min": a registration from 6 November was "in the future", so its waiting time came out negative. */
+export const now = () => new Date();
 
 /** "12 min ago", "3 h ago", "4 d ago", then the date. */
 export function since(d: MaybeDate): string {

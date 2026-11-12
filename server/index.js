@@ -25,7 +25,6 @@ import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from '.
 import { noahConfigured } from './noah-api.js';
 import { queuesFor } from './queues.js';
 import { listPrayerRequests } from './prayer-requests.js';
-import { now } from './seed/helpers.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
 import mountStaff from './routes/staff.js';
@@ -149,7 +148,7 @@ async function catalystState(force = false) {
 app.get('/api/health', async (req, res) => {
   /* noahApi: whether the Noah API key is set, i.e. whether a decision can reach the member's phone.
      A yes or no only; the key itself never leaves the server. */
-  const base = { ok: true, at: now(), dataSource: source(), noahApi: noahConfigured() };
+  const base = { ok: true, at: new Date(), dataSource: source(), noahApi: noahConfigured() };
   /* What this process has spent of Catalyst's free allowance since it started. Free to ask. */
   if (live()) base.catalystSpent = usage();
   if (!live()) {
@@ -167,7 +166,7 @@ app.get('/api/health', async (req, res) => {
    503 when Catalyst cannot be reached. Not what the host polls. */
 app.get('/api/health/catalyst', async (_req, res) => {
   const catalyst = await catalystState(true);
-  res.status(catalyst.reachable ? 200 : 503).json({ ok: catalyst.reachable, at: now(), catalyst });
+  res.status(catalyst.reachable ? 200 : 503).json({ ok: catalyst.reachable, at: new Date(), catalyst });
 });
 
 /* Every table in the connected project and how many rows it holds.

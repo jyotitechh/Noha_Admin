@@ -9,7 +9,6 @@
 import { SEED } from './seed/data.js';
 import { AUD, ROLES, ME, PERM_GROUPS, PERM_LBL, ALL_PERMS } from './seed/roles.js';
 import { REGISTRATIONS, PRAYER_INBOX, videoScript } from './seed/registrations.js';
-import { now } from './seed/helpers.js';
 
 export const db = {
   ...SEED,
@@ -34,7 +33,7 @@ let audSeq = 4900;
 export function audit(actor, roleName, action, mod, rec, before, after, remark) {
   const entry = {
     id: 'AU-' + ++audSeq,
-    at: now(),
+    at: new Date(), /* the real time: the demo clock (9 Oct) made every audit line read as that day */
     actor,
     role: roleName,
     action,
