@@ -49,6 +49,7 @@ const EXPLAIN = {
   event_archived: 'That event is archived, so members are not told about it.',
   event_hidden: 'That event is hidden from members, so they are not told about it.',
   not_published_yet: 'That event is not published yet.',
+  post_not_found: 'Noah has no Noahgram post with that id.',
 };
 
 export class NoahApiError extends Error {
@@ -278,6 +279,29 @@ export const listProfileRequests = async (status = 'pending') => {
 
 export const decideProfileRequest = (id, { decision, note, actor } = {}) =>
   call(`/admin/profile-requests/${encodeURIComponent(id)}/decide`, {
+    method: 'POST', actor,
+    body: { decision, ...(note ? { note } : {}) },
+  });
+
+/* ---------- Noahgram ----------
+
+   FOR-CONSOLE-NOAHGRAM.md. Every new post and reel waits for the office (`noahGram.isApproved` is false) and is shown to no one
+   until it is approved. The decision goes through the API, which also tells the author; writing the table by hand tells nobody.
+
+   GET  /admin/noahgram/pending                    -> the posts waiting (author with name and photo, caption, reel or not, file ref)
+   POST /admin/noahgram/posts/:id/decide           { decision: 'approve' | 'reject', note? }
+        approve: the post goes live and the author is told.  reject: it is archived (never deleted) and the author is told.
+        The same reject takes down a post that is ALREADY live (a report, something unsuitable). */
+export const listNoahgramPending = async () => {
+  const data = await call('/admin/noahgram/pending');
+  /* The note does not give the wrapper, so a bare list and the usual names are all accepted. */
+  if (Array.isArray(data)) return data;
+  for (const k of ['posts', 'items', 'pending', 'rows', 'data']) if (Array.isArray(data?.[k])) return data[k];
+  return [];
+};
+
+export const decideNoahgramPost = (id, { decision, note, actor } = {}) =>
+  call(`/admin/noahgram/posts/${encodeURIComponent(id)}/decide`, {
     method: 'POST', actor,
     body: { decision, ...(note ? { note } : {}) },
   });

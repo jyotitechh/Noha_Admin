@@ -974,6 +974,121 @@ if (NO_KEY) {
     && (famDecided.body?.rows || []).some((x) => x.action === 'Rejected a family request' && /could not find/.test(x.remark || '')));
 }
 
+section('Noahgram moderation (posts, reels and comments)');
+
+/* The fixtures in dev-offline.mjs: two waiting (a picture 52 h old, a reel 5 h old), two live (a member's, and one the office wrote
+   with a plain link), one the office already took down, and comments under the live member post. */
+const G = {
+  pic: '27145000000181001', reel: '27145000000181002', live: '27145000000181003', office: '27145000000181004', gone: '27145000000181005',
+  cMember: '27145000000183001', cReply: '27145000000183002', cGone: '27145000000183003',
+};
+/* Who the fake Noah API told: it keeps the list, because telling the author is the whole point of deciding through it. */
+const told = async () => (await (await fetch(`http://127.0.0.1:${process.env.NOAH_PORT || '4301'}/_fake/noahgram-told`)).json()).told;
+
+if (NO_KEY) {
+  const noKeyGram = await call('GET', '/noahgram/posts?state=pending', null, BT);
+  check('without the admin key the waiting list says so instead of looking empty', noKeyGram.status === 200 && noKeyGram.body?.needsAdminKey === true && noKeyGram.body?.rows?.length === 0, noKeyGram.text.slice(0, 120));
+  const noKeyDo = await call('POST', `/noahgram/posts/${G.pic}/decide`, { decision: 'approve' }, BT);
+  check('...and a decision is refused, because the author would not be told', noKeyDo.status === 409 && noKeyDo.body?.needsAdminKey === true, noKeyDo.text.slice(0, 120));
+} else {
+  const waitingGram = await call('GET', '/noahgram/posts?state=pending', null, BT);
+  const wrows = waitingGram.body?.rows || [];
+  check('the waiting list shows both posts, the one waiting longest first', waitingGram.status === 200 && wrows.length === 2 && wrows[0].id === G.pic && wrows[1].id === G.reel, `${waitingGram.status} ${waitingGram.text.slice(0, 200)}`);
+  check('a member is shown by their own name, with no title', wrows[0]?.author?.name === 'Anand Rao' && wrows[1]?.author?.name === 'Old Member', JSON.stringify(wrows.map((p) => p.author)));
+  check('a reel is marked as one, a picture is not', wrows[1]?.reel === true && wrows[0]?.reel === false);
+  check('how long each has waited is real (52 h and 5 h)', Math.abs(Date.now() - +new Date(wrows[0]?.at) - 52 * 3600e3) < 120_000 && Math.abs(Date.now() - +new Date(wrows[1]?.at) - 5 * 3600e3) < 120_000, JSON.stringify(wrows.map((p) => p.at)));
+  check('the picture is served by this console, not from a public address', wrows[0]?.media?.src?.url === `/noahgram/posts/${G.pic}/media/main` && wrows[0].media.src.external === false);
+  check('a reel also carries its still picture', wrows[1]?.media?.still?.url === `/noahgram/posts/${G.reel}/media/still`);
+  check('the work queue counts what is waiting', await queueCount('mod') === 2, String(await queueCount('mod')));
+  const dashGram = await call('GET', '/dashboard', null, BT);
+  check('the dashboard has a Noahgram card', (dashGram.body?.cards || []).some((c) => c.id === 'noahgram' && c.value === 2), dashGram.text.slice(0, 200));
+
+  const pic = await call('GET', `/noahgram/posts/${G.pic}/media/main`, null, BT);
+  check('a waiting picture can be looked at before deciding', pic.status === 200 && pic.text.slice(1, 4) === 'PNG' && /image[/]png/.test(pic.type), `${pic.status} ${pic.text.slice(0, 20)} ${pic.type}`);
+  const reelFile = await call('GET', `/noahgram/posts/${G.reel}/media/main`, null, BT);
+  check('a waiting reel plays as a video', reelFile.status === 200 && reelFile.text === 'FAKE-reel-BYTES' && /video[/]mp4/.test(reelFile.type), `${reelFile.status} ${reelFile.type}`);
+  const still = await call('GET', `/noahgram/posts/${G.reel}/media/still`, null, BT);
+  check('...and its still picture is there', still.status === 200 && /image[/]png/.test(still.type), `${still.status} ${still.type}`);
+  check('a picture has no still (404)', (await call('GET', `/noahgram/posts/${G.pic}/media/still`, null, BT)).status === 404);
+  check('a post that does not exist has no picture (404)', (await call('GET', '/noahgram/posts/27145000000999999/media/main', null, BT)).status === 404);
+  check('an id that is not a number is refused before anything is read (404)', (await call('GET', '/noahgram/posts/abc/media/main', null, BT)).status === 404);
+  check('only main or still can be asked for (400)', (await call('GET', `/noahgram/posts/${G.pic}/media/passport`, null, BT)).status === 400);
+  const external = await fetch(BASE + `/noahgram/posts/${G.office}/media/main`, { headers: { authorization: 'Bearer ' + BT }, redirect: 'manual' });
+  check('a post the office wrote with a plain link goes to that link', external.status === 302 && external.headers.get('location') === 'https://example.com/carols.jpg', `${external.status} ${external.headers.get('location')}`);
+
+  check('the waiting list needs permission to moderate (403)', (await call('GET', '/noahgram/posts?state=pending', null, verifier.token)).status === 403);
+  check('deciding needs it too (403)', (await call('POST', `/noahgram/posts/${G.pic}/decide`, { decision: 'approve' }, verifier.token)).status === 403);
+  check('so does looking at a file (403)', (await call('GET', `/noahgram/posts/${G.pic}/media/main`, null, verifier.token)).status === 403);
+  check('...and the comments (403)', (await call('GET', `/noahgram/posts/${G.live}/comments`, null, verifier.token)).status === 403);
+  check('...and moderating one (403)', (await call('POST', `/noahgram/comments/${G.cMember}/moderate`, { action: 'remove' }, verifier.token)).status === 403);
+  check('nothing is listed without signing in (401)', (await call('GET', '/noahgram/posts?state=pending')).status === 401);
+
+  const liveGram = await call('GET', '/noahgram/posts?state=live', null, BT);
+  const lrows = liveGram.body?.rows || [];
+  check('the live list holds what members can see now, newest first', liveGram.status === 200 && lrows.map((p) => p.id).join() === [G.live, G.office].join(), `${liveGram.status} ${lrows.map((p) => p.id)}`);
+  check('...with its counts', lrows[0]?.likes === 3 && lrows[0]?.comments === 2 && lrows[0]?.views === 40, JSON.stringify(lrows[0]));
+  check('...a post the office wrote has no member, so it says the office', lrows[1]?.author?.name === 'The office' && lrows[1]?.media?.src?.external === true);
+  check('...nothing waiting and nothing already taken down is in it', !lrows.some((p) => [G.pic, G.reel, G.gone].includes(p.id)));
+
+  check('a decision that is not approve or reject is refused (400)', (await call('POST', `/noahgram/posts/${G.pic}/decide`, { decision: 'maybe' }, BT)).status === 400);
+  const noWhyGram = await call('POST', `/noahgram/posts/${G.reel}/decide`, { decision: 'reject' }, BT);
+  check('turning one down needs a reason (400)', noWhyGram.status === 400 && /why/i.test(noWhyGram.body?.error || ''), noWhyGram.text.slice(0, 120));
+  const noSuch = await call('POST', '/noahgram/posts/27145000000999999/decide', { decision: 'approve' }, BT);
+  check('a post that does not exist is refused, with the code (404)', noSuch.status === 404 && noSuch.body?.code === 'post_not_found', noSuch.text.slice(0, 120));
+  check('none of those decided anything', (await call('GET', '/noahgram/posts?state=pending', null, BT)).body?.rows?.length === 2);
+
+  const okPic = await call('POST', `/noahgram/posts/${G.pic}/decide`, { decision: 'approve' }, BT);
+  check('a picture can be approved', okPic.status === 200 && okPic.body?.ok === true && okPic.body?.result?.approved === true && okPic.body?.result?.notified?.pushed === 1, okPic.text.slice(0, 200));
+  check('...and the author was told it is live (by the API, not by writing the table)', (await told()).some((t) => t.post === G.pic && t.type === 'noahgram_post_approved'));
+  check('...it is no longer waiting', (await call('GET', '/noahgram/posts?state=pending', null, BT)).body?.rows?.map((p) => p.id).join() === G.reel);
+  check('...it is on the live list', (await call('GET', '/noahgram/posts?state=live', null, BT)).body?.rows?.some((p) => p.id === G.pic));
+  check('...and the work queue dropped to 1', await queueCount('mod') === 1, String(await queueCount('mod')));
+  const again = await call('POST', `/noahgram/posts/${G.pic}/decide`, { decision: 'approve' }, BT);
+  check('approving twice is refused (409, not_pending)', again.status === 409 && again.body?.code === 'not_pending', again.text.slice(0, 120));
+
+  const rejGram = await call('POST', `/noahgram/posts/${G.reel}/decide`, { decision: 'reject', note: 'It advertises something for sale.' }, BT);
+  check('a reel can be turned down with a reason', rejGram.status === 200 && rejGram.body?.result?.archived === true, rejGram.text.slice(0, 200));
+  check('...the author was told, and the reason went with it', (await told()).some((t) => t.post === G.reel && t.type === 'noahgram_post_rejected' && /for sale/.test(t.note)));
+  check('...it is archived, never live, and nothing is waiting', (await call('GET', '/noahgram/posts?state=pending', null, BT)).body?.rows?.length === 0
+    && !(await call('GET', '/noahgram/posts?state=live', null, BT)).body?.rows?.some((p) => p.id === G.reel));
+  check('...and the work queue says so', await queueCount('mod') === 0, String(await queueCount('mod')));
+
+  const down = await call('POST', `/noahgram/posts/${G.office}/decide`, { decision: 'reject', note: 'Event is over.' }, BT);
+  check('a post that is already live can be taken down', down.status === 200 && down.body?.result?.archived === true, down.text.slice(0, 200));
+  check('...and it leaves the live list', !(await call('GET', '/noahgram/posts?state=live', null, BT)).body?.rows?.some((p) => p.id === G.office));
+  check('one already taken down cannot be decided again (409)', (await call('POST', `/noahgram/posts/${G.gone}/decide`, { decision: 'reject', note: 'x' }, BT)).status === 409);
+
+  const gramAud = await call('GET', '/data/AUD?limit=300', null, BT);
+  check('approving and taking down are in the audit log, with the reason',
+    (gramAud.body?.rows || []).some((x) => x.action === 'Approved a Noahgram post')
+    && (gramAud.body?.rows || []).some((x) => x.action === 'Took down a Noahgram post' && /for sale/.test(x.remark || '')));
+
+  /* Comments. */
+  const cm = await call('GET', `/noahgram/posts/${G.live}/comments`, null, BT);
+  const crows = cm.body?.rows || [];
+  check('the comments under a post are listed, oldest first, a removed one left out', cm.status === 200 && crows.map((c) => c.id).join() === [G.cMember, G.cReply].join(), `${cm.status} ${cm.text.slice(0, 200)}`);
+  check('...a reply says which comment it answers, and everyone is named', crows[1]?.parentId === G.cMember && crows[0]?.parentId === null && crows[0]?.author?.name === 'Old Member', JSON.stringify(crows));
+
+  check('a comment can be hidden', (await call('POST', `/noahgram/comments/${G.cReply}/moderate`, { action: 'hide' }, BT)).status === 200);
+  check('...it is still listed, marked hidden', (await call('GET', `/noahgram/posts/${G.live}/comments`, null, BT)).body?.rows?.find((c) => c.id === G.cReply)?.hidden === true);
+  check('hiding it again is refused (409)', (await call('POST', `/noahgram/comments/${G.cReply}/moderate`, { action: 'hide' }, BT)).status === 409);
+  check('a hidden comment can be shown again', (await call('POST', `/noahgram/comments/${G.cReply}/moderate`, { action: 'show' }, BT)).status === 200
+    && (await call('GET', `/noahgram/posts/${G.live}/comments`, null, BT)).body?.rows?.find((c) => c.id === G.cReply)?.hidden === false);
+  check('showing one that is not hidden is refused (409)', (await call('POST', `/noahgram/comments/${G.cReply}/moderate`, { action: 'show' }, BT)).status === 409);
+
+  const before = (await call('GET', '/noahgram/posts?state=live', null, BT)).body?.rows?.find((p) => p.id === G.live)?.comments;
+  check('a comment can be removed', (await call('POST', `/noahgram/comments/${G.cMember}/moderate`, { action: 'remove' }, BT)).status === 200);
+  check('...it is gone from the list', !(await call('GET', `/noahgram/posts/${G.live}/comments`, null, BT)).body?.rows?.some((c) => c.id === G.cMember));
+  check('...and the post counts one fewer (never below nothing)', (await call('GET', '/noahgram/posts?state=live', null, BT)).body?.rows?.find((p) => p.id === G.live)?.comments === before - 1, String(before));
+  check('removing it again is refused (409)', (await call('POST', `/noahgram/comments/${G.cMember}/moderate`, { action: 'remove' }, BT)).status === 409);
+  check('a comment that does not exist is refused (404)', (await call('POST', '/noahgram/comments/27145000000999999/moderate', { action: 'remove' }, BT)).status === 404);
+  check('an action that does not exist is refused (400)', (await call('POST', `/noahgram/comments/${G.cReply}/moderate`, { action: 'delete' }, BT)).status === 400);
+
+  const cAud = await call('GET', '/data/AUD?limit=300', null, BT);
+  check('hiding, showing and removing a comment are in the audit log',
+    ['Hid a Noahgram comment', 'Showed a Noahgram comment again', 'Removed a Noahgram comment'].every((a) => (cAud.body?.rows || []).some((x) => x.action === a)));
+}
+
 section('Who looks after a member: pastor and cell leader');
 
 const withChoices = await call('GET', `/people/${ANAND_ID}`, null, BT);

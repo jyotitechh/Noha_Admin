@@ -23,6 +23,7 @@
    mistake here cannot reach the real project or send a member an email. */
 
 import http from 'node:http';
+import zlib from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -91,6 +92,50 @@ const familyRequests = [
   { id: '100596000000071004', state: 'Approved', relation: 'spouse', kid: false, name: 'Old Member', gender: 'male', dob: null, mobile: '+919000000778', note: '', requesterId: M.approved, existingMemberId: M.office, at: '2026-10-20T09:00:00.000Z' },
   { id: '100596000000071005', state: 'Cancelled', relation: 'other', kid: false, name: 'Someone', gender: null, dob: null, mobile: '+919000000888', note: '', requesterId: M.boss, existingMemberId: null, at: '2026-10-25T09:00:00.000Z' },
 ];
+/* Noahgram (FOR-CONSOLE-NOAHGRAM.md). Two posts waiting (a picture and a reel), two live (one by a member, one the office wrote with a
+   plain link), one the office already took down, and comments under the live one. Times are relative to now, so waiting times
+   read sensibly whenever the harness is started. */
+const istStamp = (msAgo) => new Date(Date.now() - msAgo + 330 * 60_000).toISOString().slice(0, 19).replace('T', ' ') + ':000';
+const HOUR = 3_600_000;
+const GRAM = {
+  pic: '27145000000181001', reel: '27145000000181002', live: '27145000000181003', office: '27145000000181004', gone: '27145000000181005',
+  cMember: '27145000000183001', cReply: '27145000000183002', cGone: '27145000000183003',
+};
+/* A 96x72 PNG in one flat colour that depends on the file id, so different pictures look different. */
+function plainPng(seed) {
+  const n = Number(String(seed).slice(-3));
+  const rgb = [90 + (n * 37) % 120, 70 + (n * 91) % 140, 160 + (n * 53) % 90];
+  const w = 96, h = 72;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1); raw[o] = 0; raw.set(rgb, o + 1 + x * 3); }
+  const crcTable = Array.from({ length: 256 }, (_, i) => { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const t = Buffer.concat([Buffer.from(type), data]); const out = Buffer.alloc(12 + data.length); out.writeUInt32BE(data.length, 0); t.copy(out, 4); out.writeUInt32BE(crc(t), 8 + data.length); return out; };
+  const head = Buffer.alloc(13); head.writeUInt32BE(w, 0); head.writeUInt32BE(h, 4); head[8] = 8; head[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const gramFile = (id, name, mimeType, purpose, fileType) => ({ ROWID: id, uid: M.approved, path: '2714500000018' + id.slice(-4), fileType, extension: name.split('.').pop(), size: 2048, archived: false, CREATEDTIME: istStamp(HOUR), remoteSource: JSON.stringify({ name, mimeType, purpose }) });
+tables[T.files].push(
+  gramFile('27145000000182001', 'post.png', 'image/png', 'post', 1),
+  gramFile('27145000000182002', 'reel.mp4', 'video/mp4', 'reel', 3),
+  gramFile('27145000000182003', 'reel-still.png', 'image/png', 'post', 1),
+  gramFile('27145000000182004', 'live.png', 'image/png', 'post', 1),
+);
+tables[T.noahGram].push(
+  { ROWID: GRAM.pic, memberId: M.approved, caption: 'Sunday worship at Andheri: what a morning.', photo: 'file:27145000000182001', isApproved: false, isArchived: false, likes: 0, comments: 0, counter: 0, CREATEDTIME: istStamp(52 * HOUR) },
+  { ROWID: GRAM.reel, memberId: M.office, caption: 'A short testimony from last night.', cloudflareLink: 'file:27145000000182002', videoImage: 'file:27145000000182003', addToReels: 1, isApproved: false, isArchived: false, likes: 0, comments: 0, counter: 0, CREATEDTIME: istStamp(5 * HOUR) },
+  { ROWID: GRAM.live, memberId: M.approved, caption: 'Thank you for praying with us.', photo: 'file:27145000000182004', isApproved: true, isArchived: false, likes: 3, comments: 2, counter: 40, CREATEDTIME: istStamp(30 * HOUR) },
+  { ROWID: GRAM.office, memberId: '', caption: 'Join us for the Christmas carol night.', photo: 'https://example.com/carols.jpg', isApproved: true, isArchived: false, likes: 9, comments: 0, counter: 120, CREATEDTIME: istStamp(80 * HOUR) },
+  { ROWID: GRAM.gone, memberId: M.office, caption: 'Taken down by the office.', photo: 'file:27145000000182001', isApproved: false, isArchived: true, likes: 0, comments: 0, counter: 0, CREATEDTIME: istStamp(120 * HOUR) },
+);
+tables[T.comments].push(
+  { ROWID: GRAM.cMember, component: 2, componentId: GRAM.live, memberId: M.office, parentId: '', content: 'Amen, praying for you all.', isArchived: false, notApproved: false, CREATEDTIME: istStamp(20 * HOUR) },
+  { ROWID: GRAM.cReply, component: 2, componentId: GRAM.live, memberId: M.approved, parentId: GRAM.cMember, content: 'Thank you.', isArchived: false, notApproved: false, CREATEDTIME: istStamp(19 * HOUR) },
+  { ROWID: GRAM.cGone, component: 2, componentId: GRAM.live, memberId: M.office, parentId: '', content: 'A comment already removed.', isArchived: true, notApproved: false, CREATEDTIME: istStamp(25 * HOUR) },
+);
+/* Who the fake Noah API has told about a Noahgram decision. */
+const gramTold = [];
+
 /* Registrations whose member the fake Noah API has already told. */
 const told = new Set();
 /* Events the fake Noah API has already announced. */
@@ -139,6 +184,9 @@ http.createServer(async (req, res) => {
     return send(res, 200, { ok: true, id: contentTableId(table) || null });
   }
 
+  /* Who the fake Noah API told about a Noahgram decision, as { post, type } in order. */
+  if (req.method === 'GET' && path === '/_fake/noahgram-told') return send(res, 200, { told: gramTold });
+
   if (req.method === 'POST' && path === '/_fake/patch') {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -185,6 +233,8 @@ http.createServer(async (req, res) => {
     const f = tables[T.files].find((x) => x.ROWID === m[1]);
     if (!f) return err(res, 404, 'file_not_found', 'No such file.');
     let meta = {}; try { meta = JSON.parse(f.remoteSource); } catch { /* none */ }
+    /* A Noahgram picture is a real (small, plain) PNG, so the screen can be seen showing one. Everything else is marker text. */
+    if (meta.purpose === 'post' && meta.mimeType === 'image/png') return send(res, 200, plainPng(f.ROWID), { 'content-type': 'image/png' });
     return send(res, 200, Buffer.from(`FAKE-${meta.purpose || 'file'}-BYTES`), { 'content-type': meta.mimeType || 'application/octet-stream' });
   }
 
@@ -304,6 +354,33 @@ http.createServer(async (req, res) => {
     }
     S.clearCache();
     return send(res, 200, { id: r.id, state: r.state, notified: { pushed: 2, emailed: false } });
+  }
+  /* FOR-CONSOLE-NOAHGRAM.md: the posts waiting, and the decision that makes one live (or archives it) and tells the author. */
+  if (req.method === 'GET' && path === '/admin/noahgram/pending') {
+    const nameOf = (id) => { const x = tables[T.members].find((mm) => mm.ROWID === String(id)); return x ? [x.firstName, x.lastName].filter(Boolean).join(' ') : null; };
+    return send(res, 200, {
+      posts: tables[T.noahGram].filter((p) => !p.isApproved && !p.isArchived).map((p) => ({
+        id: p.ROWID, memberId: p.memberId, author: { id: p.memberId, name: nameOf(p.memberId), photo: null },
+        caption: p.caption, isReel: !!p.addToReels, file: p.addToReels ? p.cloudflareLink : p.photo,
+        createdAt: new Date(String(p.CREATEDTIME).slice(0, 19).replace(' ', 'T') + '+05:30').toISOString(),
+      })),
+    });
+  }
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/noahgram\/posts\/(\d+)\/decide$/))) {
+    const p = tables[T.noahGram].find((x) => x.ROWID === m[1]);
+    if (!p) return err(res, 404, 'post_not_found', 'No such post.');
+    if (!['approve', 'reject'].includes(body.decision)) return err(res, 400, 'bad_decision', 'Decide approve or reject.');
+    if (p.isArchived) return err(res, 409, 'not_pending', 'That post is already down.');
+    if (body.decision === 'approve') {
+      if (p.isApproved) return err(res, 409, 'not_pending', 'That post is already live.');
+      p.isApproved = true;
+      gramTold.push({ post: p.ROWID, type: 'noahgram_post_approved' });
+    } else {
+      p.isApproved = false; p.isArchived = true; p.rejectNote = body.note || '';
+      gramTold.push({ post: p.ROWID, type: 'noahgram_post_rejected', note: body.note || '' });
+    }
+    S.clearCache();
+    return send(res, 200, { id: p.ROWID, approved: !!p.isApproved, archived: !!p.isArchived, notified: { pushed: 1 } });
   }
   /* Noah backend README, "Telling members about a new event". An event is announced once; 3 approved members match, 2 have a phone. */
   const eventsTable = () => tables['tbl:events'] || [];

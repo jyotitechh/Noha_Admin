@@ -14,6 +14,7 @@ import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, a
 import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
+import { cachedPending } from '../noahgram.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -55,6 +56,8 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     if (live()) {
       const [regs, members] = await Promise.all([listRegistrations({}), listMembers({})]);
       const waiting = regs.filter((r) => r.state === 'pending');
+      /* Noahgram posts and reels waiting for the office; only the Noah API can say, so no card without it. */
+      const gram = held('community.moderate') && noahConfigured() ? await cachedPending().catch(() => null) : null;
       return res.json({
         asOf: now(),
         dataSource: 'catalyst',
@@ -75,6 +78,11 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
           held('members.edit') && {
             id: 'drafts', label: 'Still filling it in', value: regs.filter((r) => r.state === 'draft').length,
             icon: 'edit', to: '/members/registrations', sub: 'started, not submitted',
+          },
+          gram && {
+            id: 'noahgram', label: 'Noahgram waiting', value: gram.length, icon: 'chats', to: '/community/queue',
+            tone: gram.length ? 'warn' : undefined,
+            sub: `${gram.filter((p) => p.reel).length} reels, ${gram.filter((p) => !p.reel).length} pictures`,
           },
         ].filter(Boolean),
         givingByMonth: [],

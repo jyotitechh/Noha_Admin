@@ -40,6 +40,7 @@ All of these go through the Noah API with the office's admin key, so the member 
 | "Tell the member" on an already decided registration | `POST /admin/registrations/:id/notify` | same as the decision | same as the decision |
 | Approve / reject a profile change request | `POST /admin/profile-requests/:id/decide` | "Your change was accepted / declined" | refresh the profile; show the note on a decline |
 | Approve / reject a family request | `POST /admin/family-requests/:id/decide` | both people are told | refresh Me > Family |
+| Approve / turn down (or take down) a Noahgram post or reel | `POST /admin/noahgram/posts/:id/decide` | "Your post is live" / "Your reel is live", or "... was not approved" (`noahgram_post_approved` / `noahgram_post_rejected`) | open that post (nothing for a turned-down one) |
 | **A new event** is saved, or its publish time arrives | `POST /admin/events/:id/announce`, and a sweep of `POST /admin/events/announce-due` every 5 minutes | "New event": `<name> · <day, time> · <place>`, with `data: { type: "event_published", eventId }` | open the Events tab (or the event) |
 
 The Noah API answers the console with `notified: { pushed: <phones reached>, emailed: <bool> }`, or

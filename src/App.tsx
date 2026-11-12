@@ -28,7 +28,7 @@ const SCREENS: Record<string, ComponentType> = {
   'members/register': lazy(() => import('@/modules/members/Register')),
 
   'community/prayer-inbox': lazy(() => import('@/modules/community/PrayerInbox')),
-  'community/queue': lazy(() => import('@/modules/community/Moderation')),
+  'community/queue': lazy(() => import('@/modules/community/Noahgram')),
   'community/flagged': lazy(() => import('@/modules/community/Flagged')),
   'community/praise': lazy(() => import('@/modules/community/Praise')),
 

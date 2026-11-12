@@ -60,6 +60,36 @@ Membership and a row in Work queues count the waiting ones.
 
 ---
 
+## 2a. Noahgram moderation
+
+**What.** Members post pictures and reels in the app. Every one **waits for the office**: nobody sees it, on the feed or on its
+share link, until it is approved. **Community > Noahgram** is where the office decides.
+
+**How.**
+- **Waiting** lists the posts and reels, longest-waiting first, each with a thumbnail, who posted it (their own name, no title) and
+  how long it has waited (red after 24 h). Open one to see the whole picture, or play the reel, before deciding.
+- **Approve** makes it live and tells the author. **Turn down** needs a reason; the post is archived (never deleted) and the
+  author is told.
+- **Live on the feed** lists what members can see now, with likes, comments and views. Open one to **take it down** (the same
+  turn-down: off the feed, its link stops working, the author is told), or to **hide or remove a comment**. Removing a comment
+  also lowers the post's comment count; a hidden one stays listed, marked, and can be shown again.
+- A badge on Community, a row in Work queues and a Dashboard card count the waiting ones. Every decision is in the audit log.
+
+Decisions go through the Noah API (`/admin/noahgram/...`), never through the table, because only the API tells the author.
+Comments have no API call, so they are written to the `comments` table. A picture or video is read through the console's own
+server (permission checked; the file id is taken from the post, never from the request). Needs `community.moderate`.
+The Media > Noahgram switch "Approved" is for posts the office writes itself and tells nobody: it says so.
+
+**Where.** `server/noah-api.js` (`listNoahgramPending`, `decideNoahgramPost`), `server/noahgram.js`,
+`server/routes/noahgram.js`, `server/queues.js`, `src/modules/community/Noahgram.tsx`. Brief: `FOR-CONSOLE-NOAHGRAM.md`.
+Tested in `server/test-offline-stack.mjs` ("Noahgram moderation").
+
+**Not yet checked against the live Noah API.** The note does not give the shape of `GET /admin/noahgram/pending`, so the console
+reads the usual names (`posts`, `items`, `rows`, a bare list; `author.name`, `caption`, `isReel`, `createdAt`) and fills what is
+missing from the `noahGram` and `members` tables. Open the screen once against the live API and look.
+
+---
+
 ## 3. Changes members ask for (Me > My information)
 
 **What.** Members cannot edit their own details. They ask, and the office approves or turns down.

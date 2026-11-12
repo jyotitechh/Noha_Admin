@@ -61,6 +61,8 @@ const TABLE_NAMES = [
   'threads', 'threadUserConnect', 'threadMessages', 'appRegistrations', 'appChangeRequests',
   /* Read on the person page only: who is family, and which groups they are in. */
   'membersRelations', 'kids', 'kidsConnect', 'groups', 'groupsConnect',
+  /* Noahgram: the posts and reels, and the comments under them (server/noahgram.js). */
+  'noahGram', 'comments',
 ];
 
 /** The six columns on membersExtra that hold a member's console role. */
@@ -304,7 +306,7 @@ const MIME = {
   pdf: 'application/pdf', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp',
 };
 
-const fileMeta = (f) => {
+export const fileMeta = (f) => {
   if (!f) return null;
   let meta = {};
   try { meta = typeof f.remoteSource === 'string' ? JSON.parse(f.remoteSource) : (f.remoteSource || {}); } catch { /* not JSON */ }
@@ -1026,6 +1028,8 @@ export const EXPECTED_COLUMNS = {
   files: ['uid', 'path', 'extension', 'size', 'fileType', 'remoteSource', 'archived', 'uploadedAt', 'isPublic'],
   appChangeRequests: ['memberRowId', 'fieldId', 'oldValue', 'newValue', 'status', 'note', 'reviewedByRowId', 'reviewedAt'],
   consoleStaff: ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'],
+  noahGram: ['memberId', 'caption', 'photo', 'cloudflareLink', 'videoImage', 'addToReels', 'isApproved', 'isArchived', 'likes', 'comments', 'counter'],
+  comments: ['component', 'componentId', 'memberId', 'parentId', 'content', 'isArchived', 'notApproved'],
   appRegistrations: [
     'memberRowId', 'status', 'reviewNote', 'reviewedAt', 'submittedAt', 'nationality',
     'idProofType', 'idProofFileId', 'signatureText', 'declarationAccepted',

@@ -139,8 +139,8 @@ export const MODULES: ModuleDef[] = [
     tabs: [
       { id: 'prayer-inbox', label: 'App prayer requests', perm: 'community.moderate', status: 'built',
         desc: 'Requests raised from the prayer pop-up in the app. Each one is held until you approve it, and the audience the member chose is honoured.' },
-      { id: 'queue', label: 'Approval queue', perm: 'community.moderate', status: 'built',
-        desc: 'Noahgram posts, reels, comments, profile photos and about-me text waiting for approval.' },
+      { id: 'queue', label: 'Noahgram', perm: 'community.moderate', status: 'built',
+        desc: 'The pictures and reels members post. Each one waits here until you approve it; you can also take a live post down and remove comments.' },
       { id: 'flagged', label: 'Flagged', perm: 'community.moderate', status: 'built',
         desc: 'What other members have reported.' },
       { id: 'praise', label: 'Praise', perm: 'community.moderate', status: 'built', desc: 'Praise reports and testimonies.' },
