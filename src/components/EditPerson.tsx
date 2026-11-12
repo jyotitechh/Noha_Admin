@@ -16,7 +16,7 @@ import { Drawer, useToast } from '@/components/layers';
 import { Btn, Field, Note } from '@/components/ui';
 
 export interface EditSpec {
-  fields: { key: string; label: string; group: string; kind: 'text' | 'email' | 'date' | 'gender'; max?: number; required: boolean; contact: boolean; locked: boolean }[];
+  fields: { key: string; label: string; group: string; kind: 'text' | 'email' | 'date' | 'gender'; max?: number; required: boolean; contact: boolean; locked: boolean; multiline?: boolean }[];
   values: Record<string, string>;
 }
 
@@ -126,6 +126,14 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
                       <option value="female">Female</option>
                       <option value="other">Other</option>
                     </select>
+                  ) : f.multiline ? (
+                    <textarea
+                      className={'ta' + (errors[f.key] ? ' err' : '')}
+                      rows={5}
+                      maxLength={f.max}
+                      value={now[f.key] ?? ''}
+                      onChange={(e) => set(f.key, e.target.value)}
+                    />
                   ) : (
                     <input
                       className={'inp' + (errors[f.key] ? ' err' : '')}

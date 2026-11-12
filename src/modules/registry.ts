@@ -139,8 +139,8 @@ export const MODULES: ModuleDef[] = [
     tabs: [
       { id: 'prayer-inbox', label: 'App prayer requests', perm: 'community.moderate', status: 'built',
         desc: 'Requests raised from the prayer pop-up in the app. Each one is held until you approve it, and the audience the member chose is honoured.' },
-      { id: 'flagged', label: 'Flagged', perm: 'community.moderate', status: 'built',
-        desc: 'What other members have reported.' },
+      { id: 'flagged', label: 'Reported comments', perm: 'community.moderate', status: 'built',
+        desc: 'Comments members have reported on the Daily Manna and on Noahgram. Keep one, hide it, or remove it.' },
       { id: 'praise', label: 'Praise', perm: 'community.moderate', status: 'built', desc: 'Praise reports and testimonies.' },
       { id: 'prayer', label: 'Prayer wall', perm: 'community.moderate', status: 'planned', from: 'Community → Prayer', desc: 'The wall itself, and prayer counts.' },
       { id: 'obituaries', label: 'Obituaries', perm: 'community.moderate', status: 'planned', from: 'Community → Obituaries', desc: 'Notices and service details.' },

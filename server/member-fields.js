@@ -30,7 +30,9 @@ export const MEMBER_FIELDS = [
   { key: 'religion', column: 'religion', label: 'Religion', group: 'Personal', kind: 'text', max: 100 },
   { key: 'motherTongue', column: 'motherTongue', label: 'Mother tongue', group: 'Personal', kind: 'text', max: 100 },
   { key: 'commLanguage', column: 'commLanguage', label: 'Language to write to them in', group: 'Personal', kind: 'text', max: 100 },
-  { key: 'educationDetail', column: 'educationDetail', label: 'Education', group: 'Personal', kind: 'text', max: 255 },
+  /* One line per qualification, 10th and 12th with their details after a dash (FOR-CONSOLE-REPORTS-AND-EDUCATION.md). The column
+     holds 10,000 characters and the app writes several lines, so this one is longer than the rest and may hold line breaks. */
+  { key: 'educationDetail', column: 'educationDetail', label: 'Education', group: 'Personal', kind: 'text', max: 2000, multiline: true },
   { key: 'employedIn', column: 'employedIn', label: 'Employed in', group: 'Personal', kind: 'text', max: 255 },
 
   { key: 'email', column: 'emailId1', label: 'Email', group: 'Contact', kind: 'email', contact: true },
@@ -80,6 +82,12 @@ export function checkValue(field, raw) {
 
   switch (field.kind) {
     case 'text':
+      if (field.multiline) {
+        const lines = s.replace(/\r\n?/g, '\n');
+        if (lines.length > field.max) return { error: `${field.label} is longer than ${field.max} characters.` };
+        if (/[\u0000-\u0009\u000b-\u001f]/.test(lines)) return { error: `${field.label} has characters that cannot be stored.` };
+        return { value: lines };
+      }
       if (s.length > field.max) return { error: `${field.label} is longer than ${field.max} characters.` };
       if (/[\u0000-\u001f]/.test(s)) return { error: `${field.label} has characters that cannot be stored.` };
       return { value: s };

@@ -130,9 +130,19 @@ export default function ChangeRequests() {
                     <RequestPhoto id={r.id} which="new" label="Asked for" />
                   </span>
                 ) : (
-                  <span className="t2" style={{ display: 'block' }}>
-                    {r.masked ? 'Hidden: it is a contact detail' : <><s>{r.oldValue || 'empty'}</s> → <b>{r.newValue || 'empty'}</b></>}
-                  </span>
+                  r.fieldId === 'education' && !r.masked ? (
+                    /* One line per qualification, 10th and 12th with school, marks and year: keep the line breaks and show both sides. */
+                    <span className="t2" style={{ display: 'block' }}>
+                      <span className="xs muted">Now</span>
+                      <span style={{ display: 'block', whiteSpace: 'pre-line' }}>{r.oldValue || 'empty'}</span>
+                      <span className="xs muted" style={{ display: 'block', marginTop: 6 }}>Asked for</span>
+                      <b style={{ display: 'block', whiteSpace: 'pre-line' }}>{r.newValue || 'empty'}</b>
+                    </span>
+                  ) : (
+                    <span className="t2" style={{ display: 'block', whiteSpace: 'pre-line' }}>
+                      {r.masked ? 'Hidden: it is a contact detail' : <><s>{r.oldValue || 'empty'}</s> → <b>{r.newValue || 'empty'}</b></>}
+                    </span>
+                  )
                 )}
                 <span className="t2" style={{ display: 'block' }}>
                   Asked {r.at ? `${since(r.at)} · ${fdt(r.at)}` : ''}

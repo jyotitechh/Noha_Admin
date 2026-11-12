@@ -509,6 +509,8 @@ export async function loadMembers() {
       partner: asBool(x.isPartner), kid: asBool(m.isKid),
       joined: utc(m.dateOfJoining) || ist(m.CREATEDTIME),
       lang: m.language || 'en',
+      /* One line per qualification (see member-fields.js); shown with its line breaks. */
+      education: String(m.educationDetail ?? '').trim(),
       address: [m.address, m.city, m.pincode].filter(Boolean).join(', '),
       photo: m.photo ? 'Approved' : 'None',
       crm: 'Pending', lastActive: null,
@@ -1031,7 +1033,7 @@ export const EXPECTED_COLUMNS = {
   appChangeRequests: ['memberRowId', 'fieldId', 'oldValue', 'newValue', 'status', 'note', 'reviewedByRowId', 'reviewedAt'],
   consoleStaff: ['memberRowId', 'role', 'status', 'title', 'grantedBy', 'grantedAt', 'lastSignedInAt'],
   noahGram: ['memberId', 'caption', 'photo', 'cloudflareLink', 'videoImage', 'addToReels', 'isApproved', 'isArchived', 'likes', 'comments', 'counter'],
-  comments: ['component', 'componentId', 'memberId', 'parentId', 'content', 'isArchived', 'notApproved'],
+  comments: ['component', 'componentId', 'memberId', 'parentId', 'content', 'isArchived', 'notApproved', 'flagged', 'hide', 'archivedOn'],
   appRegistrations: [
     'memberRowId', 'status', 'reviewNote', 'reviewedAt', 'submittedAt', 'nationality',
     'idProofType', 'idProofFileId', 'signatureText', 'declarationAccepted',

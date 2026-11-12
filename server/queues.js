@@ -12,7 +12,7 @@ import { pendingPrayerRequests } from './prayer-requests.js';
 import { accessRequests } from './noah-schema.js';
 import { pendingRequests as pendingFamilyRequests } from './family-requests.js';
 import { noahConfigured } from './noah-api.js';
-import { cachedPending } from './noahgram.js';
+import { cachedPending, cachedReported } from './noahgram.js';
 
 const minDate = (a) => (a.length ? new Date(Math.min(...a.map((d) => +d))) : null);
 const open = (coll, fn) => (db[coll] || []).filter(fn);
@@ -32,7 +32,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod', 'flags']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -79,7 +79,11 @@ export function queues() {
       perm: 'community.moderate', owner: 'Community moderator', sla: 12,
       count: () => 0, oldest: () => null,   /* counted from the Noah API below; the sample data has none */
     },
-    { id: 'flags', l: 'Flagged content', area: 'Community', icon: 'flag', to: '/community/flagged', perm: 'community.moderate', owner: 'Community moderator', sla: 24, ...q('FLAGS', (x) => x.state === 'Open') },
+    {
+      id: 'flags', l: 'Reported comments to look at', area: 'Community', icon: 'flag', to: '/community/flagged',
+      perm: 'community.moderate', owner: 'Community moderator', sla: 24,
+      count: () => 0, oldest: () => null,   /* counted from the comments table below; the sample data has none */
+    },
     { id: 'prayer', l: 'Prayer wall requests to approve', area: 'Community', icon: 'flame', to: '/community/prayer', perm: 'community.moderate', owner: 'Community moderator', sla: 12, ...q('PRAYERS', (x) => x.state === 'Pending') },
     { id: 'praise', l: 'Praise reports to approve', area: 'Community', icon: 'sparkles', to: '/community/praise', perm: 'community.moderate', owner: 'Community moderator', sla: 24, ...q('PRAISE', (x) => x.state === 'Pending') },
     { id: 'obits', l: 'Obituaries to approve', area: 'Community', icon: 'cross', to: '/community/obituaries', perm: 'community.moderate', owner: 'Community moderator', sla: 12, ...q('OBITS', (x) => x.state === 'Pending') },
@@ -137,6 +141,10 @@ export async function queuesFor(roleId, canFn) {
       /* Only the Noah API lists them. Without its key there is nothing to count, and saying 0 is the truth. */
       try { real.mod = noahConfigured() ? tally(await cachedPending()) : { count: 0, oldest: null }; }
       catch { real.mod = { count: 0, oldest: null }; }
+    }
+    if (rows.some((x) => x.id === 'flags')) {
+      try { real.flags = tally(await cachedReported()); }
+      catch { real.flags = { count: 0, oldest: null }; }
     }
     try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
     catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }

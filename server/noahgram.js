@@ -36,7 +36,7 @@ const asUtc = (v) => zoned(v, 'Z');
 const NAMES_MS = 60_000;
 let names = null;
 let namesAt = 0;
-export const forgetNoahgram = () => { names = null; pending = null; };
+export const forgetNoahgram = () => { names = null; pending = null; reportedCount = null; };
 
 const memberName = (m) => [m.firstName, m.middleName, m.lastName].map(text).filter(Boolean).join(' ');
 
@@ -167,47 +167,132 @@ export async function cachedPending() {
   return pending;
 }
 
-/* ---------- comments ---------- */
+/* ---------- comments ----------
 
-/** The comments and replies under one post, oldest first. Removed ones are not listed; hidden ones are, marked. */
+   One table for Daily Manna and Noahgram comments (FOR-CONSOLE-REPORTS-AND-EDUCATION.md): `component` 1 is a Daily Manna
+   (componentId = the dailyMana row), 2 is a Noahgram post (componentId = the noahGram row). Members can report a comment: the API
+   raises `flagged`, and at three different reporters sets `hide` to 1 (an int). It never deletes one: the office decides.
+
+   A comment is NOT shown in the app when `hide` is 1, `notApproved` is true or `isArchived` is true. */
+
+/* The Daily Manna table. Not in NOAH_TABLES: the content screens already own the name dailyMana (server/content-types.js). */
+const MANNA_TABLE = 'tbl:dailyMana';
+const MANNA = 1;
+const POST = 2;
+const hiddenNow = (c) => Number(c.hide) === 1 || asBool(c.notApproved);
+const whoWrote = (map, c) => {
+  const own = [text(c.firstName), text(c.lastName)].filter(Boolean).join(' ');
+  return authorOf(map, c.memberId, own);
+};
+
+/** The comments and replies under one Noahgram post, oldest first. Removed ones are not listed; hidden ones are, marked. */
 export async function commentsOn(postId) {
   const [rows, map] = await Promise.all([io.getRows(T.comments), nameMap()]);
   return rows
-    .filter((c) => Number(c.component) === 2 && String(c.componentId) === String(postId) && !asBool(c.isArchived))
+    .filter((c) => Number(c.component) === POST && String(c.componentId) === String(postId) && !asBool(c.isArchived))
     .map((c) => ({
       id: String(c.ROWID),
       parentId: text(c.parentId) && text(c.parentId) !== '0' ? String(c.parentId) : null,
-      author: authorOf(map, c.memberId),
+      author: whoWrote(map, c),
       text: text(c.content),
-      hidden: asBool(c.notApproved),
+      hidden: hiddenNow(c),
+      reports: Number(c.flagged) || 0,
       at: asDate(c.CREATEDTIME),
     }))
     .sort((a, b) => (+(a.at ?? 0)) - (+(b.at ?? 0)));
 }
 
+/** UTC, the way the API writes a time. */
+const nowUtc = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
+
 /**
- * Take a comment off the post (`remove`, which also lowers the post's count by one) or hide it (`hide`) or show a hidden one
- * again (`show`). Hidden and removed comments are not shown in the app.
+ * Decide one comment.
+ *   remove  take it off for good (isArchived, archivedOn) and lower the parent's comment count by one, never below 0
+ *   hide    hide it from members without removing it (hide = 1)
+ *   show    show a hidden one again (hide = 0, notApproved off)
+ *   keep    it was reported unfairly: clear the reports and any hiding (flagged = 0, hide = 0)
+ * `components` says which kinds of comment the caller may touch: the Noahgram screen only its own.
  */
-export async function moderateComment(commentId, action) {
+export async function moderateComment(commentId, action, { components = [POST] } = {}) {
   const c = await io.getRow(T.comments, commentId);
-  if (!c || Number(c.component) !== 2) return { error: 'No such comment.', status: 404, code: 'not_found' };
+  if (!c || !components.includes(Number(c.component))) return { error: 'No such comment.', status: 404, code: 'not_found' };
   if (asBool(c.isArchived)) return { error: 'That comment has already been removed.', status: 409, code: 'already_removed' };
+  const row = { ROWID: String(c.ROWID) };
 
   if (action === 'hide') {
-    if (asBool(c.notApproved)) return { error: 'That comment is already hidden.', status: 409, code: 'already_hidden' };
-    await io.update(T.comments, { ROWID: String(c.ROWID), notApproved: true });
+    if (hiddenNow(c)) return { error: 'That comment is already hidden.', status: 409, code: 'already_hidden' };
+    row.hide = 1;
   } else if (action === 'show') {
-    if (!asBool(c.notApproved)) return { error: 'That comment is not hidden.', status: 409, code: 'not_hidden' };
-    await io.update(T.comments, { ROWID: String(c.ROWID), notApproved: false });
+    if (!hiddenNow(c)) return { error: 'That comment is not hidden.', status: 409, code: 'not_hidden' };
+    row.hide = 0; row.notApproved = false;
+  } else if (action === 'keep') {
+    row.flagged = 0; row.hide = 0;
   } else if (action === 'remove') {
-    await io.update(T.comments, { ROWID: String(c.ROWID), isArchived: true });
-    /* The count on the post is kept by the API; take this one off it so the app does not show a number that is too high. */
-    const post = await io.getRow(T.noahGram, c.componentId);
-    if (post) await io.update(T.noahGram, { ROWID: String(post.ROWID), comments: Math.max(0, (Number(post.comments) || 0) - 1) });
+    row.isArchived = true; row.archivedOn = nowUtc();
   } else {
-    return { error: 'Choose remove, hide or show.', status: 400, code: 'bad_action' };
+    return { error: 'Choose keep, hide, show or remove.', status: 400, code: 'bad_action' };
+  }
+  await io.update(T.comments, row);
+
+  if (action === 'remove') {
+    /* The count on the parent is kept by the API; take this one off it so the app does not show a number that is too high. */
+    const parentTable = Number(c.component) === MANNA ? MANNA_TABLE : T.noahGram;
+    const parent = await io.getRow(parentTable, c.componentId);
+    if (parent) await io.update(parentTable, { ROWID: String(parent.ROWID), comments: Math.max(0, (Number(parent.comments) || 0) - 1) });
   }
   forgetNoahgram();
-  return { ok: true, postId: String(c.componentId), text: text(c.content).slice(0, 200) };
+  return { ok: true, postId: String(c.componentId), component: Number(c.component), text: text(c.content).slice(0, 200) };
+}
+
+/* ---------- reported comments ---------- */
+
+/**
+ * Comments members have reported (flagged above 0) and the office has not removed, most reported first. Manna and Noahgram together,
+ * each with where it is, who wrote it, and its replies (hiding a first-level comment does not hide its replies in the table).
+ */
+export async function reportedComments() {
+  const [rows, map] = await Promise.all([io.getRows(T.comments), nameMap()]);
+  const live = rows.filter((c) => !asBool(c.isArchived));
+  const reported = live.filter((c) => Number(c.flagged) > 0 && [MANNA, POST].includes(Number(c.component)));
+
+  /* Where each one is: one read per distinct Manna or post. */
+  const titles = new Map();
+  for (const c of reported) {
+    const key = c.component + ':' + c.componentId;
+    if (titles.has(key)) continue;
+    const parent = await io.getRow(Number(c.component) === MANNA ? MANNA_TABLE : T.noahGram, c.componentId).catch(() => null);
+    titles.set(key, parent ? (Number(c.component) === MANNA ? text(parent.title) : text(parent.caption)).slice(0, 120) : '');
+  }
+
+  return reported
+    .map((c) => {
+      const replies = live
+        .filter((r) => text(r.parentId) && String(r.parentId) === String(c.ROWID))
+        .map((r) => ({ id: String(r.ROWID), author: whoWrote(map, r), text: text(r.content), hidden: hiddenNow(r), at: asUtc(r.createdOn) || asDate(r.CREATEDTIME) }))
+        .sort((a, b) => (+(a.at ?? 0)) - (+(b.at ?? 0)));
+      return {
+        id: String(c.ROWID),
+        kind: Number(c.component) === MANNA ? 'manna' : 'noahgram',
+        where: { id: String(c.componentId), title: titles.get(c.component + ':' + c.componentId) || '' },
+        author: whoWrote(map, c),
+        text: text(c.content),
+        reports: Number(c.flagged) || 0,
+        hidden: hiddenNow(c),
+        isReply: !!text(c.parentId) && text(c.parentId) !== '0',
+        replies,
+        at: asUtc(c.createdOn) || asDate(c.CREATEDTIME),
+      };
+    })
+    .sort((a, b) => b.reports - a.reports || (+(b.at ?? 0)) - (+(a.at ?? 0)));
+}
+
+/* The badge asks on every page load: how many, and the oldest, from a short cache. A decision clears it. */
+let reportedCount = null;
+let reportedAt = 0;
+export async function cachedReported() {
+  if (reportedCount && Date.now() - reportedAt < 30_000) return reportedCount;
+  const rows = await reportedComments();
+  reportedCount = rows.map((r) => ({ at: r.at }));
+  reportedAt = Date.now();
+  return reportedCount;
 }

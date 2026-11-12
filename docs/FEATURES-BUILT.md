@@ -60,6 +60,33 @@ Membership and a row in Work queues count the waiting ones.
 
 ---
 
+## 2c. Reported comments, education details, WhatsApp number, Tamil
+
+Brief: `FOR-CONSOLE-REPORTS-AND-EDUCATION.md`.
+
+**Reported comments** (Community > **Reported comments**, `community.moderate`). Members can report a comment on the Daily Manna or on
+Noahgram (`comments` rows, `component` 1 or 2). One member reports one comment once; at three the app hides it for everybody (`hide` = 1)
+and tells no one. The screen lists every comment with `flagged` above 0 that is not removed, most reported first, with where it is (the
+Manna title or the post's caption), who wrote it, and its replies shown together. Three decisions:
+- **Keep it**: reported unfairly. `flagged` = 0 and `hide` = 0, so it shows again.
+- **Hide it**: `hide` = 1. Out of sight, not removed.
+- **Remove it**: `isArchived` = true, `archivedOn` = now, and the Manna's or post's `comments` count goes down by one (never below 0).
+The Work queues row and the Community badge count what is reported. Under **Media > Noahgram**, a post's comments carry the same
+"Reported N times" mark, and their Hide and Show now use the API's `hide` column too. Every decision is in the audit log.
+`server/noahgram.js` (`reportedComments`, `moderateComment`), `server/routes/reported.js`, `src/modules/community/Reported.tsx`.
+
+**Education details.** The app sends `education` change requests: one line per qualification, 10th and 12th with school, marks and year
+after a dash. The request list shows the old and new text with its line breaks (Now / Asked for), the member page has an Education row,
+and the office can edit it by hand in a text box that keeps the line breaks. The limit is 2,000 characters (the column holds 10,000);
+it was 255, which the app's own entries could exceed. `server/member-fields.js`, `server/change-fields.js`.
+
+**WhatsApp number.** The app's second phone is now the WhatsApp number (still `phone2`). Change requests label it so. The removed
+fields (second email, landline, communication language) can still be edited by hand.
+
+**Tamil** is `contentLanguage` 6, which is what the content forms already use. Nothing to change.
+
+---
+
 ## 2b. Archive, restore and delete a member for good
 
 **What.** Two steps, so a slip can be undone. On a member's page (Member register, or Approved and history):

@@ -1184,6 +1184,68 @@ check('a member who may sign in to this console cannot be deleted', await (async
   return r.status === 409 && r.body?.code === 'console_access';
 })());
 
+section('Reported comments (Daily Manna and Noahgram)');
+
+/* dev-offline.mjs: a Manna comment reported 3 times (hidden by the API) with a reply, a Noahgram comment reported once, one with no
+   reports, and one already removed. */
+const RC = { manna: '27145000000184001', cManna: '27145000000185001', cMannaReply: '27145000000185002', cPost: '27145000000185003', cClean: '27145000000185004', cRemoved: '27145000000185005' };
+const repList = await call('GET', '/reported-comments', null, BT);
+const repRows = repList.body?.rows || [];
+check('reported comments are listed, the most reported first', repList.status === 200 && repRows.map((r) => r.id).join() === [RC.cManna, RC.cPost].join(), `${repList.status} ${repRows.map((r) => r.id)} ${repList.text.slice(0, 120)}`);
+check('...none with no reports, and none already removed', !repRows.some((r) => [RC.cClean, RC.cRemoved, RC.cMannaReply].includes(r.id)));
+check('...a Manna comment says it is on a Daily Manna, with its title', repRows[0]?.kind === 'manna' && repRows[0]?.where?.title === 'Faith that moves mountains' && repRows[0]?.reports === 3, JSON.stringify(repRows[0]?.where));
+check('...a Noahgram comment says so, with the post caption', repRows[1]?.kind === 'noahgram' && /Christmas carol/.test(repRows[1]?.where?.title || ''));
+check('...one the API hid is marked hidden, one it did not is not', repRows[0]?.hidden === true && repRows[1]?.hidden === false);
+check('...with its replies shown together', repRows[0]?.replies?.length === 1 && repRows[0].replies[0].text === 'Please be kind.' && repRows[0].replies[0].author.name === 'Anand Rao', JSON.stringify(repRows[0]?.replies));
+check('...and who wrote it, by name', repRows[0]?.author?.name === 'Old Member', repRows[0]?.author?.name);
+check('the work queue counts them', await queueCount('flags') === 2, String(await queueCount('flags')));
+check('listing needs permission to moderate (403)', (await call('GET', '/reported-comments', null, verifier.token)).status === 403);
+check('...and a sign-in (401)', (await call('GET', '/reported-comments')).status === 401);
+check('deciding needs permission too (403)', (await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'keep' }, verifier.token)).status === 403);
+check('an action that does not exist is refused (400)', (await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'delete' }, BT)).status === 400);
+check('a comment that does not exist is refused (404)', (await call('POST', '/reported-comments/27145000000999999/decide', { action: 'keep' }, BT)).status === 404);
+
+check('under a Noahgram post the comment shows how often it was reported', (await call('GET', '/noahgram/posts/27145000000181004/comments', null, BT)).body?.rows?.find((c) => c.id === RC.cPost)?.reports === 1);
+const hid = await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'hide' }, BT);
+check('a reported comment can be hidden without removing it', hid.status === 200 && (await call('GET', '/reported-comments', null, BT)).body?.rows?.find((r) => r.id === RC.cPost)?.hidden === true, `${hid.status} ${hid.text.slice(0, 100)}`);
+check('hiding it again is refused (409)', (await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'hide' }, BT)).status === 409);
+
+const keep = await call('POST', `/reported-comments/${RC.cManna}/decide`, { action: 'keep' }, BT);
+check('a comment reported unfairly can be kept: the reports are cleared and it shows again', keep.status === 200
+  && !(await call('GET', '/reported-comments', null, BT)).body?.rows?.some((r) => r.id === RC.cManna), `${keep.status} ${keep.text.slice(0, 100)}`);
+check('...it is no longer listed, and its replies were never touched', (await call('GET', '/reported-comments', null, BT)).body?.rows?.length === 1);
+
+const rem = await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'remove' }, BT);
+check('a reported comment can be removed', rem.status === 200 && (await call('GET', '/reported-comments', null, BT)).body?.rows?.length === 0, `${rem.status} ${rem.text.slice(0, 100)}`);
+check('removing it again is refused (409)', (await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'remove' }, BT)).status === 409);
+check('...nothing is waiting, and the work queue says so', await queueCount('flags') === 0, String(await queueCount('flags')));
+
+/* Removing a Manna comment lowers the Daily Manna's count. Report one by the fake, then remove it. */
+await hook('/patch', { table: 'comments', rowId: RC.cClean, set: { flagged: 2 } });
+const mannaRemove = await call('POST', `/reported-comments/${RC.cClean}/decide`, { action: 'remove' }, BT);
+check('a Daily Manna comment can be removed too', mannaRemove.status === 200, `${mannaRemove.status} ${mannaRemove.text.slice(0, 100)}`);
+
+const repAud = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || [];
+check('keeping, hiding and removing are in the audit log', ['Kept a reported comment', 'Hid a reported comment', 'Removed a reported comment'].every((a) => repAud.some((x) => x.action === a)));
+
+section('Education details and other My information changes');
+
+const EDU = "10th (SSC) — School: St Mary's High School; Marks: 85%; Academic year: 2008-09\n12th (HSC) — School: Holy Cross College; Marks: 425/500; Academic year: 2010-11\nBachelor's degree";
+await hook('/insert', { table: 'appChangeRequests', rows: [{ ROWID: '27145000000193001', memberRowId: ANAND_ID, fieldId: 'education', oldValue: '', newValue: EDU, status: 'pending', CREATEDTIME: '2026-11-10 10:00:00:000' }] });
+const eduList = await call('GET', '/change-requests?status=pending', null, BT);
+const eduReq = (eduList.body?.rows || []).find((r) => r.id === '27145000000193001');
+check('an education request is listed, known, and its line breaks are kept', eduReq?.fieldLabel === 'Education' && eduReq?.known === true && eduReq?.newValue === EDU, JSON.stringify(eduReq));
+const eduOk = await call('POST', '/change-requests/27145000000193001/decide', { approve: true }, BT);
+check('...it can be approved', eduOk.status === 200 && eduOk.body?.ok === true, `${eduOk.status} ${eduOk.text.slice(0, 160)}`);
+const eduMember = (await call('GET', `/people/${ANAND_ID}`, null, BT)).body;
+check('...and the member page shows it with its three lines', eduMember?.member?.education === EDU && eduMember.member.education.split('\n').length === 3, JSON.stringify(eduMember?.member?.education));
+check('the edit form offers it as a long text', (eduMember?.edit?.fields || []).find((f) => f.key === 'educationDetail')?.multiline === true && (eduMember?.edit?.fields || []).find((f) => f.key === 'educationDetail')?.max === 2000);
+const eduEdit = await call('PATCH', `/people/${ANAND_ID}`, { changes: { educationDetail: 'Diploma\nMaster\'s degree' } }, BT);
+check('the office can edit it by hand, keeping its line breaks', eduEdit.status === 200 && (await call('GET', `/people/${ANAND_ID}`, null, BT)).body?.member?.education === "Diploma\nMaster's degree", `${eduEdit.status} ${eduEdit.text.slice(0, 160)}`);
+check('...but not past 2000 characters (422)', [400, 422].includes((await call('PATCH', `/people/${ANAND_ID}`, { changes: { educationDetail: 'x'.repeat(2001) } }, BT)).status));
+check('...and not with control characters (422)', [400, 422].includes((await call('PATCH', `/people/${ANAND_ID}`, { changes: { educationDetail: 'a\u0007b' } }, BT)).status));
+check('a single-line field still refuses a line break', [400, 422].includes((await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'An\nand' } }, BT)).status));
+
 section('Who looks after a member: pastor and cell leader');
 
 const withChoices = await call('GET', `/people/${ANAND_ID}`, null, BT);

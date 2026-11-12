@@ -133,6 +133,17 @@ tables[T.comments].push(
   { ROWID: GRAM.cReply, component: 2, componentId: GRAM.live, memberId: M.approved, parentId: GRAM.cMember, content: 'Thank you.', isArchived: false, notApproved: false, CREATEDTIME: istStamp(19 * HOUR) },
   { ROWID: GRAM.cGone, component: 2, componentId: GRAM.live, memberId: M.office, parentId: '', content: 'A comment already removed.', isArchived: true, notApproved: false, CREATEDTIME: istStamp(25 * HOUR) },
 );
+/* Reported comments (FOR-CONSOLE-REPORTS-AND-EDUCATION.md): one on a Daily Manna reported by three members (so the API has hidden it),
+   with a reply, and one on the office's Noahgram post reported once. A comment with no reports, and one already removed, are not listed. */
+const REPORTED = { manna: '27145000000184001', cManna: '27145000000185001', cMannaReply: '27145000000185002', cPost: '27145000000185003', cClean: '27145000000185004', cRemoved: '27145000000185005' };
+(tables['tbl:dailyMana'] ||= []).push({ ROWID: REPORTED.manna, title: 'Faith that moves mountains', comments: 3 });
+tables[T.comments].push(
+  { ROWID: REPORTED.cManna, component: 1, componentId: REPORTED.manna, memberId: M.office, parentId: '', content: 'A rude comment under the Manna.', flagged: 3, hide: 1, isArchived: false, notApproved: false, createdOn: new Date(Date.now() - 30 * HOUR).toISOString().slice(0, 19).replace('T', ' '), CREATEDTIME: istStamp(30 * HOUR) },
+  { ROWID: REPORTED.cMannaReply, component: 1, componentId: REPORTED.manna, memberId: M.approved, parentId: REPORTED.cManna, content: 'Please be kind.', flagged: 0, hide: 0, isArchived: false, notApproved: false, createdOn: new Date(Date.now() - 29 * HOUR).toISOString().slice(0, 19).replace('T', ' '), CREATEDTIME: istStamp(29 * HOUR) },
+  { ROWID: REPORTED.cPost, component: 2, componentId: GRAM.office, memberId: M.approved, parentId: '', content: 'Buy cheap watches here.', flagged: 1, hide: 0, isArchived: false, notApproved: false, createdOn: new Date(Date.now() - 6 * HOUR).toISOString().slice(0, 19).replace('T', ' '), CREATEDTIME: istStamp(6 * HOUR) },
+  { ROWID: REPORTED.cClean, component: 1, componentId: REPORTED.manna, memberId: M.office, parentId: '', content: 'Thank you for this word.', flagged: 0, hide: 0, isArchived: false, notApproved: false, CREATEDTIME: istStamp(10 * HOUR) },
+  { ROWID: REPORTED.cRemoved, component: 1, componentId: REPORTED.manna, memberId: M.office, parentId: '', content: 'Already removed.', flagged: 4, hide: 1, isArchived: true, notApproved: false, CREATEDTIME: istStamp(40 * HOUR) },
+);
 /* Who the fake Noah API has told about a Noahgram decision. */
 const gramTold = [];
 

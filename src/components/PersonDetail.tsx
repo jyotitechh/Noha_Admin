@@ -36,7 +36,7 @@ interface Profile {
   member: {
     id: string; rowId: string; name: string; status: string; approved?: boolean; blocked?: boolean;
     g?: string; age?: number; kid?: boolean; lang?: string; mobile?: string; email?: string;
-    address?: string; loc?: string; joined?: Date | null; partner?: boolean; masked?: boolean; archived?: boolean; isAdmin?: boolean;
+    address?: string; loc?: string; joined?: Date | null; partner?: boolean; masked?: boolean; archived?: boolean; isAdmin?: boolean; education?: string;
   };
   /* Present only for someone who may edit members. */
   edit?: EditSpec;
@@ -282,6 +282,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           ['Email', (contact?.email ?? member.email) || '—'],
           ['Age and gender', member.age ? `${member.age} · ${member.g === 'F' ? 'Female' : 'Male'}` : '—'],
           ['Language', member.lang || '—'],
+          ['Education', member.education ? <span key="e" style={{ whiteSpace: 'pre-line' }}>{member.education}</span> : '—'],
           ['Congregation', member.loc || '—'],
           ['Address', (contact?.address ?? member.address) || '—'],
           ['Member since', member.joined ? fd(member.joined) : '—'],

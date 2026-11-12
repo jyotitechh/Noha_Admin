@@ -26,7 +26,7 @@ interface Post {
   media: { src: MediaRef | null; still: MediaRef | null };
   at: Date | null; likes: number; comments: number; views: number; pinned: boolean;
 }
-interface Comment { id: string; parentId: string | null; author: { id: string; name: string }; text: string; hidden: boolean; at: Date | null }
+interface Comment { id: string; parentId: string | null; author: { id: string; name: string }; text: string; hidden: boolean; reports?: number; at: Date | null }
 type Show = 'pending' | 'live';
 
 const REASONS = [
@@ -325,7 +325,7 @@ export default function Noahgram() {
                       <li key={c.id} style={{ alignItems: 'flex-start', paddingLeft: c.parentId ? 28 : undefined }}>
                         <span className="grow" style={{ minWidth: 0 }}>
                           <span className="t1" style={{ display: 'block' }}>
-                            {c.author.name} {c.parentId && <Chip tone="plain">Reply</Chip>} {c.hidden && <Chip tone="mute" icon="eye-off">Hidden</Chip>}
+                            {c.author.name} {c.parentId && <Chip tone="plain">Reply</Chip>} {c.hidden && <Chip tone="mute" icon="eye-off">Hidden</Chip>} {(c.reports ?? 0) > 0 && <Chip tone="warn" icon="flag">Reported {c.reports}×</Chip>}
                           </span>
                           <span className="t2" style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{c.text}</span>
                           <span className="t2" style={{ display: 'block' }}>{since(c.at)}</span>

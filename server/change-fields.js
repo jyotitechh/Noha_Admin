@@ -41,14 +41,14 @@ const empty = (raw) => raw === null || raw === undefined || String(raw).trim() =
 const bad = (message, code = 'invalid_value') => ({ error: message, code });
 
 /** One column, one text value. */
-function text(column, label, max, { required = false, contact = false } = {}) {
+function text(column, label, max, { required = false, contact = false, multiline = false } = {}) {
   return {
     label, contact,
     apply(raw) {
       if (empty(raw)) return required ? bad(`${label} cannot be empty.`) : one(column, label, null);
-      const s = String(raw).trim();
+      const s = multiline ? String(raw).trim().replace(/\r\n?/g, '\n') : String(raw).trim();
       if (s.length > max) return bad(`${label} is longer than ${max} characters.`);
-      if (/[\u0000-\u001f]/.test(s)) return bad(`${label} has characters that cannot be stored.`);
+      if ((multiline ? /[\u0000-\u0009\u000b-\u001f]/ : /[\u0000-\u001f]/).test(s)) return bad(`${label} has characters that cannot be stored.`);
       return one(column, label, s);
     },
   };
@@ -267,7 +267,8 @@ export const CHANGE_FIELDS = {
 
   occupation: text('occupation', 'Designation', 255),
   employed: text('employedIn', 'Organisation name', 255),
-  education: text('educationDetail', 'Education', 255),
+  /* One line per qualification; 10th and 12th carry school, marks and year after a dash. The API writes it; this is the fallback path. */
+  education: text('educationDetail', 'Education', 2000, { multiline: true }),
   income: whole('annualIncome', 'Annual income'),
 
   mother_tongue: text('motherTongue', 'Mother tongue', 255),
@@ -294,7 +295,7 @@ export const CHANGE_FIELDS = {
     label: 'Mobile number', contact: true,
     blocked: 'This is the number the member signs in with. Changing it here would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number. Change it by hand in `users` and `members`, then turn the request down with a note such as “Changed”.',
   },
-  phone2: phone('mobileNumber2', 'mobileNumber2CountryCode', 'Second mobile number'),
+  phone2: phone('mobileNumber2', 'mobileNumber2CountryCode', 'WhatsApp number'),
   landline: phone('landlineNumber', 'landlineCountryCode', 'Landline'),
 
   reference: reference('name', 'Reference name'),

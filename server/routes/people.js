@@ -64,8 +64,8 @@ function shape(p, role) {
   if (p.editable && can(role, 'members.edit') && live() && isNoah()) {
     const canContact = can(role, 'members.pii');
     out.edit = {
-      fields: MEMBER_FIELDS.map(({ key, label, group, kind, max, required, contact }) =>
-        ({ key, label, group, kind, max, required: !!required, contact: !!contact, locked: !!contact && !canContact })),
+      fields: MEMBER_FIELDS.map(({ key, label, group, kind, max, required, contact, multiline }) =>
+        ({ key, label, group, kind, max, required: !!required, contact: !!contact, locked: !!contact && !canContact, multiline: !!multiline })),
       values: Object.fromEntries(MEMBER_FIELDS.filter((f) => !f.contact).map((f) => [f.key, p.editable[f.key]])),
     };
   }
