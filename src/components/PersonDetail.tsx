@@ -72,9 +72,7 @@ const optionText = (o: Leader) => [
 ].filter(Boolean).join(' · ');
 
 const Missing = ({ why }: { why?: string }) => (
-  <Note tone="mute" icon="info">
-    <b>Not recorded yet.</b> {why}
-  </Note>
+  <p className="muted small">Not recorded yet.{why ? ` ${why}` : ''}</p>
 );
 
 /* `onChanged` is called after the office edits the person, so the list this is
@@ -358,7 +356,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
             {registration.remark && (
               <Note tone={registration.state === 'approved' ? 'mute' : 'warn'} icon="chats">
                 <b>
-                  {registration.state === 'approved' ? 'Note' : 'What the member was told'}
+                  {registration.state === 'approved' ? 'Note' : 'Reason given'}
                   {registration.decidedAt ? ` · ${fdt(registration.decidedAt)}` : ''}
                   {registration.decidedBy ? ` · ${registration.decidedBy}` : ''}
                 </b>
@@ -371,21 +369,13 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
             {registration.state !== 'pending' && registration.state !== 'draft' && can('members.edit') && (
               <div className="mt8">
                 <Btn icon="bell" disabled={telling} onClick={tell}>{telling ? 'Telling them…' : 'Tell the member'}</Btn>
-                <span className="xs muted" style={{ marginLeft: 8 }}>
-                  Sends the push notification for this decision (an email if no phone can be reached). Each member is told once.
-                </span>
               </div>
             )}
           </>
         ) : q.data.registrationHidden ? (
-          <Note tone="mute" icon="lock">
-            This person registered through the app. Reading the registration, with the ID and video,
-            needs the permission to edit members.
-          </Note>
+          <p className="muted small">The registration is hidden for your role.</p>
         ) : (
-          <Note tone="mute" icon="info">
-            No app registration on record. They were added by the office.
-          </Note>
+          <p className="muted small">No app registration.</p>
         )}
 
         {q.data.earlier.length > 0 && (
@@ -507,9 +497,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
             {!relPick && relSearch === 'searching' && <span className="xs muted">Searching…</span>}
             {!relPick && relSearch === 'error' && <Note tone="bad" icon="alert">The search did not work: {relError}</Note>}
             {!relPick && relSearch === 'done' && relResults.length === 0 && (
-              <Note tone="mute" icon="info">
-                No member found called “{relQ.trim()}”. Only people who are on the member register can be added.
-              </Note>
+              <p className="muted small">No member found.</p>
             )}
             {!relPick && relSearch === 'done' && relResults.length > 0 && (
               <ul className="list">

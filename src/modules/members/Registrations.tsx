@@ -410,9 +410,9 @@ export default function Registrations() {
             </>
           ) : open ? (
             <span className="muted small">
-              {open.state === 'draft' && 'They have not submitted yet, so there is nothing to decide.'}
-              {open.state === 'rejected' && `Rejected ${open.decidedAt ? fdt(open.decidedAt) : ''}. A decision can only be made once.`}
-              {open.state === 'videoReturned' && 'Waiting for them to record the video again. It comes back here when they do.'}
+              {open.state === 'draft' && 'Not submitted yet.'}
+              {open.state === 'rejected' && `Rejected ${open.decidedAt ? fdt(open.decidedAt) : ''}.`}
+              {open.state === 'videoReturned' && 'Waiting for a new video.'}
             </span>
           ) : null
         }
@@ -424,8 +424,6 @@ export default function Registrations() {
                 <Note tone="bad" icon="x">
                   <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}.</b>
                   <br />“{open.remark}”
-                  <br />
-                  <span className="small">The member was shown this reason.</span>
                 </Note>
               </div>
             )}
@@ -435,8 +433,6 @@ export default function Registrations() {
                 <Note tone="warn" icon="video">
                   <b>The video went back to them on {open.decidedAt ? fd(open.decidedAt) : ''}.</b>
                   <br />“{open.remark}”
-                  <br />
-                  <span className="small">They are re-recording step six in the app. It will come back here when they submit.</span>
                 </Note>
               </div>
             )}
@@ -482,22 +478,11 @@ export default function Registrations() {
           <>
             <p className="mt0">
               {onCatalyst ? (
-                <>
-                  <b>{open.fullName}</b> is approved and the Noah app opens for them
-                  immediately. They are emailed to say so.
-                </>
+                <>Approve <b>{open.fullName}</b>? They are notified and the app opens for them.</>
               ) : (
-                <>
-                  <b>{open.fullName}</b> becomes a member of the <b>{loc}</b> congregation.
-                  The Noah app opens for them immediately.
-                </>
+                <>Approve <b>{open.fullName}</b> as a member of <b>{loc}</b>? The app opens for them.</>
               )}
             </p>
-            <Note tone="mute" icon="info">
-              Their ID, photograph, signed declaration and KYC video stay on the
-              record. You cannot undo this from here — a member is archived
-              rather than deleted.
-            </Note>
           </>
         )}
       </Confirm>
@@ -507,7 +492,7 @@ export default function Registrations() {
         open={rejecting}
         onClose={() => { setRejecting(false); setRemark(''); }}
         title="Reject this registration"
-        sub={open ? `${open.fullName} will be told why` : ''}
+        sub={open ? open.fullName : ''}
         footer={
           <>
             <span className="sp" style={{ flex: 1 }} />
@@ -518,13 +503,8 @@ export default function Registrations() {
           </>
         }
       >
-        <Note tone="warn" icon="alert">
-          A registration can be decided once. After this the member cannot be
-          approved from here, so if the problem is only the video, return the
-          video instead.
-        </Note>
-        <div className="mt16">
-          <Field label="Why is it being rejected?" hint="Required. The member sees these words, in the email and in the app.">
+        <div>
+          <Field label="Reason" hint="The member sees this. A rejection is final.">
             <textarea
               className="ta"
               rows={4}
@@ -542,7 +522,7 @@ export default function Registrations() {
         open={returning}
         onClose={() => { setReturning(false); setRemark(''); }}
         title="Return the video"
-        sub={open ? `${open.fullName} will record step six again` : ''}
+        sub={open ? open.fullName : ''}
         footer={
           <>
             <span className="sp" style={{ flex: 1 }} />
@@ -553,12 +533,8 @@ export default function Registrations() {
           </>
         }
       >
-        <Note tone="warn" icon="alert">
-          The member reads this on their waiting screen, so write it to them,
-          plainly, and say what to do differently.
-        </Note>
-        <div className="mt16">
-          <Field label="Why is it going back?" hint="Required. They see these words.">
+        <div>
+          <Field label="Reason" hint="The member sees this and records the video again.">
             <textarea
               className="ta"
               rows={4}
@@ -570,7 +546,6 @@ export default function Registrations() {
           </Field>
         </div>
         <div className="mt16">
-          <div className="sect-title">Common reasons</div>
           <div className="row wrap gap6">
             {[
               'The video is too dark to match your photograph. Please record it again in daylight.',

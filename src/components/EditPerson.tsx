@@ -109,10 +109,7 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
       }
     >
       <div className="stack">
-        <Note tone="mute" icon="info">
-          The mobile number is the member's login, and ID numbers are identity records, so neither can be changed here.
-        </Note>
-
+        <p className="muted small" style={{ margin: 0 }}>The mobile number and ID numbers cannot be changed here.</p>
         {groups.map((g) => (
           <section key={g.name}>
             <div className="sect-title">{g.name}</div>

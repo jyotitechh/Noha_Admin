@@ -14,7 +14,7 @@ import { useQuery } from '@/lib/useQuery';
 import { useQueues } from '@/state/queues';
 import { useToast, Drawer } from '@/components/layers';
 import { Table, type Column } from '@/components/Table';
-import { Btn, Chip, Field, Kpi, Kpis, Note, Age, Failed, Loading, Empty } from '@/components/ui';
+import { Btn, Chip, Field, Kpi, Kpis, Age, Failed, Loading, Empty } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
 
 export interface DecisionRow {
@@ -235,11 +235,8 @@ export function DecisionQueue<T extends DecisionRow>({
 
             {rejecting && (
               <div className="mt20">
-                <Note tone="warn" icon="alert">
-                  The member reads this. Say what was wrong, plainly.
-                </Note>
-                <div className="mt12">
-                  <Field label="Why?" hint={reasonRequired ? 'Required.' : 'Optional.'}>
+                <div>
+                  <Field label="Why?" hint={`${reasonRequired ? 'Required' : 'Optional'}. The member sees this.`}>
                     <textarea className="ta" rows={3} value={remark} autoFocus onChange={(e) => setRemark(e.target.value)} />
                   </Field>
                 </div>

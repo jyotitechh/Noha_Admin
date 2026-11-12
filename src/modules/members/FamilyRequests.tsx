@@ -275,11 +275,10 @@ export default function FamilyRequests() {
                 <div className="sect-title">Their account</div>
                 {open.existingMemberName ? (
                   <>
-                    <Who name={open.existingMemberName} sub="The member this number belongs to" photoId={open.existingMemberId} />
-                    <div className="mt8"><Note tone="ok" icon="check">The number matches <b>{open.existingMemberName}</b>, an existing member.</Note></div>
+                    <Who name={open.existingMemberName} sub="Existing member" photoId={open.existingMemberId} />
                   </>
                 ) : (
-                  <Note tone="mute" icon="clock">No member has that number: they have not joined yet.</Note>
+                  <Note tone="mute" icon="clock">Not joined yet. They are linked when they join.</Note>
                 )}
 
                 {open.state === 'Pending' && !rejecting && (
@@ -290,7 +289,7 @@ export default function FamilyRequests() {
                         <button className="btn sm" onClick={() => { setRelPick(null); setRelQ(''); }}>Undo</button>
                       </Note>
                     ) : picking ? (
-                      <Field label="Link a different member" hint="Use this when the number typed is not the one they joined with.">
+                      <Field label="Link a different member">
                         <input className="inp" autoFocus placeholder="Type at least two letters of their name" value={relQ}
                           onChange={(e) => setRelQ(e.target.value)} />
                         {relResults.length > 0 && (
@@ -321,9 +320,8 @@ export default function FamilyRequests() {
 
             {rejecting && (
               <div className="mt20">
-                <Note tone="warn" icon="alert">The member reads this. Say what was wrong, so they can ask again.</Note>
-                <div className="mt12">
-                  <Field label="Why is it being rejected?" hint="Required.">
+                <div>
+                  <Field label="Reason" hint="The member sees this.">
                     <textarea className="ta" rows={3} value={remark} autoFocus placeholder={REASONS[0]}
                       onChange={(e) => setRemark(e.target.value)} />
                   </Field>

@@ -10,7 +10,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/state/auth';
 import { useQueues } from '@/state/queues';
 import { Card, Kpi, Kpis, Icon, Failed, Loading, Age, Who, Empty, Note } from '@/components/ui';
-import { inrS, num, since, flong, pct } from '@/lib/format';
+import { inrS, num, since, pct } from '@/lib/format';
 import type { AuditEntry } from '@/lib/types';
 
 interface DashCard { id: string; label: string; value: number; icon: string; to: string; sub?: string; money?: boolean; tone?: 'warn' | 'bad' }
@@ -43,10 +43,7 @@ export default function Dashboard() {
   return (
     <div className="stack">
       <Note tone="mute" icon="info">
-        Good morning, {user?.name.split(' ')[0]}. It is {flong(d.asOf)}.
-        {total > 0
-          ? <> You have <b>{total}</b> {total === 1 ? 'item' : 'items'} waiting across {mine.length} {mine.length === 1 ? 'queue' : 'queues'}.</>
-          : <> Nothing is waiting for you.</>}
+        Good morning, {user?.name.split(' ')[0]}. {total > 0 ? <><b>{total}</b> {total === 1 ? 'item is' : 'items are'} waiting.</> : 'Nothing is waiting.'}
       </Note>
 
       <Kpis>

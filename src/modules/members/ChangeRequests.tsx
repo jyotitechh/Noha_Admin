@@ -94,9 +94,6 @@ export default function ChangeRequests() {
 
   return (
     <div className="stack">
-      {q.data && q.data.via !== 'api' && (
-        <Note tone="warn" icon="alert">Members are not notified of decisions made here at the moment.</Note>
-      )}
       <div className="row wrap gap8">
         <Seg<Show>
           value={show}
