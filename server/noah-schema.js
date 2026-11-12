@@ -1623,6 +1623,14 @@ export async function removeRelation(memberRowId, otherRowId) {
   clearCache();
 }
 
+/** The files row id of a member's profile photograph, or null. Read from the one member row, so the family screens can show a face
+    without loading the whole register. */
+export async function memberPhotoFileId(memberRowId) {
+  const m = await io.getRow(T.members, memberRowId);
+  const id = String(m?.photo ?? '').trim();
+  return /^\d{6,}$/.test(id) ? id : null;
+}
+
 /** Members whose name matches `q`, to pick a relative from. Name and place only: nothing private. */
 export async function relationCandidates(memberRowId, q) {
   const { members } = await snapshot();

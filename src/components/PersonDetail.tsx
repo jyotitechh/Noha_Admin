@@ -21,6 +21,7 @@ import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
 import { useToast } from '@/components/layers';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
+import { MemberPhoto } from '@/components/MemberPhoto';
 import { fd, fdt } from '@/lib/format';
 import { Steps } from '@/modules/members/Registrations';
 import { EditPerson, type EditSpec } from '@/components/EditPerson';
@@ -381,6 +382,8 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
           <ul className="list">
             {family.rows.map((f) => (
               <li key={f.rowId}>
+                {/* A member shows their own photograph; a child has no account, so initials. */}
+                <MemberPhoto id={f.member && !f.kid ? f.rowId : null} name={f.name} />
                 <span className="grow">
                   <span className="t1">{f.name}</span>
                   <span className="t2">{[f.rel, f.age ? `${f.age} years` : '', f.kid ? 'child' : ''].filter(Boolean).join(' · ')}</span>
@@ -426,6 +429,7 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
                   return (
                     <li key={c.rowId} className="click"
                       onClick={() => { setRelPick(c); setRelQ(c.name); setRelResults([]); setRelChange(already); }}>
+                      <MemberPhoto id={c.rowId} name={c.name} />
                       <span className="grow">
                         <span className="t1">{c.name}</span>
                         <span className="t2">{already ? 'Already in this family. Choose to change the relation.' : (c.where || 'No address on record')}</span>

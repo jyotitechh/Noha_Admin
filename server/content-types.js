@@ -52,7 +52,7 @@ const published = (key = 'published', label = 'Published', store) =>
 const when = (key, label, extra = {}) => ({ key, label, kind: 'date', store: 'datetime', ...extra });
 const rich = (key, label, extra = {}) => ({ key, label, kind: 'richtext', ...extra });
 const writer = { key: 'writerId', label: 'Writer', kind: 'member', hint: 'The member credited as the author.' };
-const membersOnly = { key: 'visibleTo', label: 'Members only', kind: 'toggle', hint: 'Off means everyone can see it.' };
+const membersOnly = { key: 'visibleTo', label: 'Partners only', kind: 'toggle', hint: 'Off means everyone can see it.' };
 /* embed01 to embed20: extra media (links or embed code) the app shows with the text. */
 const embeds = () => Array.from({ length: 20 }, (_, i) => {
   const n = String(i + 1).padStart(2, '0');

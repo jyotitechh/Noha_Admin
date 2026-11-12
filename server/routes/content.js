@@ -79,7 +79,12 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     express.raw({ type: () => true, limit: MAX_BYTES + 1024 }),
     async (req, res) => {
       try {
-        const saved = await storePicture(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0));
+        /* The picture arrives as raw bytes, or, from a browser whose first try was refused on the way (a gateway that only lets
+           JSON through), as { data: <base64> }. */
+        const bytes = Buffer.isBuffer(req.body) ? req.body
+          : typeof req.body?.data === 'string' ? Buffer.from(req.body.data, 'base64')
+          : Buffer.alloc(0);
+        const saved = await storePicture(bytes);
         await writeAudit({
           actor: req.user.name, role: roleById(req.session.role).name,
           action: 'Uploaded a picture', module: 'Content', record: saved.url,

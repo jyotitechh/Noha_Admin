@@ -124,7 +124,7 @@ HTML (section 2).
 | `prayer` | text | the closing prayer **or confession**, as HTML. `isConfession` says which |
 | `isConfession` | boolean | false means the closing is a prayer, true means a confession. Use it for the heading above `prayer` |
 | `writerId` | bigint | the `ROWID` of the member credited as the writer, in `members`. Empty when none |
-| `visibleTo` | boolean | true means members only, false means everyone |
+| `visibleTo` | boolean | true means partners only, false means everyone |
 | `numberOfWords` | int | word count of `content`, filled in by the console. Use it for the reading time |
 | `embed01` to `embed20` | text | extra media attached to the entry, see section 2 |
 | `categoryIds` | text | the `ROWID` of a row in `dailyMannaCategories` (empty when none) |
@@ -397,7 +397,7 @@ edit it in the admin console under **Content**.
 1. **How are embeds placed?** The console stores whatever is typed in
    `embed01` to `embed20`. The old app's rule for where each one appears in the
    text is not documented. Confirm it with whoever built the old app.
-1. **`visibleTo`.** The console treats it as "true means members only, false
+1. **`visibleTo`.** The console treats it as "true means partners only, false
    means everyone". Confirm that matches the old app.
 2. **Separate verse and reference?** Needed only if the design shows the
    scripture as its own card.

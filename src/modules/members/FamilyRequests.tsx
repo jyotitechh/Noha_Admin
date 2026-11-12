@@ -19,6 +19,7 @@ import { useToast, Drawer } from '@/components/layers';
 import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Field, Kpi, Kpis, Note, Age, Failed, Loading, Empty, Who } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
+import { MemberPhoto } from '@/components/MemberPhoto';
 
 type State = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
 
@@ -147,7 +148,7 @@ export default function FamilyRequests() {
     },
     {
       key: 'requester', label: 'Asked by',
-      cell: (r) => <Who name={r.requesterName || 'A member'} sub={<span className="mono">{r.requesterMobile}</span>} size="sm" />,
+      cell: (r) => <Who name={r.requesterName || 'A member'} sub={<span className="mono">{r.requesterMobile}</span>} size="sm" photoId={r.requesterId} />,
       sortBy: (r) => r.requesterName,
     },
     {
@@ -266,14 +267,17 @@ export default function FamilyRequests() {
 
             <div className="mt16">
               <div className="sect-title">Asked by</div>
-              <Who name={open.requesterName || 'A member'} sub={<span className="mono">{open.requesterMobile}</span>} />
+              <Who name={open.requesterName || 'A member'} sub={<span className="mono">{open.requesterMobile}</span>} photoId={open.requesterId} />
             </div>
 
             {!open.kid && (
               <div className="mt16">
                 <div className="sect-title">Their account</div>
                 {open.existingMemberName ? (
-                  <Note tone="ok" icon="check">The number matches <b>{open.existingMemberName}</b>, an existing member.</Note>
+                  <>
+                    <Who name={open.existingMemberName} sub="The member this number belongs to" photoId={open.existingMemberId} />
+                    <div className="mt8"><Note tone="ok" icon="check">The number matches <b>{open.existingMemberName}</b>, an existing member.</Note></div>
+                  </>
                 ) : (
                   <Note tone="mute" icon="clock">No member has that number: they have not joined yet.</Note>
                 )}
@@ -292,9 +296,10 @@ export default function FamilyRequests() {
                         {relResults.length > 0 && (
                           <div className="card mt8">
                             {relResults.map((c) => (
-                              <button key={c.rowId} className="btn sm" style={{ display: 'block', width: '100%', textAlign: 'left' }}
+                              <button key={c.rowId} className="btn sm row gap8" style={{ display: 'flex', width: '100%', textAlign: 'left', alignItems: 'center' }}
                                 onClick={() => { setRelPick(c); setRelResults([]); }}>
-                                {c.name} <span className="muted">· {c.where}</span>
+                                <MemberPhoto id={c.rowId} name={c.name} size="sm" />
+                                <span>{c.name} <span className="muted">· {c.where}</span></span>
                               </button>
                             ))}
                           </div>

@@ -14,6 +14,7 @@
    Catalyst functions, the filters move into ZCQL there and these functions
    keep their signatures. */
 
+import { withChecks } from './review-checks.js';
 import { getRows, insert, update, configured } from './catalyst.js';
 import { loadRegistrations, loadMembers, surveyTables, approveInNoah, returnVideoInNoah, rejectInNoah, canEnterApp, createRegistrationInNoah, patchRegistrationInNoah, loadPerson } from './noah-schema.js';
 import { db, audit as memAudit } from './db.js';
@@ -151,6 +152,10 @@ export async function markSignedIn(rowId) {
 /* ---------- registrations ---------- */
 
 export async function listRegistrations({ state, search } = {}) {
+  return (await listRegistrationsRaw({ state, search })).map(withChecks);
+}
+
+async function listRegistrationsRaw({ state, search } = {}) {
   if (!live()) {
     let rows = db.REGISTRATIONS;
     if (state) rows = rows.filter((r) => r.state === state);
@@ -170,6 +175,10 @@ export async function listRegistrations({ state, search } = {}) {
 }
 
 export async function registrationById(regId) {
+  return withChecks(await registrationByIdRaw(regId));
+}
+
+async function registrationByIdRaw(regId) {
   if (!live()) return db.REGISTRATIONS.find((r) => r.id === regId) || null;
   if (isNoah()) {
     /* Ids are strings and compared as strings: a Catalyst ROWID does not

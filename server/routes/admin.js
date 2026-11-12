@@ -15,6 +15,7 @@ import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
 import { cachedPending } from '../noahgram.js';
+import { pickChecks, saveChecks } from '../review-checks.js';
 
 /** Catalyst wants 'YYYY-MM-DD HH:MM:SS'. */
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -676,13 +677,17 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
   });
 
   /* Tick or untick one of the office's checks while reviewing. */
-  app.patch('/api/registrations/:id/checks', ...guard('members.edit'), (req, res) => {
-    const r = find('REGISTRATIONS', req.params.id);
+  app.patch('/api/registrations/:id/checks', ...guard('members.edit'), async (req, res) => {
+    /* On Catalyst the registration is a real one, not a sample: look it up where it lives. */
+    const r = live() ? await registrationById(req.params.id) : find('REGISTRATIONS', req.params.id);
     if (!r) return notFound(res);
+    const patch = pickChecks(req.body);
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'Say which check, and yes or no.' });
     const before = { ...r.checks };
-    r.checks = { ...r.checks, ...(req.body || {}) };
-    log(req, 'Amended registration checks', 'Membership', r.id, before, r.checks);
-    res.json({ ok: true, checks: r.checks });
+    const checks = { ...r.checks, ...patch };
+    if (live()) saveChecks(r.id, patch); else r.checks = checks;
+    log(req, 'Amended registration checks', 'Membership', r.id, before, checks);
+    res.json({ ok: true, checks });
   });
 
   /* ================= prayer requests from the app ================= */

@@ -35,6 +35,14 @@ async function shrink(file: File): Promise<File> {
   }
 }
 
+/** A file as base64 text, without the data: prefix. */
+const toBase64 = (file: File) => new Promise<string>((ok, bad) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1] ?? '');
+  r.onerror = () => bad(r.error);
+  r.readAsDataURL(file);
+});
+
 export function PictureInput({ value, onChange, invalid, label }: {
   value: string; onChange: (v: string) => void; invalid?: boolean; label: string;
 }) {
@@ -52,13 +60,23 @@ export function PictureInput({ value, onChange, invalid, label }: {
     try {
       const file = await shrink(chosen);
       if (file.size > MAX_MB * 1048576) { setProblem(`That picture is ${(file.size / 1048576).toFixed(1)} MB. The most allowed is ${MAX_MB} MB.`); return; }
-      const res = await fetch(apiUrl('/uploads/picture'), {
-        method: 'POST',
-        headers: { authorization: 'Bearer ' + getToken(), 'Content-Type': file.type },
-        body: file,
-      });
+      let res: Response;
+      try {
+        res = await fetch(apiUrl('/uploads/picture'), {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + getToken(), 'Content-Type': file.type },
+          body: file,
+        });
+      } catch {
+        /* The browser never got an answer. Some hosts in front of the API let only JSON through, so send the same picture that way. */
+        res = await fetch(apiUrl('/uploads/picture'), {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + getToken(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: await toBase64(file), type: file.type }),
+        });
+      }
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `The upload failed (${res.status}).`);
+      if (!res.ok) throw new Error(body.error || `The upload failed (${res.status}). Try again, or paste a picture link instead.`);
       onChange(body.url);
     } catch (e) {
       setProblem((e as Error).message);

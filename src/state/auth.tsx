@@ -10,6 +10,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, getToken, setToken, type User } from '@/lib/api';
+import { forgetMemberPhotos } from '@/components/MemberPhoto';
 
 /** How someone signs in: by mobile number (a code is texted) or by email (a code is emailed). */
 export type Identity = { mobile: string; email?: undefined } | { email: string; mobile?: undefined };
@@ -96,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try { await api.post('/auth/sign-out'); } catch { /* the session may already be gone */ }
     setToken('');
+    forgetMemberPhotos();
     setUser(null);
   }, []);
 

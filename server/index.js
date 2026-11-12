@@ -98,6 +98,9 @@ const corsHandler = cors({
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
 });
 if (!BEHIND_GATEWAY) app.use(corsHandler);
+/* A picture sent as JSON (base64) can be up to 5 MB of picture, so this one route takes more than the rest. It is mounted first:
+   the parser below leaves a body that is already read alone. */
+app.use('/api/uploads/picture', express.json({ limit: '8mb' }));
 app.use(express.json({ limit: '2mb' }));
 
 /* Small request log, so you can see the console talking to the API. */

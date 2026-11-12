@@ -21,7 +21,8 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates } from '../noah-schema.js';
+import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, memberPhotoFileId, io, NOAH_TABLES, fileMeta } from '../noah-schema.js';
+import { noahConfigured, getFile } from '../noah-api.js';
 import { relationOptions } from '../relations.js';
 import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
 import { can, roleById } from '../db.js';
@@ -87,6 +88,26 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
     const p = await personProfile(req.params.id);
     if (!p) return res.status(404).json({ error: 'No such member.' });
     res.json(await withChoices(p, req.session.role));
+  });
+
+  /* A member's profile photograph, for the family screens. Read through here, not from a public address, so the permission check
+     runs. It is the picture the member chose for themselves; ID documents and the video are NOT served from this route. */
+  app.get('/api/people/:id/photo', requireSession, requirePerm('members.view'), async (req, res) => {
+    if (!(live() && isNoah()) || !/^\d{6,}$/.test(String(req.params.id))) return res.status(404).json({ error: 'No photograph.' });
+    if (!noahConfigured()) return res.status(404).json({ error: 'No photograph.' });
+    try {
+      const fileId = await memberPhotoFileId(req.params.id);
+      if (!fileId) return res.status(404).json({ error: 'No photograph.' });
+      const { buffer, contentType } = await getFile(fileId, { actor: req.user.name });
+      let mime = '';
+      try { mime = fileMeta(await io.getRow(NOAH_TABLES.files, fileId))?.mimeType || ''; } catch { /* a nicety */ }
+      const generic = !contentType || /octet-stream/i.test(contentType);
+      res.setHeader('content-type', generic ? (mime.startsWith('image/') ? mime : 'image/jpeg') : contentType);
+      res.setHeader('cache-control', 'private, max-age=300');
+      res.send(buffer);
+    } catch {
+      res.status(404).json({ error: 'No photograph.' });
+    }
   });
 
   /* Members to pick a relative from: matched by name, showing name and place only. */

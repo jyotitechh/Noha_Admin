@@ -1089,6 +1089,33 @@ if (NO_KEY) {
     ['Hid a Noahgram comment', 'Showed a Noahgram comment again', 'Removed a Noahgram comment'].every((a) => (cAud.body?.rows || []).some((x) => x.action === a)));
 }
 
+section('Registration checks, member photographs, and pictures sent as JSON');
+
+/* The three Yes / No checks on a live registration used to do nothing: the route looked in the sample data. */
+const tick = await call('PATCH', `/registrations/${APPROVED_REG}/checks`, { idReadable: true }, BT);
+check('a check can be ticked on a real registration', tick.status === 200 && tick.body?.checks?.idReadable === true, `${tick.status} ${tick.text.slice(0, 160)}`);
+check('...and it is still ticked when the registration is opened again', (await call('GET', `/registrations/${APPROVED_REG}`, null, BT)).body?.checks?.idReadable === true);
+check('...and in the list', (await call('GET', '/data/REGISTRATIONS?limit=100', null, BT)).body?.rows?.find((r) => r.id === APPROVED_REG)?.checks?.idReadable === true);
+check('No is kept as no, not as not checked', (await call('PATCH', `/registrations/${APPROVED_REG}/checks`, { idReadable: false }, BT)).body?.checks?.idReadable === false);
+check('a check that does not exist is refused (400)', (await call('PATCH', `/registrations/${APPROVED_REG}/checks`, { nonsense: true }, BT)).status === 400);
+check('a registration that does not exist is refused (404)', (await call('PATCH', '/registrations/1/checks', { idReadable: true }, BT)).status === 404);
+check('ticking needs the permission to edit members (403)', (await call('PATCH', `/registrations/${APPROVED_REG}/checks`, { idReadable: true }, verifier.token)).status === 403);
+
+if (!NO_KEY) {
+  const face = await call('GET', `/people/${ANAND_ID}/photo`, null, BT);
+  check('a member photograph is served for the family screens', face.status === 200 && face.text === 'FAKE-photo-BYTES' && /image[/]/.test(face.type), `${face.status} ${face.text.slice(0, 40)} ${face.type}`);
+  check('a member with no photograph says so (404)', (await call('GET', `/people/${OLD_ID}/photo`, null, BT)).status === 404);
+  check('an id that is not a number is refused (404)', (await call('GET', '/people/abc/photo', null, BT)).status === 404);
+  check('a photograph needs permission to view members (403)', (await call('GET', `/people/${ANAND_ID}/photo`, null, verifier.token)).status === 403);
+  check('...and a sign-in (401)', (await call('GET', `/people/${ANAND_ID}/photo`)).status === 401);
+}
+
+/* A picture sent as JSON (base64), for a host in front of the API that lets only JSON through. */
+const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const viaJson = await call('POST', '/uploads/picture', { data: tinyPng, type: 'image/png' }, BT);
+check('a picture can be sent as JSON as well as raw bytes', viaJson.status === 201 && /\.png$/.test(viaJson.body?.url || '') && viaJson.body?.bytes === 70, `${viaJson.status} ${viaJson.text.slice(0, 160)}`);
+check('JSON that holds no picture is refused (400)', (await call('POST', '/uploads/picture', { data: Buffer.from('not a picture at all').toString('base64') }, BT)).status === 400);
+
 section('Who looks after a member: pastor and cell leader');
 
 const withChoices = await call('GET', `/people/${ANAND_ID}`, null, BT);

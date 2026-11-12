@@ -7,6 +7,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ICONS } from '@/lib/icons';
+import { MemberPhoto } from '@/components/MemberPhoto';
 import { ageCls, ageTxt, hue, initials, tone, type Tone } from '@/lib/format';
 
 /* ---------- icon ---------- */
@@ -136,10 +137,10 @@ export const Avatar = ({ name, size }: { name: string; size?: 'sm' | 'lg' }) => 
   </span>
 );
 
-export function Who({ name, sub, size }: { name: string; sub?: ReactNode; size?: 'sm' | 'lg' }) {
+export function Who({ name, sub, size, photoId }: { name: string; sub?: ReactNode; size?: 'sm' | 'lg'; photoId?: string | null }) {
   return (
     <div className="who">
-      <Avatar name={name} size={size} />
+      {photoId ? <MemberPhoto id={photoId} name={name} size={size} /> : <Avatar name={name} size={size} />}
       <div className="grow">
         <b className="ellip">{name}</b>
         {sub != null && sub !== '' && <span className="ellip">{sub}</span>}
