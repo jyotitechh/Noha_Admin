@@ -19,7 +19,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
-import { useToast } from '@/components/layers';
+import { Modal, useToast } from '@/components/layers';
+import { Field } from '@/components/ui';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
 import { MemberPhoto } from '@/components/MemberPhoto';
 import { fd, fdt } from '@/lib/format';
@@ -35,7 +36,7 @@ interface Profile {
   member: {
     id: string; rowId: string; name: string; status: string; approved?: boolean; blocked?: boolean;
     g?: string; age?: number; kid?: boolean; lang?: string; mobile?: string; email?: string;
-    address?: string; loc?: string; joined?: Date | null; partner?: boolean; masked?: boolean;
+    address?: string; loc?: string; joined?: Date | null; partner?: boolean; masked?: boolean; archived?: boolean; isAdmin?: boolean;
   };
   /* Present only for someone who may edit members. */
   edit?: EditSpec;
@@ -78,7 +79,7 @@ const Missing = ({ why }: { why?: string }) => (
 
 /* `onChanged` is called after the office edits the person, so the list this is
    open from can read again and not show the old name behind the drawer. */
-export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; onChanged?: () => void }) {
+export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: string; onChanged?: () => void; onGone?: () => void }) {
   const q = useQuery(() => api.get<Profile>(`/people/${memberRowId}`), [memberRowId]);
   const { can } = useAuth();
   const { toast } = useToast();
@@ -87,6 +88,10 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
   const [editing, setEditing] = useState(false);
   const [telling, setTelling] = useState(false);
   const [savingCare, setSavingCare] = useState(false);
+  /* Archive, restore, and delete for good: which step is open, and the name typed to confirm a deletion. */
+  const [step, setStep] = useState<'' | 'archive' | 'delete'>('');
+  const [typed, setTyped] = useState('');
+  const [acting, setActing] = useState(false);
   /* Adding a relative: the search box, what it found, who was picked, and the relation. */
   const [relQ, setRelQ] = useState('');
   const [relResults, setRelResults] = useState<{ rowId: string; name: string; where: string }[]>([]);
@@ -196,8 +201,51 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
     }
   }
 
+  async function archive(to: boolean) {
+    setActing(true);
+    try {
+      await api.post(`/people/${memberRowId}/${to ? 'archive' : 'restore'}`);
+      toast(to ? `${member.name} is archived. They are hidden and cannot sign in to the app. This can be undone.` : `${member.name} is restored.`, to ? 'warn' : 'ok');
+      setStep('');
+      q.reload();
+      onChanged?.();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function deleteForGood() {
+    setActing(true);
+    try {
+      const out = await api.post<{ removed: { registrations: number; files: number; familyLinks: number; children: number }; storedFiles: { removed: number; left: number } }>(
+        `/people/${memberRowId}/delete-for-good`, { confirmName: typed });
+      const left = out.storedFiles.left
+        ? ` ${out.storedFiles.left} uploaded file${out.storedFiles.left === 1 ? '' : 's'} could not be removed from storage and need clearing by the Catalyst administrator.`
+        : '';
+      toast(`${member.name} is deleted for good.${left}`, left ? 'warn' : 'ok');
+      setStep(''); setTyped('');
+      onChanged?.();
+      onGone?.();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setActing(false);
+    }
+  }
+
   return (
     <div className="stack">
+      {member.archived && (
+        <Note tone="warn" icon="alert">
+          <b>This member is archived.</b> They are hidden from the register and cannot sign in to the app.
+          <div className="row wrap gap6 mt8">
+            {can('members.archive') && <Btn sm icon="refresh" disabled={acting} onClick={() => archive(false)}>Restore</Btn>}
+            {can('members.delete') && <Btn sm variant="danger" icon="trash" disabled={acting} onClick={() => { setTyped(''); setStep('delete'); }}>Delete for good</Btn>}
+          </div>
+        </Note>
+      )}
       <div className="row wrap gap6">
         <Status>{member.status}</Status>
         {s && <Chip tone={s.tone}>{s.label}</Chip>}
@@ -224,7 +272,8 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
       <section ref={place('who')}>
         <div className="row">
           <div className="sect-title grow">Who they are</div>
-          {q.data.edit && <Btn sm icon="edit" onClick={() => setEditing(true)}>Edit details</Btn>}
+          {q.data.edit && !member.archived && <Btn sm icon="edit" onClick={() => setEditing(true)}>Edit details</Btn>}
+          {can('members.archive') && !member.archived && !member.isAdmin && <Btn sm icon="ban" onClick={() => setStep('archive')}>Archive</Btn>}
         </div>
         <Kv rows={[
           ['Name', <b key="n">{member.name}</b>],
@@ -249,6 +298,47 @@ export function PersonDetail({ memberRowId, onChanged }: { memberRowId: string; 
           <p className="xs muted mt8">Revealed just now. This was recorded in the audit log.</p>
         )}
       </section>
+
+      <Modal
+        open={step === 'archive'}
+        onClose={() => setStep('')}
+        title="Archive this member?"
+        footer={
+          <>
+            <span className="sp" style={{ flex: 1 }} />
+            <Btn onClick={() => setStep('')}>Cancel</Btn>
+            <Btn variant="danger" disabled={acting} onClick={() => archive(true)}>Archive</Btn>
+          </>
+        }
+      >
+        <p style={{ marginTop: 0 }}><b>{member.name}</b> is hidden from the register and can no longer sign in to the Noah app.</p>
+        <Note tone="info" icon="info">Nothing is deleted. You can restore them at any time from this page. If they should be removed for good, archive first, then delete.</Note>
+      </Modal>
+
+      <Modal
+        open={step === 'delete'}
+        onClose={() => setStep('')}
+        title="Delete this member for good?"
+        footer={
+          <>
+            <span className="sp" style={{ flex: 1 }} />
+            <Btn onClick={() => setStep('')}>Cancel</Btn>
+            <Btn variant="danger" icon="trash" disabled={acting || typed.trim().toLowerCase() !== member.name.trim().toLowerCase()} onClick={deleteForGood}>
+              Delete for good
+            </Btn>
+          </>
+        }
+      >
+        <Note tone="bad" icon="alert">
+          <b>This cannot be undone.</b> Their record, registration, family links, uploaded ID, photograph and video, and their login are removed.
+          Anything they posted or booked in the app stays, no longer linked to anyone. If you only want them gone from sight, leave them archived.
+        </Note>
+        <div className="mt12">
+          <Field label={<>Type <b>{member.name}</b> to confirm</>}>
+            <input className="inp" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={member.name} />
+          </Field>
+        </div>
+      </Modal>
 
       {editing && q.data.edit && (
         <EditPerson

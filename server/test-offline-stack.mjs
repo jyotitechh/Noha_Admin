@@ -1116,6 +1116,74 @@ const viaJson = await call('POST', '/uploads/picture', { data: tinyPng, type: 'i
 check('a picture can be sent as JSON as well as raw bytes', viaJson.status === 201 && /\.png$/.test(viaJson.body?.url || '') && viaJson.body?.bytes === 70, `${viaJson.status} ${viaJson.text.slice(0, 160)}`);
 check('JSON that holds no picture is refused (400)', (await call('POST', '/uploads/picture', { data: Buffer.from('not a picture at all').toString('base64') }, BT)).status === 400);
 
+section('Archive, restore and delete a member for good');
+
+/* Someone to delete: a member with a login, an extra row, an approved registration with three uploads, a family link to Anand, and
+   Anand has them as his cell leader. Put straight into the fake's tables. */
+const FAKE = `http://127.0.0.1:${process.env.NOAH_PORT || '4301'}/_fake`;
+const hook = (path, body) => fetch(FAKE + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const DM = { user: '27145000000191001', member: '27145000000191002', extra: '27145000000191003', reg: '27145000000191004', photo: '27145000000191005', idf: '27145000000191006', vid: '27145000000191007', rel: '27145000000191008' };
+const file = (id, purpose) => ({ ROWID: id, uid: DM.member, path: '99' + id.slice(2), fileType: 1, extension: 'jpg', size: 10, archived: false, remoteSource: JSON.stringify({ name: purpose + '.jpg', mimeType: 'image/jpeg', purpose }) });
+await hook('/insert', { table: 'users', rows: [{ ROWID: DM.user, number: '9000000444', countryCode: '+91', archived: false, is_member: true }] });
+await hook('/insert', { table: 'members', rows: [{ ROWID: DM.member, id: DM.member, userId: DM.user, countryCode: '+91', mobileNumber1: '9000000444', status: true, isUnVerified: false, archived: false, firstName: 'Delete', lastName: 'Me', gender: 1, photo: DM.photo }] });
+await hook('/insert', { table: 'membersExtra', rows: [{ ROWID: DM.extra, id: DM.member }] });
+await hook('/insert', { table: 'appRegistrations', rows: [{ ROWID: DM.reg, memberRowId: DM.member, status: 'approved', idProofFileId: DM.idf, videoFileId: DM.vid }] });
+await hook('/insert', { table: 'files', rows: [file(DM.photo, 'photo'), file(DM.idf, 'idProof'), file(DM.vid, 'video')] });
+await hook('/insert', { table: 'membersRelations', rows: [{ ROWID: DM.rel, memberIdA: ANAND_ID, memberIdB: DM.member, relationshipA2B: 6, relationshipB2A: 6, isArchived: false }] });
+await hook('/patch', { table: 'membersExtra', rowId: '27145000000150001', set: { connectedLeader: DM.member } });
+
+const officer = await signIn('+91 90000 00002');     /* a role that may archive but not delete */
+const personOf = async (id, tok = BT) => (await call('GET', `/people/${id}`, null, tok)).body?.member;
+
+check('the member is on the register', (await personOf(DM.member))?.name === 'Delete Me' && (await personOf(DM.member))?.archived === false);
+check('deleting a member who is not archived is refused (409)', await (async () => { const r = await call('POST', `/people/${DM.member}/delete-for-good`, { confirmName: 'Delete Me' }, BT); return r.status === 409 && r.body?.code === 'not_archived'; })());
+check('...so there is no way to delete by mistake in one step', !!(await personOf(DM.member)));
+
+check('archiving needs the permission (403 for someone without it)', (await call('POST', `/people/${DM.member}/archive`, {}, verifier.token)).status === 403);
+check('archiving a member that does not exist is refused (404)', (await call('POST', '/people/27145000000999999/archive', {}, BT)).status === 404);
+const arch = await call('POST', `/people/${DM.member}/archive`, { remark: 'Left the church' }, officer.token);
+check('a membership officer can archive a member', arch.status === 200 && arch.body?.archived === true && arch.body?.name === 'Delete Me', `${arch.status} ${arch.text.slice(0, 160)}`);
+check('...they show as Archived', (await personOf(DM.member))?.status === 'Archived' && (await personOf(DM.member))?.archived === true);
+check('...and they cannot be offered as a relative any more', !(await call('GET', `/people/${ANAND_ID}/relation-candidates?q=Delete`, null, BT)).body?.rows?.some((c) => c.rowId === DM.member));
+check('archiving twice is refused (409)', (await call('POST', `/people/${DM.member}/archive`, {}, BT)).status === 409);
+check('a membership officer cannot delete for good (403)', (await call('POST', `/people/${DM.member}/delete-for-good`, { confirmName: 'Delete Me' }, officer.token)).status === 403);
+
+const restored = await call('POST', `/people/${DM.member}/restore`, {}, officer.token);
+check('an archived member can be restored', restored.status === 200 && (await personOf(DM.member))?.archived === false && (await personOf(DM.member))?.status !== 'Archived', `${restored.status} ${restored.text.slice(0, 120)}`);
+check('restoring one who is not archived is refused (409)', (await call('POST', `/people/${DM.member}/restore`, {}, BT)).status === 409);
+
+await call('POST', `/people/${DM.member}/archive`, {}, BT);
+const wrong = await call('POST', `/people/${DM.member}/delete-for-good`, { confirmName: 'Someone Else' }, BT);
+check('deleting needs the member name typed exactly (400)', wrong.status === 400 && wrong.body?.code === 'confirm_mismatch', `${wrong.status} ${wrong.text.slice(0, 120)}`);
+check('...and not an empty one (400)', (await call('POST', `/people/${DM.member}/delete-for-good`, {}, BT)).status === 400);
+check('...nothing was removed by those refusals', !!(await personOf(DM.member)));
+
+const sa = await call('POST', `/people/${BOSS_ID}/archive`, {}, officer.token);
+check('nobody can archive their own record (409)', (await call('POST', `/people/${BOSS_ID}/archive`, {}, BT)).body?.code === 'self');
+check('the office\'s own super administrator cannot be archived from here (409)', sa.status === 409 && sa.body?.code === 'super_admin', `${sa.status} ${sa.text.slice(0, 120)}`);
+
+const wiped = await call('POST', `/people/${DM.member}/delete-for-good`, { confirmName: '  delete   ME ' }, BT);
+check('a super administrator can delete an archived member for good (name typed, case and spaces forgiven)', wiped.status === 200 && wiped.body?.ok === true && wiped.body?.name === 'Delete Me', `${wiped.status} ${wiped.text.slice(0, 300)}`);
+check('...their registration, uploads and family link were removed', wiped.body?.removed?.registrations === 1 && wiped.body?.removed?.files === 3 && wiped.body?.removed?.familyLinks === 1 && wiped.body?.removed?.login === true, JSON.stringify(wiped.body?.removed));
+check('...the stored files were removed too', wiped.body?.storedFiles?.removed === 3 && wiped.body?.storedFiles?.left === 0, JSON.stringify(wiped.body?.storedFiles));
+check('...someone who had them as cell leader is cleared', wiped.body?.removed?.clearedFromOthers === 1);
+check('...they are no longer on the register', (await call('GET', `/people/${DM.member}`, null, BT)).status === 404);
+check('...nor in the people list', !((await call('GET', '/data/MEMBERS?limit=500', null, BT)).body?.rows || []).some((m) => m.rowId === DM.member));
+check('...and Anand\'s family no longer shows them', !(await famOf(ANAND_ID)).some((r) => r.rowId === DM.member));
+check('deleting again is refused (404)', (await call('POST', `/people/${DM.member}/delete-for-good`, { confirmName: 'Delete Me' }, BT)).status === 404);
+
+const delAud = await call('GET', '/data/AUD?limit=300', null, BT);
+const delRows = delAud.body?.rows || [];
+check('archive, restore and delete are all in the audit log', ['Archived a member', 'Restored an archived member', 'Deleted a member for good'].every((a) => delRows.some((x) => x.action === a)));
+check('...the deletion keeps the name and number but no contact details', (() => { const x = delRows.find((r) => r.action === 'Deleted a member for good'); const t = JSON.stringify(x); return /Delete Me/.test(t) && !/9000000444/.test(t); })());
+check('a member who may sign in to this console cannot be deleted', await (async () => {
+  /* Anand is made console staff by an earlier test only in some runs, so use the fake to give a fresh archived member a console role. */
+  await hook('/insert', { table: 'members', rows: [{ ROWID: '27145000000192002', id: '27145000000192002', status: true, archived: true, firstName: 'Staff', lastName: 'Person', gender: 1 }] });
+  await hook('/insert', { table: 'membersExtra', rows: [{ ROWID: '27145000000192003', id: '27145000000192002', consoleRole: 'moderator', consoleStatus: 'Active' }] });
+  const r = await call('POST', '/people/27145000000192002/delete-for-good', { confirmName: 'Staff Person' }, BT);
+  return r.status === 409 && r.body?.code === 'console_access';
+})());
+
 section('Who looks after a member: pastor and cell leader');
 
 const withChoices = await call('GET', `/people/${ANAND_ID}`, null, BT);

@@ -51,6 +51,10 @@ S.io.update = async (id, row) => {
   return row;
 };
 
+/* File Store: which stored files were deleted (by store id), so a test can see them go. */
+export const storedDeleted = [];
+S.io.deleteStoredFile = async (storeId) => { storedDeleted.push(String(storeId)); return true; };
+
 export { tables, writes, reset };
 
 /* ---------- fixtures ---------- */

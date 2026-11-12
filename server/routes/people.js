@@ -21,7 +21,7 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, memberPhotoFileId, io, NOAH_TABLES, fileMeta } from '../noah-schema.js';
+import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, setMemberArchived, deleteMemberForGood, memberPhotoFileId, io, NOAH_TABLES, fileMeta } from '../noah-schema.js';
 import { noahConfigured, getFile } from '../noah-api.js';
 import { relationOptions } from '../relations.js';
 import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
@@ -114,6 +114,55 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
   app.get('/api/people/:id/relation-candidates', requireSession, requirePerm('members.edit'), async (req, res) => {
     if (!(live() && isNoah())) return res.json({ rows: [] });
     res.json({ rows: await relationCandidates(req.params.id, req.query.q) });
+  });
+
+  /* ---- archive, restore, and delete for good ----
+     Archive hides the member and blocks their login; it can be undone (restore). Only an archived member can be deleted for good,
+     and only a super administrator may (members.delete), who must type the member's name. Nobody can do either to themselves. */
+  const CODES = { not_found: 404, already_archived: 409, not_archived: 409, super_admin: 409, console_access: 409, confirm_mismatch: 400, self: 409 };
+  const memberFail = (res, err) => {
+    if (CODES[err.code]) return res.status(CODES[err.code]).json({ error: err.message, code: err.code });
+    const explained = explainCatalyst(err);
+    return res.status(explained?.status ?? 502).json({ error: explained?.message ?? `Catalyst refused the change: ${err.message}` });
+  };
+  const needsCatalyst = (res) => res.status(409).json({ error: 'This needs the Catalyst connection. The sample data cannot be changed.' });
+  const isSelf = (req) => String(req.session.memberRowId ?? '') === String(req.params.id);
+
+  for (const [action, to] of [['archive', true], ['restore', false]]) {
+    app.post(`/api/people/:id/${action}`, requireSession, requirePerm('members.archive'), async (req, res) => {
+      if (!(live() && isNoah())) return needsCatalyst(res);
+      if (isSelf(req)) return res.status(409).json({ error: 'You cannot archive your own record.', code: 'self' });
+      try {
+        const r = await setMemberArchived(req.params.id, to);
+        await writeAudit({
+          actor: req.user.name, role: roleById(req.session.role).name,
+          action: to ? 'Archived a member' : 'Restored an archived member', module: 'Membership', record: req.params.id,
+          before: { archived: !to }, after: { archived: to, name: r.name, memberNumber: r.memberNumber },
+          remark: String(req.body?.remark || '').trim().slice(0, 300), ip: req.ip || '',
+        });
+        res.json({ ok: true, archived: to, name: r.name });
+      } catch (err) {
+        memberFail(res, err);
+      }
+    });
+  }
+
+  app.post('/api/people/:id/delete-for-good', requireSession, requirePerm('members.delete'), async (req, res) => {
+    if (!(live() && isNoah())) return needsCatalyst(res);
+    if (isSelf(req)) return res.status(409).json({ error: 'You cannot delete your own record.', code: 'self' });
+    try {
+      const r = await deleteMemberForGood(req.params.id, { confirmName: req.body?.confirmName });
+      /* The audit entry keeps who and how many, never the member's contact details or documents. */
+      await writeAudit({
+        actor: req.user.name, role: roleById(req.session.role).name,
+        action: 'Deleted a member for good', module: 'Membership', record: req.params.id,
+        before: { name: r.name, memberNumber: r.memberNumber, archived: true }, after: { removed: r.removed, storedFiles: r.storedFiles },
+        remark: String(req.body?.remark || '').trim().slice(0, 300), ip: req.ip || '',
+      });
+      res.json({ ok: true, ...r });
+    } catch (err) {
+      memberFail(res, err);
+    }
   });
 
   /* Relate another member to this one. One row in membersRelations carries both directions, so the other person

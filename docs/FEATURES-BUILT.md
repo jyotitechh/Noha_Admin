@@ -60,6 +60,30 @@ Membership and a row in Work queues count the waiting ones.
 
 ---
 
+## 2b. Archive, restore and delete a member for good
+
+**What.** Two steps, so a slip can be undone. On a member's page (Member register, or Approved and history):
+- **Archive** (permission `members.archive`, the membership officer and super administrator) hides the member and blocks their
+  login to the app. Nothing is deleted. A banner on the page offers **Restore**.
+- **Delete for good** (permission `members.delete`, **super administrator only**) appears only on an archived member, and only after
+  the member's name is typed. It removes the member, their extra row, registrations, change requests, family links, children recorded
+  only under them, their uploads and their login, and clears them as pastor or cell leader of others. It cannot be undone.
+- Refused: archiving or deleting your own record; archiving or deleting a super administrator flagged in the office's own system;
+  deleting someone who still has console access (remove it first); deleting one who is not archived.
+- Every step is in the audit log. The deletion entry keeps the name and member number, never contact details.
+
+**Limits, said plainly.**
+- Rows in the Noah app's other tables (passes, likes, comments, Noahgram posts) are not touched. They stay, pointing at no one.
+- The uploaded ID, photograph and video are deleted from File Store too, but that needs the Catalyst token to hold
+  `ZohoCatalyst.files.DELETE` (now in the scope list; run `npm run catalyst:connect` once to grant it). Without it the rows are
+  removed and the screen says how many files could not be removed, so the Catalyst administrator can clear them.
+- Events, event groups and the content kinds (Manna, prayers, banners and so on) already had delete (events: archive first).
+
+**Where.** `server/noah-schema.js` (`setMemberArchived`, `deleteMemberForGood`), `server/routes/people.js`,
+`src/components/PersonDetail.tsx`. Tested in `server/test-offline-stack.mjs` ("Archive, restore and delete a member for good").
+
+---
+
 ## 2a. Noahgram moderation
 
 **What.** Members post pictures and reels in the app. Every one **waits for the office**: nobody sees it, on the feed or on its

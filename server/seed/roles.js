@@ -10,7 +10,7 @@ import { clone } from './helpers.js';
 const ME={id:'ST-001',name:'Anitha Varghese',title:'Office administrator',email:'anitha.varghese@karunasadan.org'};
 
 const PERM_GROUPS=[
- ['Membership',[['members.view','View member register'],['members.edit','Create and amend members'],['members.archive','Archive, restore and mark deceased'],['members.export','Import and export members'],['members.pii','Reveal contact details'],['pastoral.manage','Pastoral hierarchy and reassignment'],['approles.manage','Member app roles, feature access and chat rules']]],
+ ['Membership',[['members.view','View member register'],['members.edit','Create and amend members'],['members.archive','Archive, restore and mark deceased'],['members.delete','Delete an archived member for good (super administrator only)'],['members.export','Import and export members'],['members.pii','Reveal contact details'],['pastoral.manage','Pastoral hierarchy and reassignment'],['approles.manage','Member app roles, feature access and chat rules']]],
  ['Giving and finance',[['giving.view','View receipts and giving'],['giving.receipt','Create, cancel and reissue receipts'],['giving.reconcile','Reconciliation and refunds'],['finance.view','View accounts, expenses and transactions'],['finance.post','Post vouchers and transactions'],['finance.approve','Approve payment batches']]],
  ['Events',[['events.view','View events and passes'],['events.manage','Create events, halls, passes and services'],['events.scan','Scan passes at the door in the Noah app, and correct attendance']]],
  ['Community',[['community.moderate','Moderate feed, prayer, praise and obituaries'],['rewards.approve','Approve reward withdrawals']]],

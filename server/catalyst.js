@@ -114,6 +114,9 @@ export const SCOPES = [
   'ZohoCatalyst.zcql.CREATE',
   'ZohoCatalyst.folders.READ',
   'ZohoCatalyst.files.READ',
+  /* Only for deleting a member for good: their uploads (ID, photograph, video) are removed from File Store too. Without it the
+     rows are removed and the files are reported as left behind. */
+  'ZohoCatalyst.files.DELETE',
   /* Pictures uploaded from the content forms go to a Stratus bucket (server/pictures.js). */
   'Stratus.fileop.CREATE',
   /* Sign-in codes sent by email through Catalyst Mail (Cloud Scale > Mail), see sendMail. */
@@ -414,6 +417,21 @@ export async function downloadFile(fileId) {
     if (hit) return hit;
   }
   throw new Error(`File ${fileId} was not found in any folder.`);
+}
+
+/**
+ * Delete one stored file by its File Store id. Returns true when it was removed, false when no folder held it.
+ * Throws when the token may not delete files (the scope above was not granted), so the caller can say so.
+ */
+export async function deleteFile(fileId) {
+  const at = await accessToken();
+  const folderIds = [FILE_FOLDER_ID, ...(await listFolders().catch(() => [])).map((f) => String(f.id))].filter(Boolean);
+  for (const folderId of [...new Set(folderIds)]) {
+    const res = await fetch(`${API}/baas/v1/project/${PROJECT_ID}/folder/${folderId}/file/${fileId}`, { method: 'DELETE', headers: headersFor(at) });
+    if (res.ok) return true;
+    if (res.status === 401 || res.status === 403) throw new Error('The Catalyst token may not delete files (ZohoCatalyst.files.DELETE).');
+  }
+  return false;
 }
 
 /** Insert rows into a table. */

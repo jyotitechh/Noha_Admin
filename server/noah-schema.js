@@ -35,7 +35,7 @@
    take it from an insert response (Catalyst sends it unquoted there). */
 
 import {
-  getRows, getRow, update, insert, remove, listTables, listColumns,
+  getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile,
 } from './catalyst.js';
 import { MEMBER_FIELDS } from './member-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
@@ -121,6 +121,8 @@ export const io = {
   remove: async (ref, rowIds) => remove(await tableId(ref), rowIds),
   listColumns: async (ref) => listColumns(await tableId(ref)),
   listTables,
+  /* A file in File Store, by its store id (the `path` column of a files row). */
+  deleteStoredFile: (storeId) => deleteFile(storeId),
 };
 
 /* The tables, as references. `npm run check:schema` confirms each exists and has
@@ -1640,6 +1642,116 @@ export async function relationCandidates(memberRowId, q) {
     .filter((m) => !asBool(m.archived) && !same(m.ROWID, memberRowId) && memberFullName(m).toLowerCase().includes(needle))
     .slice(0, 15)
     .map((m) => ({ rowId: String(m.ROWID), name: memberFullName(m), where: [m.area, m.city].map((s) => String(s || '').trim()).filter(Boolean).join(', ') }));
+}
+
+/* ---------- archiving, restoring and deleting a member ----------
+
+   Two steps, so a slip can be undone. ARCHIVE hides the member and blocks their login (members.archived and users.archived), and
+   RESTORE puts both back. Only an ARCHIVED member can be deleted for good, which removes their rows: the member, their extra row,
+   registrations, change requests, family links, the children recorded only under them, their uploads and their login. Other members
+   who had them as pastor or cell leader are cleared. Nothing in the Noah app's other tables (passes, likes, comments, posts) is
+   touched: those rows are left, no longer pointing at anyone. */
+
+const fail = (message, code) => Object.assign(new Error(message), { code });
+const norm = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Hide a member and block their login, or put them back. Throws { code }. */
+export async function setMemberArchived(memberRowId, archived) {
+  const m = await io.getRow(T.members, memberRowId);
+  if (!m) throw fail('No such member.', 'not_found');
+  if (archived && asBool(m.archived)) throw fail('That member is already archived.', 'already_archived');
+  if (!archived && !asBool(m.archived)) throw fail('That member is not archived.', 'not_archived');
+  const user = m.userId ? await io.getRow(T.users, m.userId) : null;
+  if (archived && asBool(user?.is_super_admin)) throw fail('That is a super administrator, flagged in the office\'s own system. They cannot be archived from here.', 'super_admin');
+  await io.update(T.members, { ROWID: String(m.ROWID), archived: !!archived });
+  if (user) await io.update(T.users, { ROWID: String(user.ROWID), archived: !!archived });
+  clearCache();
+  return { name: memberFullName(m), memberNumber: m.memberId || String(m.ROWID) };
+}
+
+/**
+ * Remove an ARCHIVED member and what belongs only to them. `confirmName` must be their name as typed by the person deleting.
+ * Throws { code: 'not_found' | 'not_archived' | 'confirm_mismatch' | 'super_admin' | 'console_access' }.
+ * Returns what was removed, and how many of their uploaded files could (or could not) also be removed from File Store.
+ */
+export async function deleteMemberForGood(memberRowId, { confirmName } = {}) {
+  const m = await io.getRow(T.members, memberRowId);
+  if (!m) throw fail('No such member.', 'not_found');
+  if (!asBool(m.archived)) throw fail('Archive the member first. Only an archived member can be deleted for good.', 'not_archived');
+  const name = memberFullName(m);
+  if (!norm(confirmName) || norm(confirmName) !== norm(name)) throw fail('The name typed does not match.', 'confirm_mismatch');
+
+  const id = String(m.ROWID);
+  const user = m.userId ? await io.getRow(T.users, m.userId) : null;
+  if (asBool(user?.is_super_admin)) throw fail('That is a super administrator, flagged in the office\'s own system. They cannot be deleted from here.', 'super_admin');
+
+  const [extras, regs, requests, relations, kidLinks, kids, files, members, staff] = await Promise.all([
+    io.getRows(T.membersExtra), io.getRows(T.appRegistrations), io.getRows(T.appChangeRequests), io.getRows(T.membersRelations),
+    io.getRows(T.kidsConnect), io.getRows(T.kids), io.getRows(T.files), io.getRows(T.members),
+    T.consoleStaff ? io.getRows(T.consoleStaff) : Promise.resolve([]),
+  ]);
+
+  const extra = extras.find((e) => same(e.id, id));
+  if (String(extra?.consoleRole ?? '').trim() && String(extra?.consoleStatus ?? '') !== 'Revoked') {
+    throw fail('They have access to this console. Take that away first (Staff and permissions).', 'console_access');
+  }
+  const staffRows = staff.filter((r) => same(r.memberRowId, id));
+  if (staffRows.some((r) => String(r.status) === 'Active')) throw fail('They have access to this console. Take that away first (Staff and permissions).', 'console_access');
+
+  const myRegs = regs.filter((r) => same(r.memberRowId, id));
+  const myRequests = requests.filter((r) => same(r.memberRowId, id));
+  const myRelations = relations.filter((r) => same(r.memberIdA, id) || same(r.memberIdB, id));
+  const myKidLinks = kidLinks.filter((r) => same(r.memberId, id));
+  /* A child is removed only when no one else is linked to them. */
+  const orphanKids = kids.filter((k) => myKidLinks.some((l) => same(l.kidId, k.ROWID)) && !kidLinks.some((l) => same(l.kidId, k.ROWID) && !same(l.memberId, id)));
+
+  /* Their uploads: the ones filed under them, and the ones their registration, photograph and requests point at. */
+  const fileIds = new Set(files.filter((f) => same(f.uid, id)).map((f) => String(f.ROWID)));
+  for (const v of [m.photo, ...myRegs.flatMap((r) => [r.idProofFileId, r.videoFileId]), ...myRequests.filter((r) => r.fieldId === 'photo').flatMap((r) => [r.oldValue, r.newValue])]) {
+    if (/^\d{6,}$/.test(String(v ?? ''))) fileIds.add(String(v));
+  }
+  const myFiles = files.filter((f) => fileIds.has(String(f.ROWID)));
+
+  /* Other members who had them as pastor or cell leader. */
+  const pointing = extras.filter((e) => !same(e.id, id) && (same(e.connectedPastor, id) || same(e.connectedLeader, id)));
+
+  /* The stored files first (a row is what says where the bytes are), then the rows, the member last, so a failure part-way
+     can be run again and finish. */
+  let storedGone = 0;
+  let storedLeft = 0;
+  let storedWhy = '';
+  for (const f of myFiles) {
+    if (!f.path) continue;
+    try { (await io.deleteStoredFile(String(f.path))) ? storedGone++ : storedLeft++; }
+    catch (err) { storedLeft++; storedWhy = err.message; }
+  }
+  for (const e of pointing) {
+    await io.update(T.membersExtra, { ROWID: String(e.ROWID), ...(same(e.connectedPastor, id) ? { connectedPastor: null } : {}), ...(same(e.connectedLeader, id) ? { connectedLeader: null } : {}) });
+  }
+  const drop = async (ref, rows) => { const ids = [...new Set(rows.map((r) => String(r.ROWID ?? r)))]; if (ids.length) await io.remove(ref, ids); return ids.length; };
+  const removed = {
+    files: await drop(T.files, myFiles),
+    registrations: await drop(T.appRegistrations, myRegs),
+    changeRequests: await drop(T.appChangeRequests, myRequests),
+    familyLinks: await drop(T.membersRelations, myRelations),
+  };
+  /* A child's links go with the child, as well as this member's own links. */
+  const linkRows = kidLinks.filter((l) => same(l.memberId, id) || orphanKids.some((k) => same(k.ROWID, l.kidId)));
+  await drop(T.kidsConnect, linkRows);
+  removed.children = await drop(T.kids, orphanKids);
+  if (extra) await drop(T.membersExtra, [extra]);
+  if (T.consoleStaff) await drop(T.consoleStaff, staffRows);
+  /* Their login goes with them, unless someone else's member row still uses it. */
+  const loginShared = members.some((o) => !same(o.ROWID, id) && same(o.userId, m.userId));
+  if (user && !loginShared) await io.remove(T.users, [String(user.ROWID)]);
+  await io.remove(T.members, [id]);
+
+  clearCache();
+  return {
+    name, memberNumber: m.memberId || id,
+    removed: { ...removed, login: !!user && !loginShared, clearedFromOthers: pointing.length },
+    storedFiles: { removed: storedGone, left: storedLeft, ...(storedWhy ? { why: storedWhy } : {}) },
+  };
 }
 
 /* ---------- editing a member from the console ----------

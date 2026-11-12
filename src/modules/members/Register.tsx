@@ -109,7 +109,7 @@ export default function Register() {
         sub={open ? <><span className="mono">{open.id}</span> · {open.loc} · member since {fd(open.joined)}</> : ''}
       >
         {/* Everything about them, in one place: see components/PersonDetail. */}
-        {open && <PersonDetail memberRowId={(open as Member & { rowId?: string }).rowId ?? open.id} onChanged={() => { q.reload(); all.reload(); }} />}
+        {open && <PersonDetail memberRowId={(open as Member & { rowId?: string }).rowId ?? open.id} onChanged={() => { q.reload(); all.reload(); }} onGone={() => setOpen(null)} />}
       </Drawer>
     </div>
   );
