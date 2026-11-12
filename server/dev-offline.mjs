@@ -144,6 +144,13 @@ tables[T.comments].push(
   { ROWID: REPORTED.cClean, component: 1, componentId: REPORTED.manna, memberId: M.office, parentId: '', content: 'Thank you for this word.', flagged: 0, hide: 0, isArchived: false, notApproved: false, CREATEDTIME: istStamp(10 * HOUR) },
   { ROWID: REPORTED.cRemoved, component: 1, componentId: REPORTED.manna, memberId: M.office, parentId: '', content: 'Already removed.', flagged: 4, hide: 1, isArchived: true, notApproved: false, CREATEDTIME: istStamp(40 * HOUR) },
 );
+/* Who reported them: component 3 is a Manna comment, 4 a Noahgram comment. */
+(tables['tbl:flaggedComponentStats'] ||= []).push(
+  { ROWID: '27145000000186001', memberId: M.approved, component: 3, componentId: REPORTED.cManna, created: new Date(Date.now() - 29 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
+  { ROWID: '27145000000186002', memberId: M.boss, component: 3, componentId: REPORTED.cManna, created: new Date(Date.now() - 28 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
+  { ROWID: '27145000000186003', memberId: M.pastor, component: 3, componentId: REPORTED.cManna, created: new Date(Date.now() - 27 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
+  { ROWID: '27145000000186004', memberId: M.office, component: 4, componentId: REPORTED.cPost, created: new Date(Date.now() - 6 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
+);
 /* Who the fake Noah API has told about a Noahgram decision. */
 const gramTold = [];
 
@@ -194,6 +201,9 @@ http.createServer(async (req, res) => {
     forgetTables();
     return send(res, 200, { ok: true, id: contentTableId(table) || null });
   }
+
+  /* How many rows a fake table holds, for tests that check something was removed. */
+  if (req.method === 'GET' && path === '/_fake/count') return send(res, 200, { count: (tables['tbl:' + url.searchParams.get('table')] || []).length });
 
   /* Who the fake Noah API told about a Noahgram decision, as { post, type } in order. */
   if (req.method === 'GET' && path === '/_fake/noahgram-told') return send(res, 200, { told: gramTold });

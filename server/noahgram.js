@@ -177,6 +177,10 @@ export async function cachedPending() {
 
 /* The Daily Manna table. Not in NOAH_TABLES: the content screens already own the name dailyMana (server/content-types.js). */
 const MANNA_TABLE = 'tbl:dailyMana';
+/* Who reported what: one row per member per comment (memberId, component 3 = a Manna comment or 4 = a Noahgram comment, componentId = the
+   comment, created). Kept by the API in the office's own table, so it does not expire (REPORT-A-COMMENT-ERROR.md). */
+const REPORTS_TABLE = 'tbl:flaggedComponentStats';
+const reportComponent = (commentComponent) => (Number(commentComponent) === 1 ? 3 : 4);
 const MANNA = 1;
 const POST = 2;
 const hiddenNow = (c) => Number(c.hide) === 1 || asBool(c.notApproved);
@@ -227,6 +231,9 @@ export async function moderateComment(commentId, action, { components = [POST] }
     row.hide = 0; row.notApproved = false;
   } else if (action === 'keep') {
     row.flagged = 0; row.hide = 0;
+    /* Those members can report it again if it earns it. */
+    const mine = (await io.getRows(REPORTS_TABLE)).filter((r) => Number(r.component) === reportComponent(c.component) && String(r.componentId) === String(c.ROWID));
+    if (mine.length) await io.remove(REPORTS_TABLE, mine.map((r) => String(r.ROWID)));
   } else if (action === 'remove') {
     row.isArchived = true; row.archivedOn = nowUtc();
   } else {
@@ -251,7 +258,7 @@ export async function moderateComment(commentId, action, { components = [POST] }
  * each with where it is, who wrote it, and its replies (hiding a first-level comment does not hide its replies in the table).
  */
 export async function reportedComments() {
-  const [rows, map] = await Promise.all([io.getRows(T.comments), nameMap()]);
+  const [rows, map, stats] = await Promise.all([io.getRows(T.comments), nameMap(), io.getRows(REPORTS_TABLE).catch(() => [])]);
   const live = rows.filter((c) => !asBool(c.isArchived));
   const reported = live.filter((c) => Number(c.flagged) > 0 && [MANNA, POST].includes(Number(c.component)));
 
@@ -280,6 +287,11 @@ export async function reportedComments() {
         hidden: hiddenNow(c),
         isReply: !!text(c.parentId) && text(c.parentId) !== '0',
         replies,
+        /* Who reported it, in the order they did. */
+        reporters: stats
+          .filter((r) => Number(r.component) === reportComponent(c.component) && String(r.componentId) === String(c.ROWID))
+          .map((r) => ({ id: String(r.memberId), name: authorOf(map, r.memberId, 'A member').name, at: asUtc(r.created) || asDate(r.CREATEDTIME) }))
+          .sort((a, b) => (+(a.at ?? 0)) - (+(b.at ?? 0))),
         at: asUtc(c.createdOn) || asDate(c.CREATEDTIME),
       };
     })

@@ -68,7 +68,9 @@ Brief: `FOR-CONSOLE-REPORTS-AND-EDUCATION.md`.
 Noahgram (`comments` rows, `component` 1 or 2). One member reports one comment once; at three the app hides it for everybody (`hide` = 1)
 and tells no one. The screen lists every comment with `flagged` above 0 that is not removed, most reported first, with where it is (the
 Manna title or the post's caption), who wrote it, and its replies shown together. Three decisions:
-- **Keep it**: reported unfairly. `flagged` = 0 and `hide` = 0, so it shows again.
+- **Keep it**: reported unfairly. `flagged` = 0 and `hide` = 0, so it shows again, and its rows in `flaggedComponentStats` are
+  deleted so those members can report it again. Each row there is one member's report (`component` 3 = a Manna comment, 4 = a
+  Noahgram comment, `componentId` = the comment); the screen shows "Reported by" with their names (REPORT-A-COMMENT-ERROR.md).
 - **Hide it**: `hide` = 1. Out of sight, not removed.
 - **Remove it**: `isArchived` = true, `archivedOn` = now, and the Manna's or post's `comments` count goes down by one (never below 0).
 The Work queues row and the Community badge count what is reported. Under **Media > Noahgram**, a post's comments carry the same

@@ -21,7 +21,7 @@ interface Reply { id: string; author: { id: string; name: string }; text: string
 interface Reported {
   id: string; kind: 'manna' | 'noahgram'; where: { id: string; title: string };
   author: { id: string; name: string }; text: string; reports: number; hidden: boolean; isReply: boolean;
-  replies: Reply[]; at: Date | null;
+  replies: Reply[]; reporters: { id: string; name: string; at: Date | null }[]; at: Date | null;
 }
 type Action = 'keep' | 'hide' | 'remove';
 
@@ -86,6 +86,11 @@ export default function ReportedComments() {
                 <span className="t2" style={{ display: 'block' }}>
                   <Who name={c.author.name} size="sm" sub={`${since(c.at)}${c.where.title ? ` · on “${c.where.title}”` : ''}`} />
                 </span>
+                {c.reporters.length > 0 && (
+                  <span className="t2" style={{ display: 'block', marginTop: 4 }}>
+                    Reported by {c.reporters.map((p) => p.name).join(', ')}
+                  </span>
+                )}
                 {c.replies.length > 0 && (
                   <ul className="list mt8" style={{ marginLeft: 12 }}>
                     {c.replies.map((r) => (

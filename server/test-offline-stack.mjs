@@ -1198,6 +1198,7 @@ check('...a Noahgram comment says so, with the post caption', repRows[1]?.kind =
 check('...one the API hid is marked hidden, one it did not is not', repRows[0]?.hidden === true && repRows[1]?.hidden === false);
 check('...with its replies shown together', repRows[0]?.replies?.length === 1 && repRows[0].replies[0].text === 'Please be kind.' && repRows[0].replies[0].author.name === 'Anand Rao', JSON.stringify(repRows[0]?.replies));
 check('...and who wrote it, by name', repRows[0]?.author?.name === 'Old Member', repRows[0]?.author?.name);
+check('...who reported it is shown, in the order they did', repRows[0]?.reporters?.map((p) => p.name).join() === 'Anand Rao,Anitha Varghese,Fr Thomas' && repRows[1]?.reporters?.map((p) => p.name).join() === 'Old Member', JSON.stringify(repRows.map((r) => r.reporters)));
 check('the work queue counts them', await queueCount('flags') === 2, String(await queueCount('flags')));
 check('listing needs permission to moderate (403)', (await call('GET', '/reported-comments', null, verifier.token)).status === 403);
 check('...and a sign-in (401)', (await call('GET', '/reported-comments')).status === 401);
@@ -1210,9 +1211,12 @@ const hid = await call('POST', `/reported-comments/${RC.cPost}/decide`, { action
 check('a reported comment can be hidden without removing it', hid.status === 200 && (await call('GET', '/reported-comments', null, BT)).body?.rows?.find((r) => r.id === RC.cPost)?.hidden === true, `${hid.status} ${hid.text.slice(0, 100)}`);
 check('hiding it again is refused (409)', (await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'hide' }, BT)).status === 409);
 
+const reportRows = async () => (await (await fetch(`http://127.0.0.1:${process.env.NOAH_PORT || '4301'}/_fake/count?table=flaggedComponentStats`)).json()).count;
+check('four reports are on record before any decision', await reportRows() === 4, String(await reportRows()));
 const keep = await call('POST', `/reported-comments/${RC.cManna}/decide`, { action: 'keep' }, BT);
 check('a comment reported unfairly can be kept: the reports are cleared and it shows again', keep.status === 200
   && !(await call('GET', '/reported-comments', null, BT)).body?.rows?.some((r) => r.id === RC.cManna), `${keep.status} ${keep.text.slice(0, 100)}`);
+check('...the three members who reported it can report it again (their report rows are cleared), and only that one comment\'s', await reportRows() === 1, String(await reportRows()));
 check('...it is no longer listed, and its replies were never touched', (await call('GET', '/reported-comments', null, BT)).body?.rows?.length === 1);
 
 const rem = await call('POST', `/reported-comments/${RC.cPost}/decide`, { action: 'remove' }, BT);
