@@ -14,7 +14,7 @@ import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useQueues } from '@/state/queues';
 import { Confirm, useToast } from '@/components/layers';
-import { Age, Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Note, Who } from '@/components/ui';
+import { Age, Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Who } from '@/components/ui';
 import { since } from '@/lib/format';
 
 interface Reply { id: string; author: { id: string; name: string }; text: string; hidden: boolean; at: Date | null }
@@ -65,17 +65,12 @@ export default function ReportedComments() {
       <Kpis>
         <Kpi label="Reported" value={rows.length} icon="flag" tone={rows.length ? 'warn' : undefined}
           detail={oldest ? <>oldest <Age at={oldest} warn={24} bad={72} /></> : 'nothing reported'} />
-        <Kpi label="Hidden already" value={hidden} icon="eye-off" detail="reported by three members or more" />
-        <Kpi label="Reported 3 times or more" value={many} icon="alert" tone={many ? 'bad' : undefined} detail="look at these first" />
+        <Kpi label="Hidden" value={hidden} icon="eye-off" />
+        <Kpi label="Reported 3 times or more" value={many} icon="alert" tone={many ? 'bad' : undefined} />
       </Kpis>
 
-      <Note tone="warn" icon="flag">
-        Members report comments on the Daily Manna and on Noahgram. At three different members the app hides the comment for everybody,
-        and nobody is told. It stays here until you decide: keep it, hide it, or remove it.
-      </Note>
-
       {rows.length === 0 ? (
-        <div className="card"><Empty icon="check" title="Nothing reported">No member has reported a comment, or every report has been decided.</Empty></div>
+        <div className="card"><Empty icon="check" title="Nothing reported" /></div>
       ) : (
         <ul className="list card">
           {rows.map((c) => (
@@ -121,10 +116,7 @@ export default function ReportedComments() {
         confirmLabel="Remove it"
         danger
       >
-        <p style={{ marginTop: 0 }}>
-          It is taken off for good, and the {removing?.kind === 'manna' ? 'Daily Manna' : 'post'} shows one comment fewer.
-          {removing && removing.replies.length > 0 && ' Its replies stay: remove them from their own rows if they should go too.'}
-        </p>
+        <p style={{ marginTop: 0 }}>This comment will be removed.</p>
         {removing && <p className="muted small" style={{ whiteSpace: 'pre-wrap' }}>“{removing.text}”</p>}
       </Confirm>
     </div>

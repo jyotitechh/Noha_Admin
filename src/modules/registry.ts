@@ -140,7 +140,7 @@ export const MODULES: ModuleDef[] = [
       { id: 'prayer-inbox', label: 'App prayer requests', perm: 'community.moderate', status: 'built',
         desc: 'Requests raised from the prayer pop-up in the app. Each one is held until you approve it, and the audience the member chose is honoured.' },
       { id: 'flagged', label: 'Reported comments', perm: 'community.moderate', status: 'built',
-        desc: 'Comments members have reported on the Daily Manna and on Noahgram. Keep one, hide it, or remove it.' },
+        desc: 'Comments members have reported on the Daily Manna and Noahgram.' },
       { id: 'praise', label: 'Praise', perm: 'community.moderate', status: 'built', desc: 'Praise reports and testimonies.' },
       { id: 'prayer', label: 'Prayer wall', perm: 'community.moderate', status: 'planned', from: 'Community → Prayer', desc: 'The wall itself, and prayer counts.' },
       { id: 'obituaries', label: 'Obituaries', perm: 'community.moderate', status: 'planned', from: 'Community → Obituaries', desc: 'Notices and service details.' },
@@ -171,7 +171,7 @@ export const MODULES: ModuleDef[] = [
     badges: ['mod'],
     tabs: [
       { id: 'noahgram', label: 'Noahgram', perm: 'community.moderate', status: 'built',
-        desc: 'The pictures and reels members post. Each one waits here until you approve it; you can also take a live post down and remove comments.' },
+        desc: 'Pictures and reels members post: approve them, take live posts down, and moderate comments.' },
       { id: 'noahgram-posts', label: 'Office posts and categories', perm: 'content.edit', status: 'built',
         desc: 'Posts the office writes for the feed, and the categories posts sit in.' },
       { id: 'noahtube', label: 'Noah Tube', perm: 'content.edit', status: 'built', desc: 'The video library, and the shelves it is arranged on.' },

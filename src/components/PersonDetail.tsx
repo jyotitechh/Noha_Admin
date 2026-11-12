@@ -205,7 +205,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
     setActing(true);
     try {
       await api.post(`/people/${memberRowId}/${to ? 'archive' : 'restore'}`);
-      toast(to ? `${member.name} is archived. They are hidden and cannot sign in to the app. This can be undone.` : `${member.name} is restored.`, to ? 'warn' : 'ok');
+      toast(to ? `${member.name} is archived.` : `${member.name} is restored.`, to ? 'warn' : 'ok');
       setStep('');
       q.reload();
       onChanged?.();
@@ -239,7 +239,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
     <div className="stack">
       {member.archived && (
         <Note tone="warn" icon="alert">
-          <b>This member is archived.</b> They are hidden from the register and cannot sign in to the app.
+          <b>This member is archived.</b>
           <div className="row wrap gap6 mt8">
             {can('members.archive') && <Btn sm icon="refresh" disabled={acting} onClick={() => archive(false)}>Restore</Btn>}
             {can('members.delete') && <Btn sm variant="danger" icon="trash" disabled={acting} onClick={() => { setTyped(''); setStep('delete'); }}>Delete for good</Btn>}
@@ -312,8 +312,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           </>
         }
       >
-        <p style={{ marginTop: 0 }}><b>{member.name}</b> is hidden from the register and can no longer sign in to the Noah app.</p>
-        <Note tone="info" icon="info">Nothing is deleted. You can restore them at any time from this page. If they should be removed for good, archive first, then delete.</Note>
+        <p style={{ marginTop: 0 }}><b>{member.name}</b> will be hidden and can no longer sign in to the app. You can restore them later.</p>
       </Modal>
 
       <Modal
@@ -331,8 +330,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
         }
       >
         <Note tone="bad" icon="alert">
-          <b>This cannot be undone.</b> Their record, registration, family links, uploaded ID, photograph and video, and their login are removed.
-          Anything they posted or booked in the app stays, no longer linked to anyone. If you only want them gone from sight, leave them archived.
+          <b>This cannot be undone.</b> Their record, registration, family links, uploads and login are removed.
         </Note>
         <div className="mt12">
           <Field label={<>Type <b>{member.name}</b> to confirm</>}>

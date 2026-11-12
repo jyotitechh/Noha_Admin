@@ -173,14 +173,9 @@ export default function Noahgram() {
       <Kpis>
         <Kpi label="Waiting" value={waiting.length} icon="chats" tone={waiting.length > 5 ? 'warn' : undefined}
           detail={oldest ? <>oldest <Age at={oldest} warn={12} bad={24} /></> : 'nothing waiting'} />
-        <Kpi label="Pictures" value={waiting.length - reels} icon="image" detail="waiting to be approved" />
-        <Kpi label="Reels" value={reels} icon="play" detail="waiting to be approved" />
-        <Kpi label="Target" value="12 h" icon="clock" detail="members are waiting to see their post" />
+        <Kpi label="Pictures" value={waiting.length - reels} icon="image" />
+        <Kpi label="Reels" value={reels} icon="play" />
       </Kpis>
-
-      <Note tone="info" icon="info">
-        Nothing a member uploads is seen by anyone until you approve it here. Approving or turning one down tells the member.
-      </Note>
 
       <div className="row wrap gap8">
         <Seg<Show> value={show} onChange={setShow}
@@ -285,21 +280,10 @@ export default function Noahgram() {
               </div>
             )}
 
-            {open.state === 'pending' && !turning && (
-              <div className="mt16">
-                <Note tone="info" icon="info"><b>If you approve:</b> it appears on the feed and its share link starts to work, and {open.author.name} is told it is live.</Note>
-              </div>
-            )}
-
             {turning && (
               <div className="mt20">
-                <Note tone="warn" icon="alert">
-                  {open.state === 'live'
-                    ? 'The post comes off the feed and its share link stops working. Nothing is deleted. The member is told.'
-                    : 'The member is told it was not approved. Nothing is deleted.'}
-                </Note>
-                <div className="mt12">
-                  <Field label="Why?" hint="Required. Kept with the post, so the next person to look can see why.">
+                <div>
+                  <Field label="Reason">
                     <textarea className="ta" rows={3} value={reason} autoFocus placeholder={REASONS[0]} maxLength={500}
                       onChange={(e) => setReason(e.target.value)} />
                   </Field>
@@ -340,7 +324,6 @@ export default function Noahgram() {
                     ))}
                   </ul>
                 )}
-                <p className="muted small mt8">Hidden and removed comments are not shown in the app. Removing one also lowers the post&apos;s comment count.</p>
               </div>
             )}
           </>
