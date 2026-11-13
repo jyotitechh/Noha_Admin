@@ -54,6 +54,11 @@ S.io.update = async (id, row) => {
 /* File Store: which stored files were deleted (by store id), so a test can see them go. */
 export const storedDeleted = [];
 S.io.deleteStoredFile = async (storeId) => { storedDeleted.push(String(storeId)); return true; };
+/* The one query the console runs on notifications: the "please correct" messages, newest first. */
+S.io.rejectionNotices = async () => (tables['tbl:notifications'] || [])
+  .filter((n) => n.type === 'registration_rejected')
+  .sort((a, b) => String(b.CREATEDTIME).localeCompare(String(a.CREATEDTIME)))
+  .map((n) => ({ ...n }));
 
 export { tables, writes, reset };
 
@@ -97,8 +102,8 @@ export const seed = () => ({
     {
       ROWID: M.draft, id: M.draft, userId: U.draft, countryCode: '+91', mobileNumber1: '9000000777',
       status: true, isUnVerified: true, archived: false, firstName: 'Meera', lastName: 'Nair', gender: 2,
-      /* Referred by a member, by her number: the green tick. */
-      referBy: 'Anitha V|+91|9000000555',
+      /* Referred by a member, her name and her number: the green tick. */
+      referBy: 'Anitha Varghese|+91|9000000555',
       CREATEDTIME: '2026-10-19 17:00:00:000',
     },
     /* Verified in the office's own system; never used the app, so no registration. */

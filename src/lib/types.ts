@@ -12,6 +12,10 @@ export interface Registration {
   marital: string; reference: string;
   /* Who referred them and whether that person is in Noah; absent without the Catalyst tables. */
   referrer?: import('@/components/ReferredBy').Referrer | null;
+  /* Sent again after a rejection (or a returned video), and the newest rejection's date and note. */
+  resent?: boolean;
+  lastRejection?: { at: Date | null; note: string } | null;
+  timesRejected?: number;
   /* `region` is the state or province. `state` below is the workflow state. */
   line1: string; line2: string; city: string; region: string; country: string; pin: string;
   idType: string; idNumber: string; idFile: string; idSizeKb: number;

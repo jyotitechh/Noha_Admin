@@ -158,7 +158,7 @@ export default function Approved() {
               {open.state === 'approved'
                 ? <Chip tone="ok" icon="user-check">Approved — the app is open to them</Chip>
                 : open.state === 'rejected'
-                  ? <Chip tone="bad" icon="x">Rejected — the app stays shut</Chip>
+                  ? <Chip tone="bad" icon="x">Rejected — waiting for the member to correct it</Chip>
                   : <Chip tone="bad" icon="video">Video returned — the app stays shut</Chip>}            </div>
 
             <div className="sect-title">What happened</div>

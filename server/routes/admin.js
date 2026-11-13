@@ -35,7 +35,7 @@ const told = (notified) => {
 const notPendingMessage = (state) => ({
   draft: 'That person has not finished registering yet, so there is nothing to decide.',
   approved: 'That registration is already approved.',
-  rejected: 'That registration was already rejected.',
+  rejected: 'That registration was rejected and is waiting for the member to correct it. It comes back here when they send it again.',
   videoReturned: 'That registration is waiting for the member to record the video again.',
 }[state] || 'That registration is not waiting for a decision.');
 
@@ -360,7 +360,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     const r = live() ? await registrationById(req.params.id) : find('REGISTRATIONS', req.params.id);
     if (!r) return notFound(res);
     const remark = String(req.body?.remark || '').trim();
-    if (!remark) return res.status(400).json({ error: 'Say why it is being rejected. The member sees this.' });
+    if (!remark) return res.status(400).json({ error: 'Say what the member should correct. They see this in the app and in the email.' });
     if (r.state === 'approved') return res.status(409).json({ error: 'That registration is already approved.' });
 
     /* Only a registration waiting for a decision can be decided. The Noah API

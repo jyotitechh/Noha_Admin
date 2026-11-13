@@ -261,7 +261,8 @@ http.createServer(async (req, res) => {
 
   /* ADMIN_INTEGRATION.md: notify tells the member about a decision ALREADY stored, once. A decision
      made through the API tells them at the time, so it is recorded here and asking again says so. */
-  if (req.method === 'POST' && (m = path.match(/^\/admin\/registrations\/(\d+)\/notify$/))) {
+  /* `announce` is the newer name (FOR-CONSOLE-REJECTED-REGISTRATIONS.md); the live API still has only `notify` (13 Nov 2026). */
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/registrations\/(\d+)\/(?:notify|announce)$/))) {
     const r = find(m[1]);
     if (!r) return err(res, 404, 'registration_not_found', 'No such registration.');
     if (r.status === 'pending' || r.status === 'draft') return err(res, 409, 'not_decided', 'There is no decision to tell them about.');
@@ -287,6 +288,16 @@ http.createServer(async (req, res) => {
       if (body.profileVerified) { r.profileVerified = true; r.profileVerifiedAt = stamp(); }
     } else {
       r.status = m[2] === 'reject' ? 'rejected' : 'videoReturned';
+      /* FOR-CONSOLE-REJECTED-REGISTRATIONS.md: the member's message is kept in notifications, the note after a fixed sentence. */
+      if (m[2] === 'reject') {
+        (tables['tbl:notifications'] ||= []).push({
+          ROWID: String(27145000000190000 + tables['tbl:notifications'].length), type: 'registration_rejected',
+          notifiable_type: 'Member', notifiable_id: String(r.memberRowId),
+          /* CREATEDTIME is IST in Catalyst. */
+          CREATEDTIME: new Date(Date.now() + 5.5 * 36e5).toISOString().slice(0, 19).replace('T', ' ') + ':000',
+          data: JSON.stringify({ title: 'Please correct your registration', body: `Some of your details need to be corrected. Open the Noah app, make the changes and submit your registration again. ${body.note || ''}`.trim() }),
+        });
+      }
     }
     S.clearCache();
     return send(res, 200, { id: r.ROWID, status: r.status, notified: { pushed: 0, emailed: true } });

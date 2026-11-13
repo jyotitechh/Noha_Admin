@@ -1,14 +1,14 @@
 /* Who referred a member, as they gave it when registering, and whether that
-   person is already in Noah: a green tick when their number belongs to a member,
-   a red cross when it does not. A name alone is not taken as proof, so a member
-   with the same name but another number is only mentioned. */
+   person is already in Noah: a green tick only when the name AND the number are
+   the same member's, a red cross otherwise. When only one half matches, which
+   member it matched is shown, so the office can see why. */
 
 import { Chip } from '@/components/ui';
 
 interface Brief { rowId: string; name: string; memberId: string; archived?: boolean }
 export interface Referrer {
   name: string; phone: string; inNoah: boolean;
-  member: Brief | null; sameName: Brief[];
+  member: Brief | null; numberOf?: Brief | null; sameName: Brief[];
 }
 
 export function ReferredBy({ referrer, phone, fallback }: { referrer?: Referrer | null; phone?: string; fallback?: string }) {
@@ -29,6 +29,11 @@ export function ReferredBy({ referrer, phone, fallback }: { referrer?: Referrer 
         <div className="small muted mt4">
           {referrer.member.name} · member number <span className="mono">{referrer.member.memberId}</span>
           {referrer.member.archived ? ' · archived' : ''}
+        </div>
+      )}
+      {!referrer.inNoah && referrer.numberOf && (
+        <div className="small muted mt4">
+          The number is {referrer.numberOf.name}'s (<span className="mono">{referrer.numberOf.memberId}</span>): the name does not match.
         </div>
       )}
       {!referrer.inNoah && referrer.sameName.length > 0 && (

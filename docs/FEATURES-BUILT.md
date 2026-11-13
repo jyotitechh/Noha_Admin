@@ -66,11 +66,11 @@ The app stores the reference a member gives at registration in `members.referBy`
 `name|+91|number` (none given is `|+91|`). The member page (**Who they are > Referred by**) and the registration
 review show the name and number with:
 
-* **green tick, "Noah member"**: the number is a member's mobile (`mobileNumber1`, `mobileNumber2`) or login number
-  (`users.number`), compared on the last 10 digits. The matched member's name and member number are shown under it.
-* **red cross, "Not a Noah member"**: no member has that number. If a member has the same name with another number,
-  that is shown as "Same name, different number", for the office to judge. A name alone never gives the green tick,
-  because names repeat (two "Mehak Dhamija" rows exist in Development).
+* **green tick, "Noah member"**: the name AND the number are the same member's. The number is their mobile
+  (`mobileNumber1`, `mobileNumber2`) or login number (`users.number`), compared on the last 10 digits; the name is their
+  full name or first and last name, ignoring case, dots and extra spaces. The matched member is shown under it.
+* **red cross, "Not a Noah member"**: anything less. When only one half matches, it says which: "The number is X's: the
+  name does not match", or "Same name, different number: X". A number with no name is never a match.
 
 The person themselves never counts as their own referrer. The referrer's number is masked like the member's own and
 shown in full with **Reveal contact details** (audited). The tick is worked out when the page opens.
@@ -80,6 +80,25 @@ only, without the country code; a contact detail, so it needs `members.pii` and 
 are written back into the one `referBy` column as `name|code|number`, keeping the existing country code (+91 when there
 was none); clearing both leaves the app's own empty `|+91|`. The change is in the audit log (the number as
 "(contact detail)"), and the tick follows the new number at once.
+
+## 2f. A rejected registration comes back corrected
+
+From `FOR-CONSOLE-REJECTED-REGISTRATIONS.md`. A rejection is no longer final: the member is told what to change (push,
+email, notification), corrects it in the app and submits again, and it is **pending** once more.
+
+* **Reject** asks for **What to correct** (required; the member sees it) and goes through `POST /admin/registrations/:id/reject`.
+  The toast says it went back for correction and returns once they send it again.
+* A registration sent again is marked **Sent again** in the list. Its drawer says when it was rejected (and how many
+  times) and the note it was rejected with, so the office can check that exactly that was corrected. The API clears
+  `reviewNote` on resubmission, so the note is read from the member's message in `notifications`
+  (type `registration_rejected`, the note after the fixed sentence): one ZCQL query, cached a minute like the tables; if
+  it fails, the registration still shows, without the note.
+* "Sent again" is a pending registration with an earlier rejection message, or one submitted after its last decision
+  (`submittedAt` later than `reviewedAt`, which also covers a returned video).
+* A rejected one waiting for the member reads "Rejected — waiting for the member to correct it", and deciding it is
+  refused with that reason.
+* **Tell the member** (a decision written to the table without the API) calls `announce`, falling back to `notify`: the
+  live API has only `notify` so far (13 Nov 2026).
 
 ## 2e. The console updates itself after a deploy
 

@@ -266,7 +266,7 @@ export default function Registrations() {
     setBusy(true);
     try {
       const res = await api.post<{ warning?: string } & Told>(`/registrations/${r.id}/reject`, { remark: remark.trim() });
-      await afterDecision(`${r.fullName}'s registration was rejected. ${res.notifiedText ?? ''}`.trim());
+      await afterDecision(`${r.fullName}'s registration went back for correction. It returns here once they send it again. ${res.notifiedText ?? ''}`.trim());
       if (res.warning) toast(res.warning, 'warn');
       else if (res.delivered === false) toast(res.notifiedText ?? 'The member could not be reached.', 'warn');
     } catch (e) {
@@ -289,7 +289,12 @@ export default function Registrations() {
   const columns: Column<Registration>[] = [
     {
       key: 'fullName', label: 'Member',
-      cell: (r) => <Who name={r.fullName} sub={<span className="mono">{r.mobile}</span>} />,
+      cell: (r) => (
+        <div className="row gap6" style={{ alignItems: 'center' }}>
+          <Who name={r.fullName} sub={<span className="mono">{r.mobile}</span>} />
+          {r.resent && <Chip tone="brand" icon="refresh">Sent again</Chip>}
+        </div>
+      ),
     },
     { key: 'city', label: 'From', cell: (r) => <>{r.city}<span className="sub">{r.country}</span></> },
     { key: 'idType', label: 'ID proof', cell: (r) => <>{r.idType}<span className="sub mono">{r.idNumber}</span></> },
@@ -423,8 +428,23 @@ export default function Registrations() {
             {open.state === 'rejected' && (
               <div className="mb12">
                 <Note tone="bad" icon="x">
-                  <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}.</b>
-                  <br />“{open.remark}”
+                  <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}. Waiting for the member to correct it and send it again.</b>
+                  {open.remark && <><br />“{open.remark}”</>}
+                </Note>
+              </div>
+            )}
+
+            {/* Corrected in the app and sent again: what the office asked them to change, to check it was done. */}
+            {open.state === 'pending' && open.resent && (
+              <div className="mb12">
+                <Note tone="info" icon="refresh">
+                  <b>
+                    Sent again after a correction.
+                    {open.lastRejection?.at ? ` Rejected on ${fd(open.lastRejection.at)}` : ''}
+                    {open.timesRejected && open.timesRejected > 1 ? ` (${open.timesRejected} times)` : ''}
+                    {open.lastRejection?.at ? '.' : ''}
+                  </b>
+                  {open.lastRejection?.note && <><br />“{open.lastRejection.note}”</>}
                 </Note>
               </div>
             )}
@@ -505,13 +525,13 @@ export default function Registrations() {
         }
       >
         <div>
-          <Field label="Reason" hint="The member sees this. A rejection is final.">
+          <Field label="What to correct" hint="The member sees this, corrects the registration in the app and sends it again.">
             <textarea
               className="ta"
               rows={4}
               value={remark}
               autoFocus
-              placeholder="The ID you gave does not match the name on your registration."
+              placeholder="The ID proof is not readable. Please upload it again."
               onChange={(e) => setRemark(e.target.value)}
             />
           </Field>

@@ -88,13 +88,49 @@ check('referBy "name|+91|number" splits', reg.reference === 'Fr. Thomas' && reg.
   tables[T.appRegistrations].pop();
   S.clearCache?.();
 }
+{
+  /* FOR-CONSOLE-REJECTED-REGISTRATIONS.md: rejected, corrected in the app, sent again. */
+  const reg0 = tables[T.appRegistrations].find((x) => x.memberRowId === M.approved);
+  const keep = { ...reg0 };
+  Object.assign(reg0, { status: 'pending', reviewNote: '', reviewedAt: '2026-11-12 10:00:00', submittedAt: '2026-11-13 06:00:00' });
+  (tables['tbl:notifications'] ||= []).push(
+    { ROWID: '90001', type: 'registration_rejected', notifiable_id: M.approved, CREATEDTIME: '2026-11-12 15:30:00:000',
+      data: JSON.stringify({ title: 'Please correct your registration', body: 'Some of your details need to be corrected. Open the Noah app, make the changes and submit your registration again. The ID proof is not readable.' }) },
+    { ROWID: '90000', type: 'registration_rejected', notifiable_id: M.approved, CREATEDTIME: '2026-11-01 15:30:00:000',
+      data: JSON.stringify({ body: 'Some of your details need to be corrected. Open the Noah app, make the changes and submit your registration again. Older note.' }) },
+    { ROWID: '90002', type: 'registration_approved', notifiable_id: M.approved, CREATEDTIME: '2026-11-13 15:30:00:000', data: '{}' },
+  );
+  S.clearCache();
+  const back = (await S.loadRegistrations()).find((x) => x.memberRowId === M.approved);
+  check('a registration sent again after a rejection is pending and marked as sent again', back.state === 'pending' && back.resent === true, JSON.stringify([back.state, back.resent]));
+  check('...with the newest rejection\'s note, without the fixed sentence', back.lastRejection?.note === 'The ID proof is not readable.', back.lastRejection?.note);
+  check('...its date, and how many times it was rejected', back.lastRejection?.at?.toISOString().startsWith('2026-11-12T10:00') && back.timesRejected === 2, JSON.stringify(back.lastRejection));
+  const other = (await S.loadRegistrations()).find((x) => x.memberRowId === M.draft);
+  check('a registration never rejected is not marked', other && other.resent === false && other.lastRejection === null);
+  Object.assign(reg0, keep);
+  tables['tbl:notifications'] = tables['tbl:notifications'].filter((n) => !['90000', '90001', '90002'].includes(n.ROWID));
+  S.clearCache();
+  const saved = S.io.rejectionNotices;
+  S.io.rejectionNotices = async () => { throw new Error('query refused'); };
+  check('if the messages cannot be read, the registrations still load', (await S.loadRegistrations()).length > 0);
+  S.io.rejectionNotices = saved;
+  S.clearCache();
+}
 check('referrer: a number no member has is not a Noah member', reg.referrer?.inNoah === false && reg.referrer.member === null && reg.referrer.phone === '+91 9000011111', JSON.stringify(reg.referrer));
 check('...but a member with the same name is mentioned', reg.referrer?.sameName.length === 1 && reg.referrer.sameName[0].rowId === M.pastor, JSON.stringify(reg.referrer?.sameName));
 {
   const S2 = S;
   const meera = (await S2.loadPerson(M.draft)).referrer;
-  check('referrer: a member\'s number is a Noah member, whatever name was typed', meera?.inNoah === true && meera.member?.rowId === M.boss && meera.member.name === 'Anitha Varghese', JSON.stringify(meera));
-  check('...and no same-name list then', meera?.sameName.length === 0);
+  check('referrer: a member\'s name and number together are a Noah member', meera?.inNoah === true && meera.member?.rowId === M.boss && meera.member.name === 'Anitha Varghese', JSON.stringify(meera));
+  check('...and no same-name list then', meera?.sameName.length === 0 && meera.numberOf === null);
+  const idx = S2.referrerIndex([{ ROWID: M.boss, firstName: 'Anitha', lastName: 'Varghese', mobileNumber1: '9000000555' }, { ROWID: M.pastor, firstName: 'Fr', lastName: 'Thomas', mobileNumber1: '9000000100' }], []);
+  const ref = (s) => S2.referrerOf({ ROWID: '1', referBy: s }, idx);
+  check('referrer: the right number with another name is NOT a member, and says whose number it is',
+    ref('Anitha V|+91|9000000555').inNoah === false && ref('Anitha V|+91|9000000555').numberOf?.rowId === M.boss, JSON.stringify(ref('Anitha V|+91|9000000555')));
+  check('referrer: the right name with another number is NOT a member, and the name is mentioned',
+    ref('Anitha Varghese|+91|9111111111').inNoah === false && ref('Anitha Varghese|+91|9111111111').sameName[0]?.rowId === M.boss);
+  check('referrer: a number alone, with no name, is NOT a member', ref('|+91|9000000555').inNoah === false);
+  check('referrer: case, dots and spaces do not matter', ref('  anitha   VARGHESE |+91|90000 00555').inNoah === true && ref('Fr. Thomas|+91|9000000100').inNoah === true);
   check('referrer: none given reads as null', (await S2.loadPerson(M.office)).referrer === null);
   check('referrer: an empty "|+91|" reads as null', S2.referrerOf({ ROWID: '1', referBy: '|+91|' }, S2.referrerIndex([], [])) === null);
   check('referrer: someone giving their own number is not their own referrer',
@@ -1053,9 +1089,11 @@ reset(seed());
   const w = writes.slice(before).filter((x) => x.op === 'update');
   check('...in one write of referBy only', w.length === 1 && Object.keys(w[0].row).sort().join() === 'ROWID,referBy', JSON.stringify(w[0]?.row));
   check('...and says it was the referrer number that changed', r.changed.length === 1 && r.changed[0].key === 'referPhone' && r.changed[0].contact === true);
-  check('...and the member page now shows a Noah member referrer', (await S.loadPerson(M.approved)).referrer?.inNoah === true);
+  const half = (await S.loadPerson(M.approved)).referrer;
+  check('...the number is a member\'s but the name is not: still not a Noah member', half?.inNoah === false && half.numberOf?.rowId === M.boss, JSON.stringify(half));
   await S.updateMemberFields(M.approved, { 'referBy#name': 'Anitha Varghese', 'referBy#phone': '9000000555' });
   check('changing both at once is one value', rowOf().referBy === 'Anitha Varghese|+91|9000000555', rowOf().referBy);
+  check('...and with both matching, the page shows a Noah member', (await S.loadPerson(M.approved)).referrer?.inNoah === true);
   await S.updateMemberFields(M.approved, { 'referBy#name': null, 'referBy#phone': null });
   check('clearing both reads as none given', rowOf().referBy === '|+91|' && (await S.loadPerson(M.approved)).referrer === null, rowOf().referBy);
 }

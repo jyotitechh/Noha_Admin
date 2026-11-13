@@ -35,7 +35,7 @@
    take it from an insert response (Catalyst sends it unquoted there). */
 
 import {
-  getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile,
+  getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile, query,
 } from './catalyst.js';
 import { MEMBER_FIELDS, REFER_COLUMN, referByParts, joinReferBy } from './member-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
@@ -123,6 +123,11 @@ export const io = {
   listTables,
   /* A file in File Store, by its store id (the `path` column of a files row). */
   deleteStoredFile: (storeId) => deleteFile(storeId),
+  /* The "Please correct your registration" messages the Noah API sent, newest first. One query,
+     not the whole notifications table (it holds every message to every member). */
+  rejectionNotices: () => query(
+    "SELECT notifiable_id, data, CREATEDTIME FROM notifications WHERE type = 'registration_rejected' ORDER BY CREATEDTIME DESC LIMIT 300",
+  ),
 };
 
 /* The tables, as references. `npm run check:schema` confirms each exists and has
@@ -271,7 +276,7 @@ let generation = 0;
    registrations an app sends in are seen after at most this long. */
 const CACHE_MS = (Number(process.env.CONSOLE_CACHE_SECONDS) || 60) * 1000;
 
-export const clearCache = () => { snap = null; crSnap = null; household = null; generation += 1; };
+export const clearCache = () => { snap = null; crSnap = null; household = null; notices = null; generation += 1; };
 
 async function snapshot() {
   if (snap && Date.now() - snapAt < CACHE_MS) return snap;
@@ -290,6 +295,41 @@ async function snapshot() {
 
   return inflight;
 }
+
+/* ---------- rejections the member was told about ----------
+
+   A rejection is not final: the member corrects the registration in the app and sends it
+   again, and it comes back as pending with `reviewNote` cleared (FOR-CONSOLE-REJECTED-REGISTRATIONS.md).
+   The office's note survives in the message the member was sent, `notifications` of type
+   registration_rejected: its body is a fixed sentence followed by the note. Read once a minute,
+   like the tables; a failure only means the earlier note is not shown. */
+
+const REJECT_LEAD = 'Some of your details need to be corrected. Open the Noah app, make the changes and submit your registration again.';
+let notices = null;
+let noticesAt = 0;
+
+/** memberRowId -> [{ at, note }], newest first. */
+async function rejectionsByMember() {
+  if (notices && Date.now() - noticesAt < CACHE_MS) return notices;
+  const out = new Map();
+  try {
+    for (const n of await io.rejectionNotices()) {
+      let body = '';
+      try { body = String(JSON.parse(n.data || '{}').body || ''); } catch { /* not JSON: no note */ }
+      const note = body.startsWith(REJECT_LEAD) ? body.slice(REJECT_LEAD.length).trim() : body.trim();
+      const key = String(n.notifiable_id);
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push({ at: ist(n.CREATEDTIME), note });
+    }
+    for (const list of out.values()) list.sort((a, b) => +(b.at ?? 0) - +(a.at ?? 0));
+  } catch (err) {
+    console.error(`[registrations] earlier rejections could not be read: ${err.message}`);
+  }
+  notices = out;
+  noticesAt = Date.now();
+  return out;
+}
+export const forgetRejections = () => { notices = null; };
 
 /* The newest registration per member. A member can have more than one (a
    draft, then a resubmission), and the newest is the one that counts. */
@@ -337,7 +377,7 @@ export async function registrationCore(rowId) {
 
 /** Everything the console needs for the registration queue, joined up. */
 export async function loadRegistrations() {
-  const { regs, members, files, users } = await snapshot();
+  const [{ regs, members, files, users }, rejections] = await Promise.all([snapshot(), rejectionsByMember()]);
 
   const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
   const userById = new Map(users.map((u) => [String(u.ROWID), u]));
@@ -373,13 +413,26 @@ export async function loadRegistrations() {
     const [refName = '', , refPhone = ''] = String(m.referBy || '').split('|');
     const dob = utc(m.dateOfBirth);
 
+    /* Sent again after the office rejected it (or returned the video): pending once more,
+       with the earlier rejection's date and note from the message the member was sent. */
+    const state = stateOf(r.status);
+    const rejectedEarlier = rejections.get(uid) || [];
+    const submitted = utc(r.submittedAt);
+    const reviewed = utc(r.reviewedAt);
+    const resent = state === 'pending'
+      && (rejectedEarlier.length > 0 || (!!reviewed && !!submitted && +submitted > +reviewed));
+
     return {
       rowId: String(r.ROWID),
       memberRowId: uid,
       id: String(r.ROWID),
       /* Their raw status, kept visible rather than translated away. */
       rawStatus: r.status,
-      state: stateOf(r.status),
+      state,
+      resent,
+      /* The newest "please correct" message: when, and the office's note in it. */
+      lastRejection: rejectedEarlier[0] ? { at: rejectedEarlier[0].at, note: rejectedEarlier[0].note } : null,
+      timesRejected: rejectedEarlier.length,
 
       mobile: phoneOf(m, userById.get(String(m.userId))),
       salutation: m.salutation || '',
@@ -1115,10 +1168,10 @@ const memberFullName = (m) =>
 /* ---------- who referred them ----------
 
    The app stores the reference as one text, `members.referBy` = "name|+91|number"
-   (an empty one is "|+91|"). The referrer counts as a Noah member when their
-   number is a member's mobile or login number: a name alone is not proof, since
-   names repeat. When the number matches no one but the name does, those members
-   are listed so the office can judge. */
+   (an empty one is "|+91|"). The referrer counts as a Noah member only when the
+   name AND the number are the same member's (the number is their mobile or login
+   number). If only one half matches, it is not a member, and the half that did
+   match is shown so the office can see why. */
 
 const phoneKey = (s) => digits(s).slice(-10);
 const nameKey = (s) => String(s ?? '').replace(/\./g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -1160,15 +1213,24 @@ export function referrerOf(m, index) {
     rowId: String(x.ROWID), name: memberFullName(x), memberId: x.memberId || String(x.ROWID), archived: asBool(x.archived),
   });
 
+  /* A Noah member only when the name AND the number are the same member's. The name may be their
+     full name or first and last name, ignoring case, dots and extra spaces. */
+  const want = nameKey(cleanName);
+  const nameIs = (x) => !!want && [memberFullName(x), [x.firstName, x.lastName].filter(Boolean).join(' ')].some((n) => nameKey(n) === want);
   const byPhone = cleanNumber.length >= 7 ? live(others(index.byPhone.get(phoneKey(cleanNumber)))) : [];
-  const sameName = byPhone.length ? [] : live(others(index.byName.get(nameKey(cleanName)))).slice(0, 3);
+  const both = byPhone.filter(nameIs);
+  const inNoah = both.length > 0;
+  /* When it is not a match, say which half matched someone, so the office can see why. */
+  const numberOf = inNoah ? null : byPhone[0] || null;
+  const sameName = inNoah ? [] : live(others(index.byName.get(want))).filter((x) => !byPhone.includes(x)).slice(0, 3);
   const dialDigits = digits(dial);
 
   return {
     name: cleanName,
     phone: cleanNumber ? `${dialDigits ? '+' + dialDigits + ' ' : ''}${cleanNumber}` : '',
-    inNoah: byPhone.length > 0,
-    member: byPhone[0] ? brief(byPhone[0]) : null,
+    inNoah,
+    member: inNoah ? brief(both[0]) : null,
+    numberOf: numberOf ? brief(numberOf) : null,
     sameName: sameName.map(brief),
   };
 }

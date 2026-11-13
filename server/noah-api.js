@@ -150,8 +150,17 @@ export const returnVideo = (id, { actor, note }) =>
  * be reached. Each member is told once: asking again answers `{ alreadySent: true }`.
  * Prefer approve / reject / returnVideo, which decide AND tell in one call.
  */
-export const notify = (id, { actor } = {}) =>
-  call(`/admin/registrations/${encodeURIComponent(id)}/notify`, { method: 'POST', actor, body: {} });
+export async function notify(id, { actor } = {}) {
+  const path = `/admin/registrations/${encodeURIComponent(id)}`;
+  /* FOR-CONSOLE-REJECTED-REGISTRATIONS.md calls it `announce`; the live API has only `notify` so far
+     (13 Nov 2026: announce answers 404). Ask for announce, and fall back when it is not there. */
+  try {
+    return await call(`${path}/announce`, { method: 'POST', actor, body: {} });
+  } catch (err) {
+    if (err.status !== 404 || err.code === 'registration_not_found') throw err;
+    return call(`${path}/notify`, { method: 'POST', actor, body: {} });
+  }
+}
 
 /**
  * What a `notified` answer means, in a sentence the office can read, and whether it is

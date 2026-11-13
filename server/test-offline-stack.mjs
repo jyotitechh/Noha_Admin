@@ -137,6 +137,7 @@ check('a rejected member is NOT let in', rejIn.body?.status !== 'member', JSON.s
 
 const approveRejected = await call('POST', `/registrations/${r.id}/approve`, {}, token);
 check('a rejected registration cannot then be approved', approveRejected.status >= 400, `${approveRejected.status}`);
+const notPendingSays = approveRejected.body?.error || '';
 
 /* ================================================================== */
 section('Returning the video');
@@ -181,6 +182,24 @@ section('Signing in by mobile number');
 const CONTROL = BASE.replace(/:(\d+)\/api$/, (_m, p) => `:${Number(p) + 1}`);
 const fakePatch = (table, rowId, set) =>
   fetch(CONTROL + '/_fake/patch', { method: 'POST', body: JSON.stringify({ table, rowId, set }) }).then((r) => r.json());
+
+/* ================================================================== */
+section('A rejected registration comes back corrected');
+
+/* FOR-CONSOLE-REJECTED-REGISTRATIONS.md: the member corrects it in the app and submits again. The app does that through
+   the Noah API: pending again, the note cleared, a new submittedAt. */
+const resubmitAt = new Date(Date.now() + 60_000).toISOString().slice(0, 19).replace('T', ' ');
+await fakePatch('appRegistrations', r.id, { status: 'pending', reviewNote: '', submittedAt: resubmitAt });
+const backRows = (await call('GET', '/data/REGISTRATIONS?state=pending&limit=500', null, token)).body?.rows || [];
+const backReg = backRows.find((x) => x.id === r.id);
+check('it is waiting for a decision again, marked as sent again', backReg?.state === 'pending' && backReg.resent === true, JSON.stringify({ s: backReg?.state, resent: backReg?.resent }));
+if (!NO_KEY) {
+  check('...with the note it was rejected with, to check it was corrected', backReg?.lastRejection?.note === 'The ID photo does not match.', JSON.stringify(backReg?.lastRejection));
+}
+const reApprove = await call('POST', `/registrations/${r.id}/approve`, {}, token);
+check('...and the office can approve it now', reApprove.status === 200, `${reApprove.status} ${reApprove.text.slice(0, 160)}`);
+check('a registration that is rejected and not sent again still cannot be decided, and the reason says it waits for the member',
+  /correct it/.test(notPendingSays || ''), notPendingSays);
 
 async function signIn(mobile, code) {
   const ask = await call('POST', '/auth/request-code', { mobile });
