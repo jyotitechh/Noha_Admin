@@ -1024,6 +1024,31 @@ const MF = await import('./member-fields.js');
   check('the login number and ID numbers are not on the editable list', !MF.MEMBER_FIELDS.some((f) => /mobile|aadhar|pan|passport|voter|driving|emirates|userId/i.test(f.key + f.column)));
   check('contact details need permission to see them', !!MF.checkPatch({ email: 'a@b.co' }, { canContact: false }).errors.email && !MF.checkPatch({ email: 'a@b.co' }, { canContact: true }).errors.email);
   check('a request names a field loosely and still finds it', MF.fieldByName('EmailId1')?.key === 'email' && MF.fieldByName('first_name')?.key === 'firstName' && MF.fieldByName('favouriteColour') === null);
+  check('referrer number: digits only, spaces dropped', MF.checkPatch({ referPhone: '98216 19133' }, { canContact: true }).values['referBy#phone'] === '9821619133');
+  check('...letters or a short number are refused', !!MF.checkPatch({ referPhone: 'abc' }, { canContact: true }).errors.referPhone && !!MF.checkPatch({ referPhone: '123' }, { canContact: true }).errors.referPhone);
+  check('...and it is a contact detail', !!MF.checkPatch({ referPhone: '9821619133' }, { canContact: false }).errors.referPhone);
+  check('referrer name cannot hold the separator', !!MF.checkPatch({ referName: 'a|b' }).errors.referName);
+  check('joining keeps the other part and the country code', MF.joinReferBy('Old Name|+971|501234567', { name: 'New Name' }) === 'New Name|+971|501234567');
+  check('...a new reference gets +91', MF.joinReferBy(null, { name: 'A', phone: '9000000555' }) === 'A|+91|9000000555');
+  check('...clearing both leaves the app\'s own empty form', MF.joinReferBy('A|+91|9', { name: null, phone: null }) === '|+91|');
+}
+
+reset(seed());
+{
+  const rowOf = () => tables[T.members].find((m) => m.ROWID === M.approved);
+  const p0 = await S.loadPerson(M.approved);
+  check('the edit form starts from the two parts of the reference', p0.editable.referName === 'Fr. Thomas' && p0.editable.referPhone === '9000011111', JSON.stringify([p0.editable.referName, p0.editable.referPhone]));
+  const before = writes.length;
+  const r = await S.updateMemberFields(M.approved, { 'referBy#phone': '9000000555' });
+  check('changing the referrer number writes the one referBy column, name and code kept', rowOf().referBy === 'Fr. Thomas|+91|9000000555', rowOf().referBy);
+  const w = writes.slice(before).filter((x) => x.op === 'update');
+  check('...in one write of referBy only', w.length === 1 && Object.keys(w[0].row).sort().join() === 'ROWID,referBy', JSON.stringify(w[0]?.row));
+  check('...and says it was the referrer number that changed', r.changed.length === 1 && r.changed[0].key === 'referPhone' && r.changed[0].contact === true);
+  check('...and the member page now shows a Noah member referrer', (await S.loadPerson(M.approved)).referrer?.inNoah === true);
+  await S.updateMemberFields(M.approved, { 'referBy#name': 'Anitha Varghese', 'referBy#phone': '9000000555' });
+  check('changing both at once is one value', rowOf().referBy === 'Anitha Varghese|+91|9000000555', rowOf().referBy);
+  await S.updateMemberFields(M.approved, { 'referBy#name': null, 'referBy#phone': null });
+  check('clearing both reads as none given', rowOf().referBy === '|+91|' && (await S.loadPerson(M.approved)).referrer === null, rowOf().referBy);
 }
 
 reset(seed());

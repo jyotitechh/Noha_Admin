@@ -73,7 +73,21 @@ review show the name and number with:
   because names repeat (two "Mehak Dhamija" rows exist in Development).
 
 The person themselves never counts as their own referrer. The referrer's number is masked like the member's own and
-shown in full with **Reveal contact details** (audited). Nothing is written: it is worked out when the page opens.
+shown in full with **Reveal contact details** (audited). The tick is worked out when the page opens.
+
+**Editing.** **Edit details** has a **Referred by** group: **Referrer name** and **Referrer mobile number** (digits
+only, without the country code; a contact detail, so it needs `members.pii` and **Show contact details to edit**). Both
+are written back into the one `referBy` column as `name|code|number`, keeping the existing country code (+91 when there
+was none); clearing both leaves the app's own empty `|+91|`. The change is in the audit log (the number as
+"(contact detail)"), and the tick follows the new number at once.
+
+## 2e. The console updates itself after a deploy
+
+Slate serves the page with a one-year cache (`cache-control: public, max-age=31536000`), so a browser could keep
+running an old console after a deploy. `src/lib/freshness.ts` asks for the page afresh on start, every ten minutes and
+when the tab comes back into view; when it loads a different script, the next move to another screen loads the new
+console (never mid-screen, so nothing typed is lost). A screen whose code is gone after a deploy also loads the new
+version instead of failing. A browser still on a version from before this needs one **Ctrl + Shift + R**.
 
 **Where.** `referrerIndex`/`referrerOf` in `server/noah-schema.js`, `server/routes/people.js`,
 `src/components/ReferredBy.tsx`, `src/components/PersonDetail.tsx`, `src/modules/members/Registrations.tsx`.

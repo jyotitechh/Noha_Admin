@@ -37,7 +37,7 @@
 import {
   getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile,
 } from './catalyst.js';
-import { MEMBER_FIELDS } from './member-fields.js';
+import { MEMBER_FIELDS, REFER_COLUMN, referByParts, joinReferBy } from './member-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
 import { kidLabel, relationLabel, reverseRelation, isOffered, genderedCode, EXTRA_CODES } from './relations.js';
 
@@ -1831,7 +1831,9 @@ const dayOf = (v) => (v ? String(v).slice(0, 10) : '');
 /** The editable fields' current values for one member, as the form shows them. */
 function editableFrom(row) {
   const out = {};
+  const refer = referByParts(row?.[REFER_COLUMN]);
   for (const f of MEMBER_FIELDS) {
+    if (f.part) { out[f.key] = refer[f.part] || ''; continue; }
     const v = row?.[f.column];
     out[f.key] = f.kind === 'gender' ? genderOf(v)
       : f.kind === 'date' ? dayOf(v)
@@ -1858,14 +1860,18 @@ export async function updateMemberFields(memberRowId, values) {
   const was = editableFrom(row);
   const changed = [];
   const write = {};
+  const referParts = {};
   for (const f of MEMBER_FIELDS) {
     if (!(f.column in values)) continue;
     const next = values[f.column];
     const after = f.kind === 'gender' ? genderOf(next) : (next ?? '');
     if (String(after) === String(was[f.key])) continue;
-    write[f.column] = next;
+    /* A part of the reference: gathered, then written as the one column below. */
+    if (f.part) referParts[f.part] = next;
+    else write[f.column] = next;
     changed.push({ key: f.key, label: f.label, contact: !!f.contact, before: was[f.key], after: String(after) });
   }
+  if (Object.keys(referParts).length) write[REFER_COLUMN] = joinReferBy(row[REFER_COLUMN], referParts);
   if (!changed.length) return { changed: [] };
 
   await io.update(T.members, { ROWID: String(row.ROWID), ...write });

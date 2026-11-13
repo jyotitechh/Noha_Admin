@@ -530,6 +530,12 @@ section('Correcting a person, and what the app asks to have changed');
     !!edited && !/new\.anand|Nashik/.test(JSON.stringify(edited)) && /contact detail/.test(JSON.stringify(edited)), JSON.stringify(edited || audit5[0]).slice(0, 200));
   const rev = await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token);
   check('revealing contact details now also gives the stored values for the form', rev.body?.values?.email === 'new.anand@example.com' && rev.body.values.city === 'Nashik' && 'corrAddress' in rev.body.values, JSON.stringify(rev.body?.values || {}).slice(0, 160));
+  const formValues = (await call('GET', `/people/${ANAND_ID}`, null, membership.token)).body?.edit?.values || {};
+  check('the reveal gives the referrer number for the form; the page gives only the name', rev.body?.values?.referPhone === '9000011111' && formValues.referName === 'Fr. Thomas' && !('referPhone' in formValues), JSON.stringify([rev.body?.values?.referPhone, formValues.referName]));
+  const refEdit = await call('PATCH', `/people/${ANAND_ID}`, { changes: { referName: 'Anitha Varghese', referPhone: '90000 00555' } }, membership.token);
+  check('the office can change who referred them', refEdit.status === 200 && refEdit.body?.changed?.length === 2, refEdit.text.slice(0, 200));
+  check('...and the page then shows a Noah member, with the matched member', refEdit.body?.person?.referrer?.inNoah === true && refEdit.body.person.referrer.name === 'Anitha Varghese' && /•/.test(refEdit.body.person.referrer.phone), JSON.stringify(refEdit.body?.person?.referrer));
+  check('a referrer number with letters is refused (400)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { referPhone: 'abc' } }, membership.token)).status === 400);
   check('an unknown member is a 404', (await call('PATCH', '/people/27145000000999999', { changes: { city: 'X' } }, membership.token)).status === 404);
 
   /* ---------- the requests the app files ---------- */

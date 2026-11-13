@@ -49,7 +49,34 @@ export const MEMBER_FIELDS = [
   { key: 'corrState', column: 'corrState', label: 'State', group: 'Postal address', kind: 'text', max: 100, contact: true },
   { key: 'corrCountry', column: 'corrCountry', label: 'Country', group: 'Postal address', kind: 'text', max: 100, contact: true },
   { key: 'corrPincode', column: 'corrPincode', label: 'Pincode', group: 'Postal address', kind: 'text', max: 12, contact: true },
+
+  /* Who referred them. The app keeps both in one column, `referBy` = "name|+91|number", so each
+     field here is a PART of that column (see referByParts below). The number is a contact detail. */
+  { key: 'referName', column: 'referBy#name', part: 'name', label: 'Referrer name', group: 'Referred by', kind: 'text', max: 60 },
+  { key: 'referPhone', column: 'referBy#phone', part: 'phone', label: 'Referrer mobile number', group: 'Referred by', kind: 'phone', contact: true },
 ];
+
+export const REFER_COLUMN = 'referBy';
+/** The longest the whole reference may be, as the app's change requests allow (change-fields.js). */
+const REFER_MAX = 100;
+
+/** "name|+91|number" -> { name, dial, phone }. An empty one is "|+91|". */
+export function referByParts(stored) {
+  const [name = '', dial = '', phone = ''] = String(stored ?? '').split('|');
+  return { name: name.trim(), dial: dial.trim(), phone: phone.trim() };
+}
+
+/**
+ * The stored text after changing some parts. `next` has `name` and/or `phone` (null clears one).
+ * The country code is kept as it was, +91 when there was none. Both empty: the app's own "|+91|".
+ */
+export function joinReferBy(stored, next) {
+  const was = referByParts(stored);
+  const name = 'name' in next ? (next.name ?? '') : was.name;
+  const phone = 'phone' in next ? (next.phone ?? '') : was.phone;
+  const dial = was.dial || '+91';
+  return `${name}|${dial}|${phone}`;
+}
 
 export const fieldByKey = (key) => MEMBER_FIELDS.find((f) => f.key === key);
 
@@ -90,7 +117,15 @@ export function checkValue(field, raw) {
       }
       if (s.length > field.max) return { error: `${field.label} is longer than ${field.max} characters.` };
       if (/[\u0000-\u001f]/.test(s)) return { error: `${field.label} has characters that cannot be stored.` };
+      /* The reference is stored as name|code|number, so its name cannot hold the separator. */
+      if (field.part && s.includes('|')) return { error: `${field.label} cannot contain "|".` };
       return { value: s };
+    case 'phone': {
+      /* Digits only; spaces and dashes are dropped. The country code is kept separately. */
+      const d = s.replace(/[\s-]/g, '');
+      if (!/^\d{6,15}$/.test(d)) return { error: `${field.label} must be 6 to 15 digits, without the country code.` };
+      return { value: d };
+    }
     case 'email':
       if (s.length > 255 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)) return { error: `${field.label} is not an email address.` };
       return { value: s };
@@ -127,5 +162,9 @@ export function checkPatch(patch, { canContact = false } = {}) {
     const r = checkValue(field, raw);
     if (r.error) errors[key] = r.error; else values[field.column] = r.value;
   }
+  /* The two parts of the reference share one column: make sure they fit it together. */
+  const name = values['referBy#name'] ?? '';
+  const phone = values['referBy#phone'] ?? '';
+  if (name.length + phone.length + 6 > REFER_MAX) errors.referName = `The reference is longer than ${REFER_MAX} characters in all.`;
   return { values, errors };
 }
