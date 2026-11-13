@@ -1,3 +1,5 @@
+> **Superseded** by `FOR-FLUTTER-CONTENT.md` (13 Nov 2026), which covers every content screen and what the Noah API answers today. Kept for history.
+
 # Daily content in the Noah app: what to build
 
 For the Flutter developer. The admin console now lets staff author five kinds

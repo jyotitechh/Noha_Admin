@@ -23,8 +23,9 @@ Things to know:
 - **Created and updated times** are written to the table's own columns
   (`created`/`updated` or `createdOn`/`updatedOn`) in UTC, as the Laravel
   backend did. `createdBy` and `writerId` are not set.
-- **Pictures** are a link to the picture, in the table's picture column. Uploading a
-  file from the console is not available yet.
+- **Pictures** are a link to the picture, in the table's picture column. The office pastes a
+  link or drops a file, which the console stores in the church's public picture storage
+  (Catalyst Stratus) and saves as its link. Videos are links only.
 - The Laravel admin had a few fields these tables do not: a scripture line on the
   Daily Manna, start and end dates on prayers, a writer's name on confessions,
   comment and like limits on Noahgram. They are not in the console, because there is
