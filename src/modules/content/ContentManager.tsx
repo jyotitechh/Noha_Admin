@@ -536,13 +536,14 @@ function TypeScreen({ def, lookup }: { def: TypeDef; source?: string; lookup: (i
   return (
     <div className="stack">
       <div className="row" style={{ alignItems: 'center', gap: 12 }}>
-        <p className="muted" style={{ margin: 0, flex: 1 }}>{def.intro}</p>
+        {/* The page header already describes the screen; repeating it here was noise. */}
+        <span style={{ flex: 1 }} />
         <Btn variant="ok" icon="plus" disabled={!canWrite} onClick={() => setEditing('new')}>New {def.singular}</Btn>
       </div>
 
       {/* Whether the Noah app can show what is saved here: not every kind has a route in the app's backend yet. */}
       {def.inApp === false && (
-        <Note tone="warn" icon="mobile">Not shown in the Noah app yet. What you save here is kept and will appear once the app shows it.</Note>
+        <Note tone="warn" icon="mobile">Not in the Noah app yet. Saved entries appear once the app reads them.</Note>
       )}
 
       {notReady && (
