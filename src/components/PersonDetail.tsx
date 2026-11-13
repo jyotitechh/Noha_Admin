@@ -23,6 +23,7 @@ import { Modal, useToast } from '@/components/layers';
 import { Field } from '@/components/ui';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
 import { MemberPhoto } from '@/components/MemberPhoto';
+import { ReferredBy, type Referrer } from '@/components/ReferredBy';
 import { fd, fdt } from '@/lib/format';
 import { Steps } from '@/modules/members/Registrations';
 import { EditPerson, type EditSpec } from '@/components/EditPerson';
@@ -44,6 +45,7 @@ interface Profile {
   registrationHidden?: boolean;
   earlier: { id: string; state: string; at: Date | null; remark: string }[];
   pastoral: { pastor: Link | null; cellLeader: Link | null; cell: string | null };
+  referrer?: Referrer | null;
   /* Who may be picked, for someone who may edit members. */
   pastoralChoices?: { pastors: Link[]; leaders: Leader[]; here?: { where: string; shared: boolean } };
   partnership: { isPartner: boolean; expiresOn: Date | null };
@@ -81,7 +83,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
   const q = useQuery(() => api.get<Profile>(`/people/${memberRowId}`), [memberRowId]);
   const { can } = useAuth();
   const { toast } = useToast();
-  const [contact, setContact] = useState<{ mobile: string; email: string; address: string } | null>(null);
+  const [contact, setContact] = useState<{ mobile: string; email: string; address: string; referrerPhone?: string } | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [telling, setTelling] = useState(false);
@@ -131,7 +133,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
   async function reveal() {
     setRevealing(true);
     try {
-      setContact(await api.get<{ mobile: string; email: string; address: string }>(`/people/${memberRowId}/contact`));
+      setContact(await api.get<{ mobile: string; email: string; address: string; referrerPhone?: string }>(`/people/${memberRowId}/contact`));
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -284,6 +286,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           ['Congregation', member.loc || '—'],
           ['Address', (contact?.address ?? member.address) || '—'],
           ['Member since', member.joined ? fd(member.joined) : '—'],
+          ['Referred by', <ReferredBy key="r" referrer={q.data.referrer} phone={contact?.referrerPhone} />],
         ]} />
         {member.masked && !contact && can('members.pii') && (
           <div className="mt8">

@@ -342,6 +342,7 @@ export async function loadRegistrations() {
   const memberById = new Map(members.map((m) => [String(m.ROWID), m]));
   const userById = new Map(users.map((u) => [String(u.ROWID), u]));
   const fileById = new Map(files.map((f) => [String(f.ROWID), f]));
+  const refIndex = referrerIndex(members, users);
 
   /* A member's uploads by kind, newest first: fileType 1 photo, 2 ID, 3 video. */
   const uploads = new Map();
@@ -387,6 +388,7 @@ export async function loadRegistrations() {
       marital: m.maritalStatus || '',
       reference: refName,
       referencePhone: refPhone,
+      referrer: m.ROWID ? referrerOf(m, refIndex) : null,
 
       line1: m.address || '', line2: m.area || '',
       city: m.city || '', region: m.state || '',
@@ -1107,6 +1109,67 @@ export function mobileKey(input) {
 const memberFullName = (m) =>
   [m?.firstName, m?.middleName, m?.lastName].filter(Boolean).join(' ') || '(no name yet)';
 
+/* ---------- who referred them ----------
+
+   The app stores the reference as one text, `members.referBy` = "name|+91|number"
+   (an empty one is "|+91|"). The referrer counts as a Noah member when their
+   number is a member's mobile or login number: a name alone is not proof, since
+   names repeat. When the number matches no one but the name does, those members
+   are listed so the office can judge. */
+
+const phoneKey = (s) => digits(s).slice(-10);
+const nameKey = (s) => String(s ?? '').replace(/\./g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** An index of members by phone and by name, built once per read. */
+export function referrerIndex(members, users) {
+  const userById = new Map(users.map((u) => [String(u.ROWID), u]));
+  const byPhone = new Map();
+  const byName = new Map();
+  const add = (map, key, m) => {
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    if (!map.get(key).includes(m)) map.get(key).push(m);
+  };
+  for (const m of members) {
+    const u = userById.get(String(m.userId));
+    for (const p of [m.mobileNumber1, m.mobileNumber2, u?.number]) {
+      const k = phoneKey(p);
+      if (k.length >= 7) add(byPhone, k, m);
+    }
+    add(byName, nameKey(memberFullName(m)), m);
+    add(byName, nameKey([m.firstName, m.lastName].filter(Boolean).join(' ')), m);
+  }
+  return { byPhone, byName };
+}
+
+/** The referrer of member row `m`, or null when none was given. */
+export function referrerOf(m, index) {
+  const [name = '', dial = '', number = ''] = String(m?.referBy ?? '').split('|');
+  const cleanName = name.trim();
+  const cleanNumber = digits(number);
+  if (!cleanName && !cleanNumber) return null;
+
+  const self = String(m.ROWID);
+  const others = (list) => (list || []).filter((x) => String(x.ROWID) !== self);
+  /* Prefer a member who is not archived, when one number has more than one row. */
+  const live = (list) => [...list].sort((a, b) => Number(asBool(a.archived)) - Number(asBool(b.archived)));
+  const brief = (x) => ({
+    rowId: String(x.ROWID), name: memberFullName(x), memberId: x.memberId || String(x.ROWID), archived: asBool(x.archived),
+  });
+
+  const byPhone = cleanNumber.length >= 7 ? live(others(index.byPhone.get(phoneKey(cleanNumber)))) : [];
+  const sameName = byPhone.length ? [] : live(others(index.byName.get(nameKey(cleanName)))).slice(0, 3);
+  const dialDigits = digits(dial);
+
+  return {
+    name: cleanName,
+    phone: cleanNumber ? `${dialDigits ? '+' + dialDigits + ' ' : ''}${cleanNumber}` : '',
+    inNoah: byPhone.length > 0,
+    member: byPhone[0] ? brief(byPhone[0]) : null,
+    sameName: sameName.map(brief),
+  };
+}
+
 /* ---------- where console roles are kept ----------
 
    Two ways, one shape.
@@ -1458,6 +1521,7 @@ export async function loadPerson(memberRowId) {
     registration: mine[0] ?? null,
     earlier: mine.slice(1).map((r) => ({ id: r.id, state: r.state, at: r.at, remark: r.remark })),
     pastoral: { pastor: who(x.connectedPastor), cellLeader: who(x.connectedLeader), cell: null },
+    referrer: referrerOf(byRow.get(member.rowId), referrerIndex(raw.members, raw.users)),
     partnership: {
       isPartner: asBool(x.isPartner),
       expiresOn: utc(x.partnershipExpireOn),

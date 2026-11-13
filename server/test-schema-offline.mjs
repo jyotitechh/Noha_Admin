@@ -79,6 +79,18 @@ check('the number is built from countryCode + mobileNumber1', reg.mobile === '+9
 check('gender 1 reads as male', reg.gender === 'male');
 check('email, dob and marital come from members', reg.email === 'anand@example.com' && reg.marital === 'married' && reg.dob?.toISOString().startsWith('1990-05-14'));
 check('referBy "name|+91|number" splits', reg.reference === 'Fr. Thomas' && reg.referencePhone === '9000011111', `${reg.reference} / ${reg.referencePhone}`);
+check('referrer: a number no member has is not a Noah member', reg.referrer?.inNoah === false && reg.referrer.member === null && reg.referrer.phone === '+91 9000011111', JSON.stringify(reg.referrer));
+check('...but a member with the same name is mentioned', reg.referrer?.sameName.length === 1 && reg.referrer.sameName[0].rowId === M.pastor, JSON.stringify(reg.referrer?.sameName));
+{
+  const S2 = S;
+  const meera = (await S2.loadPerson(M.draft)).referrer;
+  check('referrer: a member\'s number is a Noah member, whatever name was typed', meera?.inNoah === true && meera.member?.rowId === M.boss && meera.member.name === 'Anitha Varghese', JSON.stringify(meera));
+  check('...and no same-name list then', meera?.sameName.length === 0);
+  check('referrer: none given reads as null', (await S2.loadPerson(M.office)).referrer === null);
+  check('referrer: an empty "|+91|" reads as null', S2.referrerOf({ ROWID: '1', referBy: '|+91|' }, S2.referrerIndex([], [])) === null);
+  check('referrer: someone giving their own number is not their own referrer',
+    S2.referrerOf({ ROWID: M.boss, referBy: 'Me|+91|9000000555', mobileNumber1: '9000000555' }, S2.referrerIndex([{ ROWID: M.boss, mobileNumber1: '9000000555', firstName: 'Anitha' }], [])).inNoah === false);
+}
 check('address columns come from members', reg.line1 === '12 Mill Road' && reg.line2 === 'Kurla' && reg.city === 'Mumbai' && reg.region === 'Maharashtra' && reg.pin === '400070');
 check('the ID number is found by the type the member declared', reg.idType === 'PAN' && reg.idNumber === 'ABCDE1234F', `${reg.idType} ${reg.idNumber}`);
 check('uploads: names come from remoteSource', reg.videoFile === 'declaration.mp4' && reg.photoFile === 'photo.jpg' && reg.idFile === 'pan.png');

@@ -51,6 +51,8 @@ function shape(p, role) {
     pastor: p.pastoral.pastor && { ...p.pastoral.pastor, mobile: '' },
     cellLeader: p.pastoral.cellLeader && { ...p.pastoral.cellLeader, mobile: '' },
   };
+  /* The referrer's number is masked like the member's own, and revealed with it. */
+  if (p.referrer) out.referrer = { ...p.referrer, phone: maskMobile(p.referrer.phone) };
 
   /* The registration carries the ID number and leads to the uploads. */
   if (!can(role, 'members.edit')) {
@@ -254,6 +256,7 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
     });
     res.json({
       mobile: p.member.mobile, email: p.member.email, address: p.member.address,
+      referrerPhone: p.referrer?.phone || '',
       /* For the edit form: every contact field's stored value. Only to someone
          who may edit; the reveal above is what was audited. */
       values: p.editable && can(req.session.role, 'members.edit')

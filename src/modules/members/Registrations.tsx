@@ -19,6 +19,7 @@ import { Btn, Chip, Field, Icon, Kpi, Kpis, Note, Who, Age, Failed, Loading, Emp
 import { fd, fdt, REG_STATE, since } from '@/lib/format';
 import type { Registration } from '@/lib/types';
 import { Upload } from '@/components/Upload';
+import { ReferredBy } from '@/components/ReferredBy';
 
 const LANG = { en: 'English', hi: 'हिन्दी Hindi', mr: 'मराठी Marathi' } as const;
 
@@ -44,7 +45,7 @@ export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) 
               ? <>{fd(r.dob)} <span className="muted">· {Math.floor((Date.now() - +r.dob) / 31557600000)} years</span></>
               : <span className="muted">Not given</span>],
             ['Marital status', r.marital],
-            ['How they heard', r.reference || <span className="muted">Not given (optional)</span>],
+            ['Referred by', <ReferredBy key="r" referrer={r.referrer} fallback={r.reference} />],
           ]} />
         </div>
       </div>

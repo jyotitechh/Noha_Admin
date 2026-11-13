@@ -477,6 +477,10 @@ check('their phone, email and address are masked until revealed',
 
 const reveal = await call('GET', `/people/${ANAND_ID}/contact`, null, membership.token);
 check('revealing them is allowed with the permission', reveal.status === 200 && reveal.body?.mobile === '+919000000779' && reveal.body?.email === 'anand@example.com', reveal.text.slice(0, 120));
+check('the referrer is on the page, not a Noah member, with the number masked',
+  person.body?.referrer?.name === 'Fr. Thomas' && person.body.referrer.inNoah === false && /•/.test(person.body.referrer.phone) && !/9000011111/.test(person.body.referrer.phone),
+  JSON.stringify(person.body?.referrer));
+check('...and its number comes with the audited reveal', reveal.body?.referrerPhone === '+91 9000011111', reveal.body?.referrerPhone);
 const aud3 = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || [];
 check('...and written to the audit log, against the member', aud3.some((a) => /Revealed contact details/.test(a.action) && a.rec === ANAND_ID), aud3.slice(0, 3).map((a) => `${a.action}|${a.rec}`).join(' / '));
 

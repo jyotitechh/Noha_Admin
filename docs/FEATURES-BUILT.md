@@ -60,6 +60,26 @@ Membership and a row in Work queues count the waiting ones.
 
 ---
 
+## 2d. Referred by, with a green or red tick
+
+The app stores the reference a member gives at registration in `members.referBy` as one text,
+`name|+91|number` (none given is `|+91|`). The member page (**Who they are > Referred by**) and the registration
+review show the name and number with:
+
+* **green tick, "Noah member"**: the number is a member's mobile (`mobileNumber1`, `mobileNumber2`) or login number
+  (`users.number`), compared on the last 10 digits. The matched member's name and member number are shown under it.
+* **red cross, "Not a Noah member"**: no member has that number. If a member has the same name with another number,
+  that is shown as "Same name, different number", for the office to judge. A name alone never gives the green tick,
+  because names repeat (two "Mehak Dhamija" rows exist in Development).
+
+The person themselves never counts as their own referrer. The referrer's number is masked like the member's own and
+shown in full with **Reveal contact details** (audited). Nothing is written: it is worked out when the page opens.
+
+**Where.** `referrerIndex`/`referrerOf` in `server/noah-schema.js`, `server/routes/people.js`,
+`src/components/ReferredBy.tsx`, `src/components/PersonDetail.tsx`, `src/modules/members/Registrations.tsx`.
+
+---
+
 ## 2c. Reported comments, education details, WhatsApp number, Tamil
 
 Brief: `FOR-CONSOLE-REPORTS-AND-EDUCATION.md`.

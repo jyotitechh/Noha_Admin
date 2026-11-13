@@ -97,6 +97,8 @@ export const seed = () => ({
     {
       ROWID: M.draft, id: M.draft, userId: U.draft, countryCode: '+91', mobileNumber1: '9000000777',
       status: true, isUnVerified: true, archived: false, firstName: 'Meera', lastName: 'Nair', gender: 2,
+      /* Referred by a member, by her number: the green tick. */
+      referBy: 'Anitha V|+91|9000000555',
       CREATEDTIME: '2026-10-19 17:00:00:000',
     },
     /* Verified in the office's own system; never used the app, so no registration. */
