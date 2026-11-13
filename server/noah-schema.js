@@ -357,8 +357,11 @@ export async function loadRegistrations() {
   const pick = (explicitId, uid, type) =>
     fileById.get(String(explicitId)) || uploads.get(`${uid}:${type}`)?.[0] || null;
 
-  return regs.map((r) => {
-    const m = memberById.get(String(r.memberRowId)) || {};
+  /* A registration whose member is not in this project's members table is left over from
+     elsewhere (Development has four pointing at another project's 73626… ids): there is no one
+     to show or open, so it is not listed anywhere. */
+  return regs.filter((r) => memberById.has(String(r.memberRowId))).map((r) => {
+    const m = memberById.get(String(r.memberRowId));
     const uid = String(r.memberRowId);
 
     const idFile = fileMeta(pick(r.idProofFileId, uid, 2));

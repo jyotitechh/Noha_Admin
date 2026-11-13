@@ -79,6 +79,15 @@ check('the number is built from countryCode + mobileNumber1', reg.mobile === '+9
 check('gender 1 reads as male', reg.gender === 'male');
 check('email, dob and marital come from members', reg.email === 'anand@example.com' && reg.marital === 'married' && reg.dob?.toISOString().startsWith('1990-05-14'));
 check('referBy "name|+91|number" splits', reg.reference === 'Fr. Thomas' && reg.referencePhone === '9000011111', `${reg.reference} / ${reg.referencePhone}`);
+{
+  /* Left over from another project: a registration whose member row is not here. */
+  tables[T.appRegistrations].push({ ROWID: '100596000000125008', memberRowId: '73626000000137013', status: 'approved', submittedAt: '2026-10-23 10:06:52', reviewedAt: '2026-10-23 10:07:20', CREATEDTIME: '2026-10-23 15:36:00:000' });
+  S.clearCache?.();
+  const all = await S.loadRegistrations();
+  check('a registration whose member is not in the members table is not listed', !all.some((x) => x.id === '100596000000125008') && all.some((x) => x.memberRowId === M.approved), all.map((x) => x.id).join());
+  tables[T.appRegistrations].pop();
+  S.clearCache?.();
+}
 check('referrer: a number no member has is not a Noah member', reg.referrer?.inNoah === false && reg.referrer.member === null && reg.referrer.phone === '+91 9000011111', JSON.stringify(reg.referrer));
 check('...but a member with the same name is mentioned', reg.referrer?.sameName.length === 1 && reg.referrer.sameName[0].rowId === M.pastor, JSON.stringify(reg.referrer?.sameName));
 {
