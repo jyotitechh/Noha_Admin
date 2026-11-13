@@ -4,8 +4,9 @@
    the tabs the office sees (shownTabs) can be opened; any other address,
    including an unfinished tab, goes to the area's first tab. */
 
-import { Suspense, lazy, type ComponentType } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { Suspense, lazy, useEffect, useRef, type ComponentType } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { isOutOfDate, loadNewest, watchForUpdates } from '@/lib/freshness';
 import { AuthProvider, useAuth } from '@/state/auth';
 import { QueuesProvider } from '@/state/queues';
 import { ToastProvider } from '@/components/layers';
@@ -107,6 +108,18 @@ function ModulePage() {
   );
 }
 
+/* After a deploy, the next move to another screen loads the new console (see lib/freshness.ts). */
+function StayCurrent() {
+  const { pathname } = useLocation();
+  const first = useRef(true);
+  useEffect(() => { watchForUpdates(); }, []);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (isOutOfDate()) loadNewest();
+  }, [pathname]);
+  return null;
+}
+
 function Routed() {
   const { user, loading, unreachable, retry } = useAuth();
 
@@ -154,6 +167,7 @@ function Routed() {
 export default function App() {
   return (
     <BrowserRouter>
+      <StayCurrent />
       <AuthProvider>
         <ToastProvider>
           <Routed />
