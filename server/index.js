@@ -25,6 +25,7 @@ import { NOAH_TABLES, tableId, resolveTables, clearCache as clearReads } from '.
 import { noahConfigured } from './noah-api.js';
 import { queuesFor } from './queues.js';
 import { listPrayerRequests } from './prayer-requests.js';
+import { listPraise } from './praise-reports.js';
 import mountApp from './routes/app.js';
 import mountAdmin from './routes/admin.js';
 import mountStaff from './routes/staff.js';
@@ -393,6 +394,8 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
     AUD: () => listAudit(),
     /* What members send from the app's prayer pop-up. */
     PRAYER_INBOX: () => listPrayerRequests({ state: req.query.state, search: req.query.q }),
+    /* Praise reports members send from the app, in the praiseReport table. */
+    PRAISE: () => listPraise({ state: req.query.state, search: req.query.q }),
     /* Staff are members with a role, found by mobile number. The sample people
        are not staff once Catalyst is connected. */
     STAFF: async () => {

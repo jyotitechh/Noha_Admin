@@ -9,6 +9,7 @@
 import { db } from './db.js';
 import { live, listRegistrations } from './store.js';
 import { pendingPrayerRequests } from './prayer-requests.js';
+import { listPraise } from './praise-reports.js';
 import { accessRequests } from './noah-schema.js';
 import { pendingRequests as pendingFamilyRequests } from './family-requests.js';
 import { noahConfigured } from './noah-api.js';
@@ -32,7 +33,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod', 'flags']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod', 'flags', 'praise']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -145,6 +146,10 @@ export async function queuesFor(roleId, canFn) {
     if (rows.some((x) => x.id === 'flags')) {
       try { real.flags = tally(await cachedReported()); }
       catch { real.flags = { count: 0, oldest: null }; }
+    }
+    if (rows.some((x) => x.id === 'praise')) {
+      try { real.praise = tally(await listPraise({ state: 'Pending' })); }
+      catch { real.praise = { count: 0, oldest: null }; }
     }
     try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
     catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }

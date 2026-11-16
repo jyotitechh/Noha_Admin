@@ -151,6 +151,17 @@ tables[T.comments].push(
   { ROWID: '27145000000186003', memberId: M.pastor, component: 3, componentId: REPORTED.cManna, created: new Date(Date.now() - 27 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
   { ROWID: '27145000000186004', memberId: M.office, component: 4, componentId: REPORTED.cPost, created: new Date(Date.now() - 6 * HOUR).toISOString().slice(0, 19).replace('T', ' ') },
 );
+/* Praise reports (the praiseReport table): two waiting (one with a stored photo and a link photo), one published and featured, one rejected. */
+const utcAgo = (h) => new Date(Date.now() - h * HOUR).toISOString().slice(0, 19).replace('T', ' ');
+const PRAISE = { waiting: '27145000000187001', plain: '27145000000187002', published: '27145000000187003', rejected: '27145000000187004' };
+(tables['tbl:praiseReport'] ||= []).push(
+  { ROWID: PRAISE.waiting, memberId: M.approved, memberName: 'Anand Rao', phoneNumber: '+919000000779', email: 'anand@example.com',
+    text: 'My mother was healed after three weeks in hospital.\nThank you for praying with us.', photo1: '27145000000182001', photo2: 'https://example.com/praise-2.jpg',
+    videoLink: 'https://youtu.be/dQw4w9WgXcQ', location: 'Kurla, Mumbai', comment: 'Please share this with the Kurla cell.', isComplete: false, isFeatured: false, isClosed: false, isArchived: false, created: utcAgo(30) },
+  { ROWID: PRAISE.plain, memberId: M.office, memberName: 'Old Member', phoneNumber: '+919000000778', text: 'I found work after two years of looking.', isComplete: false, isArchived: false, created: utcAgo(3) },
+  { ROWID: PRAISE.published, memberId: M.boss, memberName: 'Anitha Varghese', text: 'Our son passed his exams.', isComplete: true, isFeatured: true, isArchived: false, created: utcAgo(100) },
+  { ROWID: PRAISE.rejected, memberId: M.pastor, memberName: 'Fr Thomas', text: 'Named a doctor.', isComplete: false, isArchived: true, created: utcAgo(200) },
+);
 /* Who the fake Noah API has told about a Noahgram decision. */
 const gramTold = [];
 

@@ -17,7 +17,7 @@ Admin Console  ──writes──▶  Catalyst Data Store tables  ──read by�
 
 ## 2. What the app can read today
 
-Checked on 13 Nov 2026 against the development Noah API (a route that exists answers 401 without a sign-in; one that does not
+Checked on 16 Nov 2026 against the development Noah API (a route that exists answers 401 without a sign-in; one that does not
 answers 404 `not_found`).
 
 | Console screen | Table | API route today | Status |
@@ -26,15 +26,16 @@ answers 404 `not_found`).
 | Content > Daily Manna > Manna categories | `dailyMannaCategories` | `GET /content/manna/categories` | **exists** |
 | Content > Daily Prayers | `dailyPrayers` | `GET /content/prayers` | **exists** |
 | Content > Confessions | `dailyConfessions` | `GET /content/confessions` | **exists** |
-| Content > Dream dictionary | `dreamDictionary`, `dreamDictionaryCategory` | none | **API route needed** |
-| Content > Bible commentary | `bibleCommentary` | none | **API route needed** |
-| Content > Banners and announcements | `dashboard` (banners), `ads` (announcements) | none | **API route needed** |
+| Content > Dream dictionary | `dreamDictionary`, `dreamDictionaryCategory` | `GET /content/dictionary`, `/content/dictionary/categories` | **exists** (added after 13 Nov) |
+| Content > Bible commentary | `bibleCommentary` | `GET /content/commentary` | **exists** (added after 13 Nov) |
+| Content > Banners and announcements | `dashboard` (banners), `ads` (announcements) | `GET /home/banners`, `/home/announcements` | **exists** (added after 13 Nov) |
 | Media > Office posts and categories | `noahGram`, `noahGramCategory` | `GET /noahgram/feed` (posts); categories: none | feed **exists**; see `FOR-FLUTTER-NOAHGRAM-OFFICE-POSTS.md` |
 | Media > Noah Tube | `videos`, `videoCategories` | none | **API route needed** |
 | School > Bible school, Courses | `bibleSchool`, `rowilCourse…` tables | none | **confirm first** (section 6) |
+| Community > Praise | `praiseReport` | none | **API routes needed**: see `FOR-API-PRAISE.md` |
 
-For the four that exist, the next step is to check that an entry the office saves now actually comes back (section 5). For the rest,
-the API needs a read route; suggested shapes are in section 4.
+For the content routes that exist, the app now has to show them, and the next step is to check that an entry the office saves
+actually comes back (section 5). For the rest, the API needs a read route; suggested shapes are in section 4.
 
 ## 3. Rules for every content table
 

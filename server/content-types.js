@@ -389,15 +389,16 @@ export const typeById = (id) => TYPES.find((t) => t.id === id);
 /* Which of these the Noah app can read today. Saving here stores the item in Catalyst; the app only
    shows it once the Noah API has a route that reads that table.
 
-   Checked 2 Nov 2026 against the Noah API (GET /content/...): manna, its categories, prayers and
-   confessions answer (they ask for a member sign-in); the dictionary, banners and announcements
-   answer "no such endpoint". Bible study is not authored here: it runs in Zoho TrainerCentral (docs/CLIENT-DEMO-FEATURES.md).
-   Media and school are left out: not checked. Change an entry here when a route appears, and the
-   console stops (or starts) warning the office. */
+   Checked 16 Nov 2026 against the Noah API. These answer (they ask for a member sign-in):
+   /content/manna (+ /categories), /content/prayers, /content/confessions, /content/dictionary
+   (+ /categories), /content/commentary, /home/banners and /home/announcements. Still "no such
+   endpoint": Noahgram categories, Noah Tube, the school; those are left out of this list. Bible
+   study is not authored here: it runs in Zoho TrainerCentral (docs/CLIENT-DEMO-FEATURES.md).
+   Change an entry here when a route appears or goes, and the console stops (or starts) warning the office. */
 export const APP_READS = {
   manna: true, mannaCategories: true, prayers: true, confessions: true,
-  bibleCommentary: false,
-  dictionary: false, dictionaryCategories: false, banners: false, announcements: false,
+  bibleCommentary: true,
+  dictionary: true, dictionaryCategories: true, banners: true, announcements: true,
 };
 
 /* Catalyst refuses some column names outright, so the project's tables have them

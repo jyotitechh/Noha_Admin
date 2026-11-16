@@ -100,6 +100,19 @@ email, notification), corrects it in the app and submits again, and it is **pend
 * **Tell the member** (a decision written to the table without the API) calls `announce`, falling back to `notify`: the
   live API has only `notify` so far (13 Nov 2026).
 
+## 2g. Praise reports from Catalyst, and the content notice
+
+**Community > Praise** reads and decides Catalyst's `praiseReport` table (it used to look for a `PRAISE` sample table, so
+it said "Not in the connected project"). Waiting / Published / Rejected are `isComplete` and `isArchived`; a published
+one can be featured (`isFeatured`). Photos (`photo1` to `photo5`) are shown whether they are links or uploaded files;
+the testimony, phone, email, place, video link and the member's note are in the drawer. The reason for a rejection is
+kept in the audit log. The work queue counts the waiting ones. The table is empty until the Noah API can take a praise
+report from the app: `docs/FOR-API-PRAISE.md`. Code: `server/praise-reports.js`, `src/modules/community/Praise.tsx`.
+
+The yellow "Not in the Noah app yet" notice is gone from Dream dictionary, Bible commentary and Banners and
+announcements: the Noah API added `/content/dictionary`, `/content/commentary`, `/home/banners` and
+`/home/announcements` (checked 16 Nov 2026). The list is `APP_READS` in `server/content-types.js`.
+
 ## 2e. The console updates itself after a deploy
 
 Slate serves the page with a one-year cache (`cache-control: public, max-age=31536000`), so a browser could keep

@@ -12,6 +12,7 @@ import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
 import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
+import { decidePraise, featurePraise, praiseById, praisePhoto } from '../praise-reports.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
 import { cachedPending } from '../noahgram.js';
@@ -750,12 +751,71 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     BATCHES: { perm: 'finance.approve', field: 'status', ok: 'Approved', no: 'Rejected', mod: 'Finance', what: 'payment batch' },
   };
 
+  /* ================= praise reports, in Catalyst's praiseReport table ================= */
+
+  /* Publish or reject one. The reason for a rejection is kept in the audit log: the table has no column for it. */
+  async function decidePraiseLive(req, res, ids, approve) {
+    const remark = String(req.body?.remark || '').trim();
+    if (!approve && ids.length === 1 && !remark) return res.status(400).json({ error: 'Say why it is not published.' });
+    const done = [];
+    try {
+      for (const id of ids) {
+        const p = await praiseById(id);
+        if (!p) { if (ids.length === 1) return notFound(res); continue; }
+        if (p.state !== 'Pending') {
+          if (ids.length === 1) return res.status(409).json({ error: `Already ${p.state.toLowerCase()}. Refresh the list.` });
+          continue;
+        }
+        await decidePraise(p.id, approve, { byRowId: req.user.memberRowId });
+        log(req, approve ? 'Published praise report' : 'Rejected praise report', 'Community', p.id, { state: p.state }, { state: approve ? 'Published' : 'Rejected' }, remark);
+        done.push(p.id);
+      }
+    } catch (err) {
+      const explained = explainCatalyst(err);
+      return res.status(503).json({ error: explained?.message ?? err.message });
+    }
+    return res.json({ ok: true, decided: done, state: approve ? 'Published' : 'Rejected' });
+  }
+
+  app.post('/api/praise/:id/feature', ...guard('community.moderate'), async (req, res) => {
+    if (!live()) return res.status(409).json({ error: 'Featuring needs the Catalyst connection.' });
+    try {
+      const p = await praiseById(req.params.id);
+      if (!p) return notFound(res);
+      if (p.state !== 'Published') return res.status(409).json({ error: 'Only a published praise report can be featured.' });
+      const on = req.body?.featured !== false;
+      await featurePraise(p.id, on, { byRowId: req.user.memberRowId });
+      log(req, on ? 'Featured praise report' : 'Unfeatured praise report', 'Community', p.id, { featured: p.featured }, { featured: on }, '');
+      res.json({ ok: true, featured: on });
+    } catch (err) {
+      const explained = explainCatalyst(err);
+      res.status(503).json({ error: explained?.message ?? err.message });
+    }
+  });
+
+  /* A photo: a link is sent on; a files ROWID is fetched through the Noah API. */
+  app.get('/api/praise/:id/photo/:n', ...guard('community.moderate'), async (req, res) => {
+    const n = Number(req.params.n);
+    if (!live() || !(n >= 1 && n <= 5)) return notFound(res);
+    try {
+      const v = await praisePhoto(req.params.id, n);
+      if (!v) return notFound(res);
+      if (/^https:\/\//i.test(v)) return res.redirect(v);
+      if (!/^\d+$/.test(v) || !noahConfigured()) return res.status(404).json({ error: 'This photo cannot be shown here.' });
+      const file = await noah.getFile(v, { actor: req.user.name });
+      res.set('content-type', file.contentType).set('cache-control', 'private, max-age=300').send(file.buffer);
+    } catch (err) {
+      res.status(err.status === 404 ? 404 : 502).json({ error: err.message });
+    }
+  });
+
   app.post('/api/decide/:coll/:id', requireSession, (req, res) => {
     const spec = DECIDE[req.params.coll];
     if (!spec) return res.status(404).json({ error: 'That queue cannot be decided here.' });
     if (!staffRole(req.session.role).perms.includes(spec.perm)) {
       return res.status(403).json({ error: 'You do not have access to this.', needs: [spec.perm] });
     }
+    if (live() && req.params.coll === 'PRAISE') return decidePraiseLive(req, res, [req.params.id], req.body?.approve !== false);
     const row = find(req.params.coll, req.params.id);
     if (!row) return notFound(res);
 
@@ -780,6 +840,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     }
     const ids = [].concat(req.body?.ids || []);
     const approve = req.body?.approve !== false;
+    if (live() && req.params.coll === 'PRAISE') return decidePraiseLive(req, res, ids, approve);
     const to = approve ? spec.ok : spec.no;
     const done = [];
     for (const id of ids) {

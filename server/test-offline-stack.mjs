@@ -780,7 +780,7 @@ const confessDef = ctypes.find((t) => t.id === 'confessions');
 check('Daily Prayers no longer asks about obituary notices', prayersDef && !prayersDef.fields.some((f) => f.key === 'showOnObituary'));
 check('Confessions no longer has a separate Prayer box', confessDef && !confessDef.fields.some((f) => f.key === 'prayer'));
 check('...but each still has its message, embeds and picture', ['content', 'embed01', 'image'].every((k) => prayersDef.fields.some((f) => f.key === k) && confessDef.fields.some((f) => f.key === k)));
-check('the console says which kinds the Noah app reads today', ['manna','prayers','confessions'].every((id) => ctypes.find((x) => x.id === id)?.inApp === true) && ['dictionary','banners','announcements'].every((id) => ctypes.find((x) => x.id === id)?.inApp === false));
+check('the console says which kinds the Noah app reads today (16 Nov 2026: all of Content)', ['manna', 'prayers', 'confessions', 'dictionary', 'bibleCommentary', 'banners', 'announcements'].every((id) => ctypes.find((x) => x.id === id)?.inApp === true));
 check('every picture field offers the drop box', ctypes.every((t) => t.fields.filter((f) => f.key === 'image').every((f) => f.picture === true)));
 
 if (up.body?.url) {
@@ -1116,6 +1116,51 @@ if (NO_KEY) {
   const cAud = await call('GET', '/data/AUD?limit=300', null, BT);
   check('hiding, showing and removing a comment are in the audit log',
     ['Hid a Noahgram comment', 'Showed a Noahgram comment again', 'Removed a Noahgram comment'].every((a) => (cAud.body?.rows || []).some((x) => x.action === a)));
+}
+
+section('Praise reports, from the praiseReport table');
+{
+  const P = { waiting: '27145000000187001', plain: '27145000000187002', published: '27145000000187003', rejected: '27145000000187004' };
+  const list = async (q = '') => (await call('GET', `/data/PRAISE?limit=500${q}`, null, BT)).body;
+  const all = await list();
+  check('the Praise screen reads the real table, not "not in the project"', !all?.notInProject && all?.rows?.length === 4, JSON.stringify(all).slice(0, 200));
+  const byId = (rows, id) => rows.find((r) => r.id === id);
+  check('waiting, published and rejected are read from isComplete and isArchived',
+    byId(all.rows, P.waiting)?.state === 'Pending' && byId(all.rows, P.published)?.state === 'Published' && byId(all.rows, P.rejected)?.state === 'Rejected');
+  const w = byId(all.rows, P.waiting);
+  check('a report carries the testimony, name, phone, place, video, note and photos',
+    /healed/.test(w?.text) && w.name === 'Anand Rao' && w.mobile === '+919000000779' && w.location === 'Kurla, Mumbai' && /youtu/.test(w.videoLink) && /Kurla cell/.test(w.comment) && w.photos === 2,
+    JSON.stringify(w).slice(0, 300));
+  check('...a photo given as a link is passed as it is; a stored file is not', w?.photoUrls?.[0] === null && w.photoUrls[1] === 'https://example.com/praise-2.jpg');
+  check('the featured one says so', byId(all.rows, P.published)?.featured === true);
+  check('the waiting filter shows only the two waiting', (await list('&state=Pending')).rows.length === 2);
+  check('the work queue counts the two waiting', await queueCount('praise') === 2, String(await queueCount('praise')));
+  check('a search finds a place', (await list('&q=kurla')).rows.length === 1);
+
+  if (!NO_KEY) {
+    const photo = await call('GET', `/praise/${P.waiting}/photo/1`, null, BT);
+    check('a stored photo is shown through the console', photo.status === 200, `${photo.status}`);
+  }
+  check('a photo that is not there is a 404', (await call('GET', `/praise/${P.plain}/photo/1`, null, BT)).status === 404);
+
+  check('rejecting needs a reason (400)', (await call('POST', `/decide/PRAISE/${P.plain}`, { approve: false }, BT)).status === 400);
+  const rej = await call('POST', `/decide/PRAISE/${P.plain}`, { approve: false, remark: 'It names a doctor or hospital.' }, BT);
+  check('a report can be rejected with a reason', rej.status === 200, rej.text.slice(0, 160));
+  check('...it is archived, so it reads Rejected', byId((await list()).rows, P.plain)?.state === 'Rejected');
+  const pub = await call('POST', `/decide/PRAISE/${P.waiting}`, { approve: true }, BT);
+  check('a report can be published', pub.status === 200 && byId((await list()).rows, P.waiting)?.state === 'Published', pub.text.slice(0, 160));
+  check('deciding it again is refused (409)', (await call('POST', `/decide/PRAISE/${P.waiting}`, { approve: true }, BT)).status === 409);
+  check('...and nothing is waiting now', await queueCount('praise') === 0);
+
+  const feat = await call('POST', `/praise/${P.waiting}/feature`, { featured: true }, BT);
+  check('a published report can be featured', feat.status === 200 && byId((await list()).rows, P.waiting)?.featured === true, feat.text.slice(0, 160));
+  check('...and unfeatured', (await call('POST', `/praise/${P.waiting}/feature`, { featured: false }, BT)).status === 200 && byId((await list()).rows, P.waiting)?.featured === false);
+  check('a rejected report cannot be featured (409)', (await call('POST', `/praise/${P.rejected}/feature`, { featured: true }, BT)).status === 409);
+  check('a role without moderation cannot decide (403)', (await call('POST', `/decide/PRAISE/${P.published}`, { approve: true }, FT)).status === 403);
+
+  const pAud = (await call('GET', '/data/AUD?limit=300', null, BT)).body?.rows || [];
+  check('publishing, rejecting (with the reason) and featuring are in the audit log',
+    pAud.some((a) => a.action === 'Published praise report') && pAud.some((a) => a.action === 'Rejected praise report' && /doctor/.test(a.remark || '')) && pAud.some((a) => a.action === 'Featured praise report'));
 }
 
 section('Registration checks, member photographs, and pictures sent as JSON');

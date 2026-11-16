@@ -51,6 +51,8 @@ interface Props<T extends DecisionRow> {
   reasons?: string[];
   /** A rejection must say why. */
   reasonRequired?: boolean;
+  /** The line under the reason box; by default it says the member sees it. */
+  reasonHint?: string;
   /** Extra tiles beside the standard two. */
   extraKpis?: (rows: T[]) => ReactNode;
   emptyTitle?: string;
@@ -59,7 +61,7 @@ interface Props<T extends DecisionRow> {
 export function DecisionQueue<T extends DecisionRow>({
   name, field = 'state', waiting, states, columns, sla, searchPlaceholder,
   approveLabel, rejectLabel, intro, detail, drawerTitle, reasons = [],
-  reasonRequired = true, extraKpis, emptyTitle = 'Nothing waiting',
+  reasonRequired = true, reasonHint, extraKpis, emptyTitle = 'Nothing waiting',
 }: Props<T>) {
   const [filter, setFilter] = useState(waiting);
   const [search, setSearch] = useState('');
@@ -236,7 +238,7 @@ export function DecisionQueue<T extends DecisionRow>({
             {rejecting && (
               <div className="mt20">
                 <div>
-                  <Field label="Why?" hint={`${reasonRequired ? 'Required' : 'Optional'}. The member sees this.`}>
+                  <Field label="Why?" hint={reasonHint ?? `${reasonRequired ? 'Required' : 'Optional'}. The member sees this.`}>
                     <textarea className="ta" rows={3} value={remark} autoFocus onChange={(e) => setRemark(e.target.value)} />
                   </Field>
                 </div>
