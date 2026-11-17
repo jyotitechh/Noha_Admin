@@ -5,6 +5,8 @@
      npm run deploy:api -- --code-on-screen  sign-in as on localhost: no passphrase, a random
                                         code shown on the page (anyone with a staff or test
                                         number can sign in; see server/demo.js)
+     npm run deploy:api -- --email-codes  THE LIVE CONSOLE: codes are emailed; no passphrase,
+                                        no code on the page, no test accounts
 
    Slate hosts the pages; AppSail runs this Node server. It sends what is COMMITTED
    (`git archive HEAD`: server/, package.json, package-lock.json), bundles it with esbuild
@@ -39,6 +41,10 @@ const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-eayoyuuw.onslate.i
 const testLogin = process.argv.includes('--test-login');
 /* Sign-in as on localhost: no passphrase, a fresh random code shown on the page (see demo.js). */
 const onScreen = process.argv.includes('--code-on-screen');
+/* The live console: codes are really emailed, so there is no passphrase, no code on the page and
+   no test accounts ("Test accounts — pick a role to try" is for local runs only). Refused unless
+   email is set up in .env.local, since otherwise nobody could sign in. */
+const emailCodes = process.argv.includes('--email-codes');
 
 const say = (s) => console.log(`\n  ${s}`);
 const fail = (s) => { console.error(`\n  ${s}\n`); process.exit(1); };
@@ -111,7 +117,18 @@ for (const k of ['MAPPLS_KEY', 'EVENT_SWEEP', 'EVENT_SWEEP_MINUTES', 'MAIL_PROVI
   if (envFile[k]) settings[k] = envFile[k];
 }
 let testCode = null;
-if (onScreen) {
+if (emailCodes) {
+  const pick = (...keys) => keys.map((k) => envFile[k]).find(Boolean);
+  const smtpReady = pick('SMTP_HOST', 'MAIL_SMTP_HOST') && pick('SMTP_USER', 'MAIL_SMTP_USER')
+    && pick('SMTP_PASS', 'MAIL_SMTP_PASS') && pick('SMTP_FROM', 'MAIL_FROM');
+  if (!smtpReady && !envFile.MAIL_CATALYST_FROM) {
+    fail('--email-codes needs email set up in .env.local (SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM): otherwise nobody could get a code.');
+  }
+  delete settings.ADMIN_PASSPHRASE;
+  /* Said outright, so nothing left over from an earlier deploy can switch them back on. */
+  settings.SHOW_CODE_ON_SCREEN = 'false';
+  settings.ENABLE_TEST_LOGIN = 'false';
+} else if (onScreen) {
   settings.SHOW_CODE_ON_SCREEN = 'true';
   delete settings.ADMIN_PASSPHRASE;
 } else if (testLogin) {
@@ -174,6 +191,6 @@ try {
 console.log(`
   Deployed. The address is printed above.
 
-${onScreen ? '  Sign-in: no passphrase; the code is shown on the page.' : `  The office passphrase is in:   ${passphrase.path}${passphrase.fresh ? '   (new)' : ''}`}
+${emailCodes ? '  Sign-in: by email; codes go to the inbox. No passphrase, no test accounts.' : onScreen ? '  Sign-in: no passphrase; the code is shown on the page.' : `  The office passphrase is in:   ${passphrase.path}${passphrase.fresh ? '   (new)' : ''}`}
 ${testCode ? `  The test sign-in code is in:   ${testCode.path}${testCode.fresh ? '   (new)' : ''}\n` : ''}  Read a file with:  cat <that path>   Nothing was printed here.
 `);
