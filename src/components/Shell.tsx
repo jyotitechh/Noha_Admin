@@ -117,7 +117,7 @@ function QueueBell() {
 /* ---------- account menu ---------- */
 
 function MeMenu() {
-  const { user, viewAs, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
@@ -149,20 +149,6 @@ function MeMenu() {
             <span className="small muted">{user.email}</span>
           </div>
           <hr />
-          <div style={{ padding: '10px 16px 6px' }}>
-            <div className="small b mb8">View the console as</div>
-            <select
-              className="sel"
-              value={user.role}
-              onChange={async (e) => { await viewAs(e.target.value); setOpen(false); }}
-            >
-              {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-            <p className="xs muted mt8" style={{ margin: '8px 0 0' }}>
-              Changes what you can see and do. {user.perms.length} of 36 permissions held.
-            </p>
-          </div>
-          <hr />
           <button
             className="btn ghost"
             style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, height: 40 }}
@@ -175,10 +161,6 @@ function MeMenu() {
     </div>
   );
 }
-
-/* The ten roles. Fetched once and cached, because they never change in a session. */
-let ROLE_OPTIONS: { id: string; name: string }[] = [];
-export const setRoleOptions = (r: { id: string; name: string }[]) => { ROLE_OPTIONS = r; };
 
 /* ---------- command palette ---------- */
 

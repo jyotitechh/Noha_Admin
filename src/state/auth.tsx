@@ -37,7 +37,8 @@ interface AuthValue {
      `sentTo` say how it went when it was sent. */
   requestCode: (who: Identity, passphrase?: string) => Promise<CodeSent>;
   verify: (who: Identity, code: string) => Promise<void>;
-  viewAs: (role: string) => Promise<void>;
+  /** Reads who is signed in again, e.g. after their own role's permissions were changed. */
+  refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -87,10 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   }, []);
 
-  /* Prototype affordance: look at the console as any of the ten roles, to
-     show what each one can and cannot reach. The prototype did the same. */
-  const viewAs = useCallback(async (role: string) => {
-    const r = await api.post<{ user: User }>('/auth/view-as', { role });
+  const refresh = useCallback(async () => {
+    const r = await api.get<{ user: User }>('/auth/me');
     setUser(r.user);
   }, []);
 
@@ -111,8 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthValue>(
-    () => ({ user, loading, unreachable, retry: resume, can, requestCode, verify, viewAs, signOut }),
-    [user, loading, unreachable, resume, can, requestCode, verify, viewAs, signOut],
+    () => ({ user, loading, unreachable, retry: resume, can, requestCode, verify, refresh, signOut }),
+    [user, loading, unreachable, resume, can, requestCode, verify, refresh, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -15,7 +15,7 @@ import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
 import { channels, emailProvider } from './deliver.js';
-import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired, mobileSignIn } from './auth.js';
+import { requestCode, verifyCode, requireSession, requirePerm, signOut, listAccounts, checkPassphrase, passphraseRequired, mobileSignIn } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { demoMode, DEMO_MOBILE } from './demo.js';
 import { handleAccessRequest } from './access-requests.js';
@@ -275,11 +275,8 @@ app.post('/api/auth/verify', async (req, res) => {
 
 app.get('/api/auth/me', requireSession, (req, res) => res.json({ user: req.user }));
 
-app.post('/api/auth/view-as', requireSession, (req, res) => {
-  const user = viewAs(req.session.token, req.body?.role);
-  if (!user) return res.status(400).json({ error: 'No such role.' });
-  res.json({ user });
-});
+/* "View the console as" another role was removed (17 Nov 2026): it let any signed-in staff member switch
+   their own session to any role, super administrator included. Each role is tried with its own account. */
 
 app.post('/api/auth/sign-out', requireSession, (req, res) => {
   signOut(req.session.token);

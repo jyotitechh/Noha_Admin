@@ -16,7 +16,7 @@ import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, roleById } from './db.js';
+import { roleById } from './db.js';
 import { allStaff, live } from './store.js';
 import { demoMode, codeOnScreen } from './demo.js';
 import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
@@ -443,18 +443,6 @@ export const signOut = (token) => {
   if (had) saveSessions();
   return had;
 };
-
-/** Prototype affordance: look at the console as any of the ten roles.
-    The prototype had the same switch in its account menu. */
-export function viewAs(token, roleId) {
-  const s = sessionFor(token);
-  if (!s) return null;
-  if (!db.ROLES.some((r) => r.id === roleId)) return null;
-  s.role = roleId;
-  /* So the role you are viewing as survives a restart with the session. */
-  saveSessions();
-  return publicUser(s);
-}
 
 /* ---------- express middleware ---------- */
 

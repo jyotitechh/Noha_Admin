@@ -479,6 +479,11 @@ section('One person, everything about them');
 
 const membership = await signIn('+91 90000 00002');   /* members.view, edit and pii */
 const verifier = await signIn('+91 90000 00008');     /* Jodie verifier: no members.view */
+/* "View the console as" is gone: no signed-in role can switch its own session to another role. */
+const escalate = await call('POST', '/auth/view-as', { role: 'super' }, verifier.token);
+const stillVerifier = await call('GET', '/auth/me', null, verifier.token);
+check('a staff member cannot switch their session to super administrator', escalate.status === 404 && stillVerifier.body?.user?.role !== 'super',
+  `${escalate.status} ${stillVerifier.body?.user?.role}`);
 
 const person = await call('GET', `/people/${ANAND_ID}`, null, BT);
 check('the person page loads for a super administrator', person.status === 200 && person.body?.member?.name === 'Anand Rao', `${person.status} ${person.text.slice(0, 120)}`);

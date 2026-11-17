@@ -16,7 +16,7 @@ interface Role { id: string; name: string; desc: string; perms: string[] }
 interface Meta { roles: Role[]; permGroups: [string, [string, string][]][]; permLabels: Record<string, string> }
 
 export default function Roles() {
-  const { user, viewAs } = useAuth();
+  const { user, refresh } = useAuth();
   const { toast } = useToast();
   const [busy, setBusy] = useState('');
 
@@ -30,7 +30,7 @@ export default function Roles() {
       q.reload();
       if (res?.warning) toast(res.warning, 'warn');
       /* If you changed your own role, refresh what you can see. */
-      if (user?.role === role.id) await viewAs(role.id);
+      if (user?.role === role.id) await refresh();
       toast(
         on
           ? `${role.name} can now ${(q.data?.permLabels[perm] ?? perm).toLowerCase()}.`
@@ -128,9 +128,6 @@ export default function Roles() {
           <Card key={r.id} title={r.name} sub={`${r.perms.length} of ${allPerms.length} permissions`}
             actions={user?.role === r.id ? <Chip tone="brand">You</Chip> : undefined}>
             <p className="small muted mt0">{r.desc}</p>
-            <button className="btn sm mt8" onClick={() => viewAs(r.id)}>
-              <Icon name="eye" /> View the console as this role
-            </button>
           </Card>
         ))}
       </div>
