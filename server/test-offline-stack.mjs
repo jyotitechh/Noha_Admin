@@ -241,7 +241,7 @@ const testMail = await call('POST', '/auth/request-code', { email: 'finance@cons
 const testMailIn = await call('POST', '/auth/verify', { email: 'finance@console.test', code: testMail.body?.devCode });
 check('a test account signs in by email too', testMailIn.status === 200 && testMailIn.body?.user?.role === 'finance', testMailIn.text.slice(0, 140));
 const metaNow = await call('GET', '/meta');
-check('/meta says which ways of getting a code are set up', metaNow.body?.codeChannels && metaNow.body.codeChannels.email === false && metaNow.body.codeChannels.sms === false, JSON.stringify(metaNow.body?.codeChannels));
+check('/meta says which ways of getting a code are set up', metaNow.body?.codeChannels && metaNow.body.codeChannels.email === false && metaNow.body.codeChannels.sms === false && metaNow.body.codeChannels.whatsapp === false, JSON.stringify(metaNow.body?.codeChannels));
 
 const ask = await call('POST', '/auth/request-code', { mobile: BOSS });
 check('a wrong code is refused', (await call('POST', '/auth/verify', { mobile: BOSS, code: '000000' })).status === 400);

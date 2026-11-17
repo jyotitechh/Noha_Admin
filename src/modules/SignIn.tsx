@@ -2,8 +2,8 @@
 
    NO ZOHO SINGLE SIGN-ON. This is a mobile-number-or-email + six-digit-code
    flow that stands in for it. Staff are members: they sign in with the number
-   or the email address they registered with in the Noah app. A number is
-   texted its code; an address is emailed it. The prototype's screen had a
+   or the email address they registered with in the Noah app. A number gets
+   its code on WhatsApp (or by SMS); an address is emailed it. The prototype's screen had a
    "Continue with Zoho" button; the layout is otherwise the same, so putting
    Zoho back is a matter of adding the button and pointing it at the callback.
 
@@ -131,7 +131,7 @@ export default function SignIn() {
     }
   }
   const asked = who?.email ?? who?.mobile ?? '';
-  const how = sent?.via === 'sms' ? 'texted' : sent?.via === 'email' ? 'emailed' : '';
+  const how = sent?.via === 'whatsapp' ? 'sent' : sent?.via === 'sms' ? 'texted' : sent?.via === 'email' ? 'emailed' : '';
 
   return (
     <div className="signin">
@@ -293,7 +293,7 @@ export default function SignIn() {
             <h2>Enter the code</h2>
             <p className="muted mt0">
               {how
-                ? <>We {how} a six-digit code to <b>{sent?.sentTo}</b>.</>
+                ? <>We {how} a six-digit code to <b>{sent?.sentTo}</b>{sent?.via === 'whatsapp' ? ' on WhatsApp' : ''}.</>
                 : <>A six-digit code for <b>{sent?.name || asked}</b>.</>}{' '}
               It lasts five minutes and works once.
             </p>
@@ -332,9 +332,11 @@ export default function SignIn() {
               </div>
             ) : how ? (
               <p className="xs muted mt16">
-                {sent?.via === 'sms'
-                  ? 'Texts usually arrive within a minute.'
-                  : 'Nothing there? Check the spam folder.'}
+                {sent?.via === 'whatsapp'
+                  ? 'It usually arrives within a minute. No WhatsApp on this number? Sign in with your email.'
+                  : sent?.via === 'sms'
+                    ? 'Texts usually arrive within a minute.'
+                    : 'Nothing there? Check the spam folder.'}
               </p>
             ) : (
               <p className="xs muted mt16">

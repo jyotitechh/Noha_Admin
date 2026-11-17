@@ -1,7 +1,8 @@
-/* Getting a one-time code to a person: by email, or by SMS.
+/* Getting a one-time code to a person: by email, or to their mobile number by WhatsApp or SMS.
 
    Which one is up to them: they type an email address and the code is emailed,
-   they type a mobile number and it is texted. A channel that has not been set
+   they type a mobile number and it goes to that number on WhatsApp (or by SMS where
+   WhatsApp is not set up). A channel that has not been set
    up here is simply "not configured", and sign-in says so; it never pretends
    to have sent something.
 
@@ -9,10 +10,17 @@
      Catalyst Mail (Cloud Scale > Mail), through the same Catalyst sign-in the console already has:
        MAIL_CATALYST_FROM, a sender address verified in Catalyst on a domain verified with SPF and DKIM
        (not a Gmail or Yahoo address). The Catalyst token also needs the scope ZohoCatalyst.email.CREATE.
-     SMTP, so Zoho Mail, Gmail, SendGrid, Brevo and so on work too:
+     SMTP, so Zoho Mail, ZeptoMail (Zoho CPaaS), Gmail, SendGrid, Brevo and so on work too:
        SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE
+       The Noah API's names are taken too, so the same settings can be copied across unchanged:
+       MAIL_SMTP_HOST, MAIL_SMTP_PORT, MAIL_SMTP_USER, MAIL_SMTP_PASS, MAIL_FROM.
    MAIL_PROVIDER = catalyst or smtp says which goes first. Left out, SMTP goes first when it is set up, else Catalyst.
    If the first fails and the other is set up, the other is tried, so one provider being down does not lock anyone out.
+   WHATSAPP is Zoho CPaaS, the same agent and approved template as the Noah app's codes:
+     ZOHO_CPAAS_AUTH (the whole API key, "Zoho-enczapikey ..."), ZOHO_CPAAS_WHATSAPP_FROM (the business
+     number, e.g. 918291565758), ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY or ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS,
+     ZOHO_CPAAS_WHATSAPP_OTP_VARIABLE (the template's variable, default "code"),
+     ZOHO_CPAAS_BASE (default https://cpaas.zoho.in, the India data centre). WHATSAPP_PROVIDER=off turns it off.
    SMS is Twilio today:
      TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and one of
      TWILIO_FROM (a number) or TWILIO_MESSAGING_SERVICE_SID
@@ -25,11 +33,20 @@ import nodemailer from 'nodemailer';
 import * as catalyst from './catalyst.js';
 
 const env = (k) => String(process.env[k] ?? '').trim();
+/** The console's own name for a setting, or the Noah API's name for the same thing. */
+const either = (...keys) => keys.map(env).find(Boolean) || '';
+const smtp = {
+  host: () => either('SMTP_HOST', 'MAIL_SMTP_HOST'),
+  port: () => either('SMTP_PORT', 'MAIL_SMTP_PORT'),
+  user: () => either('SMTP_USER', 'MAIL_SMTP_USER'),
+  pass: () => either('SMTP_PASS', 'MAIL_SMTP_PASS'),
+  from: () => either('SMTP_FROM', 'MAIL_FROM'),
+};
 
 /* ---------- what is set up ---------- */
 
 const mailers = {
-  smtp: { ready: () => !!(env('SMTP_HOST') && env('SMTP_USER') && env('SMTP_PASS') && env('SMTP_FROM')), send: sendSmtp },
+  smtp: { ready: () => !!(smtp.host() && smtp.user() && smtp.pass() && smtp.from()), send: sendSmtp },
   catalyst: { ready: () => !!(env('MAIL_CATALYST_FROM') && catalyst.configured()), send: sendCatalystMail },
 };
 
@@ -56,8 +73,23 @@ const smsProviders = {
 const smsProvider = () => smsProviders[env('SMS_PROVIDER').toLowerCase() || 'twilio'];
 const smsReady = () => !!smsProvider()?.ready();
 
+const whatsappProviders = {
+  zoho_cpaas: {
+    ready: () => !!(env('ZOHO_CPAAS_AUTH') && env('ZOHO_CPAAS_WHATSAPP_FROM')
+      && (env('ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY') || env('ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS'))),
+    send: sendCpaasWhatsapp,
+  },
+};
+const whatsappProvider = () => (env('WHATSAPP_PROVIDER').toLowerCase() === 'off'
+  ? null
+  : whatsappProviders[env('WHATSAPP_PROVIDER').toLowerCase() || 'zoho_cpaas']);
+const whatsappReady = () => !!whatsappProvider()?.ready();
+
 /** For the sign-in screen and the health check: which ways of getting a code work. */
-export const channels = () => ({ email: emailReady(), sms: smsReady() });
+export const channels = () => ({ email: emailReady(), sms: smsReady(), whatsapp: whatsappReady() });
+
+/** How a code for a mobile number goes: WhatsApp first (SMS to Indian numbers needs DLT), else SMS, else null. */
+export const mobileChannel = () => (whatsappReady() ? 'whatsapp' : smsReady() ? 'sms' : null);
 
 /* ---------- the transports ----------
 
@@ -67,6 +99,7 @@ export const channels = () => ({ email: emailReady(), sms: smsReady() });
 export const transport = {
   email: sendEmail,
   sms: (to, text) => smsProvider().send(to, text),
+  whatsapp: (to, code) => whatsappProvider().send(to, code),
 };
 
 /** Email by the first provider that is set up; if it fails, by the next. The last failure is the one thrown. */
@@ -90,17 +123,17 @@ async function sendCatalystMail({ to, subject, html }) {
 }
 
 async function sendSmtp({ to, subject, text, html }) {
-  const port = Number(env('SMTP_PORT')) || 587;
+  const port = Number(smtp.port()) || 587;
   const mailer = nodemailer.createTransport({
-    host: env('SMTP_HOST'),
+    host: smtp.host(),
     port,
     /* 465 is TLS from the first byte; 587 starts plain and upgrades. */
     secure: env('SMTP_SECURE') ? env('SMTP_SECURE') === 'true' : port === 465,
-    auth: { user: env('SMTP_USER'), pass: env('SMTP_PASS') },
+    auth: { user: smtp.user(), pass: smtp.pass() },
     connectionTimeout: 10_000,
     socketTimeout: 15_000,
   });
-  await mailer.sendMail({ from: env('SMTP_FROM'), to, subject, text, html });
+  await mailer.sendMail({ from: smtp.from(), to, subject, text, html });
 }
 
 async function sendTwilio(to, text) {
@@ -121,6 +154,41 @@ async function sendTwilio(to, text) {
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     throw new Error(`Twilio refused the message (${res.status}${j.code ? ` / ${j.code}` : ''}): ${j.message || 'no reason given'}`);
+  }
+}
+
+/* Zoho CPaaS: POST /v1.1/whatsapp with an approved template (the Authentication template "noah_otp",
+   whose one variable is the code). Docs: https://www.zoho.com/cpaas/help/api/send-a-whatsapp-message.html
+   The code goes only in merge_info: never in client_reference, which shows in the CPaaS message logs. */
+async function sendCpaasWhatsapp(to, code) {
+  const base = (env('ZOHO_CPAAS_BASE') || 'https://cpaas.zoho.in').replace(/\/+$/, '');
+  const key = env('ZOHO_CPAAS_AUTH');
+  const plus = (n) => '+' + String(n).replace(/\D/g, '');
+  const body = {
+    /* CPaaS wants both numbers with their '+': without it the sender is "not associated". */
+    from: plus(env('ZOHO_CPAAS_WHATSAPP_FROM')),
+    to: plus(to),
+    merge_info: { [env('ZOHO_CPAAS_WHATSAPP_OTP_VARIABLE') || 'code']: String(code) },
+    client_reference: 'console-sign-in',
+  };
+  if (env('ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY')) body.template_key = env('ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY');
+  else body.template_alias = env('ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS');
+
+  const res = await fetch(`${base}/v1.1/whatsapp`, {
+    method: 'POST',
+    headers: {
+      /* Kept as the whole key, as CPaaS shows it; the bare key works too. */
+      Authorization: /^zoho-enczapikey\s/i.test(key) ? key : `Zoho-enczapikey ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || (j.status && j.status !== 'success')) {
+    const e = j.error || {};
+    const detail = (e.details || []).map((d) => [d.code, d.message, d.target].filter(Boolean).join(' ')).join('; ');
+    throw new Error(`Zoho CPaaS refused the WhatsApp message (${res.status}${e.code ? ` / ${e.code}` : ''}): ${[e.message, detail].filter(Boolean).join(' - ') || 'no reason given'}`);
   }
 }
 
@@ -165,6 +233,11 @@ export async function sendCode({ via, to, code, ttlMs }) {
       });
       return;
     }
+    if (via === 'whatsapp') {
+      if (!whatsappReady()) throw new Error('WhatsApp is not set up on this server.');
+      await transport.whatsapp(to, code);
+      return;
+    }
     if (via === 'sms') {
       if (!smsReady()) throw new Error('SMS is not set up on this server.');
       await transport.sms(to, `${code} is your Karuna Sadan console code. It works once and lasts ${mins} minutes.`);
@@ -178,7 +251,9 @@ export async function sendCode({ via, to, code, ttlMs }) {
     throw Object.assign(
       new Error(via === 'email'
         ? 'The code could not be emailed just now. Try again in a minute, or sign in with your mobile number.'
-        : 'The code could not be texted just now. Try again in a minute, or sign in with your email.'),
+        : via === 'whatsapp'
+          ? 'The code could not be sent on WhatsApp. Check that this number uses WhatsApp, or sign in with your email.'
+          : 'The code could not be texted just now. Try again in a minute, or sign in with your email.'),
       { code: 'delivery_failed' },
     );
   }

@@ -12,14 +12,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, getToken, setToken, type User } from '@/lib/api';
 import { forgetMemberPhotos } from '@/components/MemberPhoto';
 
-/** How someone signs in: by mobile number (a code is texted) or by email (a code is emailed). */
+/** How someone signs in: by mobile number (the code goes on WhatsApp, or by SMS) or by email (it is emailed). */
 export type Identity = { mobile: string; email?: undefined } | { email: string; mobile?: undefined };
 
 export interface CodeSent {
   name: string;
   devCode?: string;
   test?: boolean;
-  via?: 'sms' | 'email';
+  via?: 'whatsapp' | 'sms' | 'email';
   sentTo?: string;
   resendAfterSeconds?: number;
 }

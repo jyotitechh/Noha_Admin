@@ -614,12 +614,18 @@ const outbox = [];
 const realTransport = { ...D.transport };
 D.transport.email = async (mail) => { outbox.push({ via: 'email', ...mail }); };
 D.transport.sms = async (to, text) => { outbox.push({ via: 'sms', to, text }); };
+D.transport.whatsapp = async (to, code) => { outbox.push({ via: 'whatsapp', to, text: `template code ${code}` }); };
 const codeIn = (msg) => (msg.text.match(/\b(\d{6})\b/) || [])[1];
 
 const EMAIL = { SMTP_HOST: 'smtp.test', SMTP_USER: 'u', SMTP_PASS: 'p', SMTP_FROM: 'Karuna Sadan <no-reply@karunasadan.test>' };
 const TWILIO = { SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'tok', TWILIO_FROM: '+15005550006', TWILIO_MESSAGING_SERVICE_SID: undefined };
 const CATMAIL = { MAIL_CATALYST_FROM: 'no-reply@karunasadan.test' };
-const NONE = Object.fromEntries(Object.keys({ ...EMAIL, ...TWILIO, ...CATMAIL, MAIL_PROVIDER: 1 }).map((k) => [k, undefined]));
+const WHATSAPP = { ZOHO_CPAAS_AUTH: 'Zoho-enczapikey test-key', ZOHO_CPAAS_WHATSAPP_FROM: '918291565758', ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY: 'tpl-noah-otp', ZOHO_CPAAS_WHATSAPP_OTP_VARIABLE: 'code' };
+const NOAH_MAIL = { MAIL_SMTP_HOST: 'smtp.zeptomail.test', MAIL_SMTP_PORT: '465', MAIL_SMTP_USER: 'emailapikey', MAIL_SMTP_PASS: 'p1', MAIL_FROM: 'noreply@karunasadan.test' };
+const NONE = Object.fromEntries(Object.keys({
+  ...EMAIL, ...TWILIO, ...CATMAIL, ...WHATSAPP, ...NOAH_MAIL, MAIL_PROVIDER: 1, WHATSAPP_PROVIDER: 1,
+  ZOHO_CPAAS_BASE: 1, ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS: 1,
+}).map((k) => [k, undefined]));
 
 /* Time is moved by hand, so the resend rules can be tested without waiting. */
 const realNow = Date.now;
@@ -630,7 +636,7 @@ const tick = (s) => { clock += s * 1000; };
 try {
   /* ---------- what counts as set up ---------- */
   await withEnv({ ...NONE }, async () => {
-    check('with nothing configured, neither channel is on', !D.channels().email && !D.channels().sms);
+    check('with nothing configured, no channel is on', !D.channels().email && !D.channels().sms && !D.channels().whatsapp && D.mobileChannel() === null);
   });
   await withEnv({ ...NONE, ...EMAIL }, async () => {
     check('email needs host, user, password and a from address', D.channels().email && !D.channels().sms);
@@ -646,6 +652,24 @@ try {
   });
   await withEnv({ ...NONE, ...TWILIO, TWILIO_FROM: undefined, TWILIO_MESSAGING_SERVICE_SID: 'MG1' }, async () => {
     check('...a messaging service stands in for a number', D.channels().sms);
+  });
+  await withEnv({ ...NONE, ...WHATSAPP }, async () => {
+    check('WhatsApp is on with the CPaaS key, the business number and the template', D.channels().whatsapp && !D.channels().sms && D.mobileChannel() === 'whatsapp');
+  });
+  await withEnv({ ...NONE, ...WHATSAPP, ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY: undefined }, async () => {
+    check('...not without a template', !D.channels().whatsapp);
+  });
+  await withEnv({ ...NONE, ...WHATSAPP, ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY: undefined, ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS: 'noah-otp' }, async () => {
+    check('...a template alias stands in for the key', D.channels().whatsapp);
+  });
+  await withEnv({ ...NONE, ...WHATSAPP, ...TWILIO }, async () => {
+    check('with WhatsApp and SMS both set up, a number gets WhatsApp', D.mobileChannel() === 'whatsapp');
+  });
+  await withEnv({ ...NONE, ...WHATSAPP, ...TWILIO, WHATSAPP_PROVIDER: 'off' }, async () => {
+    check('...WHATSAPP_PROVIDER=off falls back to SMS', !D.channels().whatsapp && D.mobileChannel() === 'sms');
+  });
+  await withEnv({ ...NONE, ...NOAH_MAIL }, async () => {
+    check('the Noah API\'s mail settings (MAIL_SMTP_*, MAIL_FROM) turn email on too', D.channels().email && D.emailProvider() === 'smtp');
   });
   check('the masks show where to look without the whole thing',
     D.maskMobile('+919000000555') === '+91••••••0555' && D.maskEmail('anitha@example.com') === 'a•••@example.com',
@@ -674,6 +698,31 @@ try {
     const signed = await A.verifyCode({ mobile: '+91 90000 00555' }, codeIn(outbox[0]));
     check('the code that was texted signs them in', signed.ok && signed.user.role === 'super' && !!signed.token, JSON.stringify(signed).slice(0, 120));
     check('...and works once', !(await A.verifyCode({ mobile: '+91 90000 00555' }, codeIn(outbox[0]))).ok);
+  });
+
+  /* ---------- by number: WhatsApp ---------- */
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...WHATSAPP, ...TWILIO, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    outbox.length = 0;
+    tick(7200);
+    const r = await A.requestCode({ mobile: '+91 90000 00555' });
+    check('asking by number sends the code on WhatsApp when it is set up', r.ok && r.via === 'whatsapp' && outbox.length === 1 && outbox[0].via === 'whatsapp', JSON.stringify(r).slice(0, 160));
+    check('...to the number in full', outbox[0].to === '+919000000555', outbox[0].to);
+    check('...not handed back, and where it went is masked', r.devCode === undefined && r.sentTo === '+91••••••0555', JSON.stringify(r).slice(0, 160));
+    const signed = await A.verifyCode({ mobile: '+91 90000 00555' }, codeIn(outbox[0]));
+    check('the WhatsApp code signs them in', signed.ok && signed.user.role === 'super', JSON.stringify(signed).slice(0, 120));
+  });
+  await withEnv({ NODE_ENV: 'test', ...NONE, ...WHATSAPP, ADMIN_PASSPHRASE: undefined }, async () => {
+    reset(seed());
+    tick(7200);
+    const was = D.transport.whatsapp;
+    D.transport.whatsapp = async () => { throw new Error('Zoho CPaaS refused the WhatsApp message (400 / WA_103): key tpl-noah-otp for +919000000555'); };
+    const errLog = console.error; const seen = [];
+    console.error = (...a) => seen.push(a.join(' '));
+    let r;
+    try { r = await A.requestCode({ mobile: '+91 90000 00555' }); } finally { console.error = errLog; D.transport.whatsapp = was; }
+    check('a WhatsApp failure says so in plain words and points to email', !r.ok && r.status === 502 && /WhatsApp/.test(r.error) && /email/.test(r.error) && !/WA_103|tpl-|9000000555/.test(r.error), r.error);
+    check('...the detail goes to the server log, number masked', seen.length === 1 && /WA_103/.test(seen[0]) && /whatsapp to \+91•+0555 failed/.test(seen[0]), seen.join('|'));
   });
 
   /* ---------- by address: an email ---------- */
@@ -820,6 +869,36 @@ try {
     globalThis.fetch = async (_u, init) => { body = new URLSearchParams(String(init.body)); return new Response('{}', { status: 201 }); };
     try { await realTransport.sms('+919000000555', 'x'); } finally { globalThis.fetch = realFetch; }
     check('with a messaging service, that is sent instead of a number', body?.get('MessagingServiceSid') === 'MG77' && !body.has('From'));
+  });
+
+  /* Zoho CPaaS WhatsApp: the request as the API documents it. fetch is stubbed: nothing is sent. */
+  await withEnv({ ...NONE, ...WHATSAPP }, async () => {
+    const realFetch = globalThis.fetch;
+    let call = null;
+    globalThis.fetch = async (url, init) => { call = { url: String(url), init }; return new Response(JSON.stringify({ data: { code: 'MSG_101', message_id: 'm1' }, status: 'success' }), { status: 200 }); };
+    try { await realTransport.whatsapp('+919000000555', '482913'); } finally { globalThis.fetch = realFetch; }
+    const body = JSON.parse(String(call?.init.body || '{}'));
+    check('CPaaS is called at the India data centre\'s /v1.1/whatsapp', call?.url === 'https://cpaas.zoho.in/v1.1/whatsapp' && call.init.method === 'POST', call?.url);
+    check('...with the key as the Zoho-enczapikey header, as JSON', call?.init.headers.Authorization === 'Zoho-enczapikey test-key' && call.init.headers['Content-Type'] === 'application/json');
+    check('...both numbers with their +, the template and the code in its variable',
+      body.from === '+918291565758' && body.to === '+919000000555' && body.template_key === 'tpl-noah-otp' && body.merge_info?.code === '482913', JSON.stringify(body));
+    check('...and the code nowhere but the template variable', !String(body.client_reference || '').includes('482913') && !('template_alias' in body), JSON.stringify(body));
+  });
+  await withEnv({ ...NONE, ...WHATSAPP, ZOHO_CPAAS_AUTH: 'bare-key', ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY: undefined, ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS: 'noah-otp', ZOHO_CPAAS_BASE: 'https://cpaas.zoho.com/' }, async () => {
+    const realFetch = globalThis.fetch;
+    let call = null;
+    globalThis.fetch = async (url, init) => { call = { url: String(url), init }; return new Response(JSON.stringify({ status: 'success', data: {} }), { status: 200 }); };
+    try { await realTransport.whatsapp('919000000555', '111222'); } finally { globalThis.fetch = realFetch; }
+    const body = JSON.parse(String(call?.init.body || '{}'));
+    check('...a bare key gets its prefix; an alias is sent instead of a key; another data centre can be set',
+      call?.init.headers.Authorization === 'Zoho-enczapikey bare-key' && body.template_alias === 'noah-otp' && !('template_key' in body) && call.url === 'https://cpaas.zoho.com/v1.1/whatsapp', JSON.stringify({ url: call?.url, body }));
+  });
+  await withEnv({ ...NONE, ...WHATSAPP }, async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'TM_3301', message: 'Bad Syntax', details: [{ code: 'SERR_110', message: 'Parameter less than min occurrance', target: 'to' }] } }), { status: 400 });
+    let failure = null;
+    try { await realTransport.whatsapp('+919000000555', '1'); } catch (e) { failure = e; } finally { globalThis.fetch = realFetch; }
+    check('CPaaS\'s refusal becomes an error naming its code and the field', /400 \/ TM_3301/.test(failure?.message || '') && /SERR_110/.test(failure.message) && /to/.test(failure.message), failure?.message);
   });
 
   /* A real SMTP conversation, against a tiny server in this process: the only

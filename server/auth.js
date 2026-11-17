@@ -7,7 +7,7 @@
    session after the Zoho callback instead of after `verify`, and leave the
    rest of the API untouched. The console's side is src/state/auth.tsx.
 
-   The code is texted (mobile number) or emailed (address) by deliver.js once
+   The code goes on WhatsApp or by SMS (mobile number) or is emailed (address) by deliver.js once
    that channel is configured. Until it is, `requestCode` falls back to returning
    the code in the response, which is only acceptable on a developer's machine
    or behind the office passphrase. */
@@ -20,7 +20,7 @@ import { db, roleById } from './db.js';
 import { allStaff, live } from './store.js';
 import { demoMode, codeOnScreen } from './demo.js';
 import { mobileKey, resolveStaff, markStaffSignedIn, testOtp, testLoginEnabled, testAccounts } from './staff.js';
-import { channels, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
+import { channels, mobileChannel, sendCode, e164, maskMobile, maskEmail } from './deliver.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 /* How long a sign-in lasts. A week by default (SESSION_HOURS changes it): the token lives in the browser
@@ -267,17 +267,21 @@ export async function requestCode({ mobile, email } = {}) {
 
   /* In demo mode the sample staff sign in with the fixed code too: there is nothing real behind them. */
   const isTest = staff.source === 'test' || demoMode();
-  const via = mobile ? 'sms' : 'email';
+  /* A number gets its code on WhatsApp (Zoho CPaaS), or by SMS where only that is set up. */
+  const via = mobile ? (mobileChannel() || 'sms') : 'email';
   const key = keyOf({ mobile, email });
   const delivering = !isTest && channels()[via];
 
   /* Neither a real channel nor a gate: the code would go to whoever asked.
      That is only ever the prototype's behaviour on someone's own machine. */
   if (!isTest && !delivering && production() && !passphraseRequired() && !codeOnScreen()) {
+    const otherWorks = mobile ? channels().email : !!mobileChannel();
     return {
       ok: false, status: 503,
-      error: `Codes cannot be ${via === 'sms' ? 'texted' : 'emailed'} yet: ${via === 'sms' ? 'SMS' : 'email'} is not set up on this server.`
-        + (channels()[via === 'sms' ? 'email' : 'sms'] ? ` Sign in with your ${via === 'sms' ? 'email' : 'mobile number'} instead.` : ''),
+      error: (via === 'email'
+        ? 'Codes cannot be emailed yet: email is not set up on this server.'
+        : 'Codes cannot be sent to a mobile number yet: WhatsApp and SMS are not set up on this server.')
+        + (otherWorks ? ` Sign in with your ${mobile ? 'email' : 'mobile number'} instead.` : ''),
     };
   }
 
@@ -288,7 +292,7 @@ export async function requestCode({ mobile, email } = {}) {
 
   /* With the code on screen there is no fixed code at all, not even for the test accounts. */
   const code = isTest && !codeOnScreen() ? testOtp() : sixDigits();
-  const to = via === 'sms' ? e164(key) : key;
+  const to = via === 'email' ? key : e164(key);
 
   if (delivering) {
     try {
@@ -313,10 +317,10 @@ export async function requestCode({ mobile, email } = {}) {
        shown only to whoever holds the inbox or the phone. */
     name: delivering ? undefined : staff.name,
     test: isTest || undefined,
-    /* How it went: 'sms' or 'email' when it was really sent (and then to where,
+    /* How it went: 'whatsapp', 'sms' or 'email' when it was really sent (and then to where,
        masked), or nothing when the code is on screen instead. */
     via: delivering ? via : undefined,
-    sentTo: delivering ? (via === 'sms' ? maskMobile(to) : maskEmail(to)) : undefined,
+    sentTo: delivering ? (via === 'email' ? maskEmail(to) : maskMobile(to)) : undefined,
     resendAfterSeconds: delivering ? RESEND_AFTER_MS / 1000 : undefined,
     /* Only when nothing was sent. Test accounts in production do not get it:
        whoever is testing knows the code. */
