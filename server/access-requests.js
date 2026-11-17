@@ -21,6 +21,11 @@ import { live, isNoah } from './store.js';
 export const REQUEST_ANSWER =
   'If that number belongs to an approved member of the church, your request has been sent to a super administrator. '
   + 'When it is approved you can sign in with the same number.';
+/** The same, for a request made with an email address (the console signs in by email). */
+export const REQUEST_ANSWER_EMAIL =
+  'If that address belongs to an approved member of the church, your request has been sent to a super administrator. '
+  + 'When it is approved you can sign in with the same address.';
+const PER_EMAIL = { max: 3, per: 24 * 60 * 60 * 1000 };   /* three a day for one address */
 
 const PER_ADDRESS = { max: 6, per: 60 * 60 * 1000 };      /* six an hour from one address */
 const PER_NUMBER = { max: 3, per: 24 * 60 * 60 * 1000 };  /* three a day for one number */
@@ -41,7 +46,27 @@ function allow(key, { max, per }) {
  * Handle one request. Returns { status, body }: 200 with the standard answer in almost every case, 429 when
  * the limits are hit, 400 when no number was given at all.
  */
-export async function handleAccessRequest({ mobile, note }, ip = '') {
+export async function handleAccessRequest({ mobile, email, note }, ip = '') {
+  /* By email address: the sign-in page asks for this while signing in by number is switched off. */
+  if (email !== undefined && !mobile) {
+    const addr = String(email || '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
+      return { status: 400, body: { ok: false, error: 'Type the email address you registered with in the app.' } };
+    }
+    if (!allow('ip:' + ip, PER_ADDRESS) || !allow('email:' + addr, PER_EMAIL)) {
+      return { status: 429, body: { ok: false, error: 'That is too many requests. Try again later, or ask a super administrator directly.' } };
+    }
+    if (live() && isNoah()) {
+      try {
+        const hits = (await loadMembers()).filter((m) => String(m.email || '').trim().toLowerCase() === addr
+          && m.approved && !m.blocked && !m.name.startsWith('('));
+        /* One member only: an address two people share cannot say whose request it is. */
+        if (hits.length === 1) await requestConsoleAccess(hits[0].rowId, note);
+      } catch { /* as below: the answer does not depend on it */ }
+    }
+    return { status: 200, body: { ok: true, message: REQUEST_ANSWER_EMAIL } };
+  }
+
   const key = mobileKey(mobile);
   if (!key || key.length < 8) return { status: 400, body: { ok: false, error: 'Type the mobile number you registered with in the app.' } };
 

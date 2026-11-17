@@ -7,6 +7,10 @@
    "Continue with Zoho" button; the layout is otherwise the same, so putting
    Zoho back is a matter of adding the button and pointing it at the callback.
 
+   SIGNING IN BY MOBILE NUMBER IS SWITCHED OFF (server/auth.js, MOBILE_SIGN_IN): the server says so in
+   /meta (mobileSignIn), and this screen then offers email only. Nothing below is removed: with the
+   switch back on, the mobile tab, the number field and the test accounts' numbers come back by themselves.
+
    When the server has no SMS or email set up, the code is shown on screen
    instead, marked below. The box listing the test accounts goes with it: a real
    console would never publish its own staff list before sign-in. */
@@ -17,13 +21,15 @@ import { useAuth, type CodeSent, type Identity } from '@/state/auth';
 import { Icon, Note } from '@/components/ui';
 import logo from '@/assets/logo.png';
 
-interface Account { mobile: string; name: string; title: string; role: string; roleName: string }
+interface Account { mobile: string; email?: string; name: string; title: string; role: string; roleName: string }
 type Mode = 'mobile' | 'email';
 
 export default function SignIn() {
   const { requestCode, verify } = useAuth();
   const [step, setStep] = useState<'start' | 'otp'>('start');
-  const [mode, setMode] = useState<Mode>('mobile');
+  /* Email unless the server has mobile sign-in switched on. */
+  const [mobileOn, setMobileOn] = useState(false);
+  const [mode, setMode] = useState<Mode>('email');
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
   /* Who the code was asked for, kept so "verify" and "send again" use exactly
@@ -40,11 +46,12 @@ export default function SignIn() {
   const [passphrase, setPassphrase] = useState('');
   const [needsPassphrase, setNeedsPassphrase] = useState(false);
   /* Set only by a demo server (sample data, fixed code): the code is shown so a visitor can get in. */
-  const [demo, setDemo] = useState<{ mobile: string; code: string } | null>(null);
+  const [demo, setDemo] = useState<{ mobile: string; email?: string; code: string } | null>(null);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
   /* Asking a super administrator for access, for someone who registered in the app but is not staff. */
   const [asking, setAsking] = useState(false);
   const [askMobile, setAskMobile] = useState('');
+  const [askEmail, setAskEmail] = useState('');
   const [askNote, setAskNote] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [askAnswer, setAskAnswer] = useState('');
@@ -54,8 +61,13 @@ export default function SignIn() {
      is the intended answer, not a failure, so it is simply left empty. */
   useEffect(() => { api.get<Account[]>('/auth/accounts').then(setAccounts).catch(() => {}); }, []);
   useEffect(() => {
-    api.get<{ passphraseRequired?: boolean; demo?: { mobile: string; code: string } }>('/meta')
-      .then((m) => { setNeedsPassphrase(!!m.passphraseRequired); setDemo(m.demo ?? null); })
+    api.get<{ passphraseRequired?: boolean; mobileSignIn?: boolean; demo?: { mobile: string; email?: string; code: string } }>('/meta')
+      .then((m) => {
+        setNeedsPassphrase(!!m.passphraseRequired);
+        setDemo(m.demo ?? null);
+        setMobileOn(!!m.mobileSignIn);
+        if (m.mobileSignIn) setMode('mobile');
+      })
       .catch(() => {});
   }, []);
   useEffect(() => { if (step === 'otp') boxes.current[0]?.focus(); }, [step]);
@@ -122,7 +134,9 @@ export default function SignIn() {
     setAskBusy(true);
     setAskError('');
     try {
-      const r = await api.post<{ message: string }>('/auth/request-access', { mobile: askMobile.trim(), note: askNote.trim(), passphrase });
+      const r = await api.post<{ message: string }>('/auth/request-access', mobileOn
+        ? { mobile: askMobile.trim(), note: askNote.trim(), passphrase }
+        : { email: askEmail.trim(), note: askNote.trim(), passphrase });
       setAskAnswer(r.message);
     } catch (e) {
       setAskError((e as Error).message);
@@ -150,19 +164,21 @@ export default function SignIn() {
           <div className="si-card">
             <h2>Sign in</h2>
             <p className="muted mt0">
-              Enter your registered mobile number or email address. We will send you a six-digit code.
+              {mobileOn
+                ? 'Enter your registered mobile number or email address. We will send you a six-digit code.'
+                : 'Enter your registered email address. We will send you a six-digit code.'}
             </p>
 
             {demo && (
               <div className="mt12">
                 <Note tone="warn" icon="key">
-                  Demo with sample data. Sign in with <b className="mono">{demo.mobile}</b> and
+                  Demo with sample data. Sign in with <b className="mono">{mobileOn || !demo.email ? demo.mobile : demo.email}</b> and
                   the code <b className="mono" style={{ letterSpacing: '.08em' }}>{demo.code}</b>.
                 </Note>
               </div>
             )}
 
-            <div className="tabs mt16" role="tablist" aria-label="Sign in with">
+            {mobileOn && <div className="tabs mt16" role="tablist" aria-label="Sign in with">
               {(['mobile', 'email'] as const).map((m) => (
                 <a
                   key={m}
@@ -176,9 +192,9 @@ export default function SignIn() {
                   {m === 'mobile' ? 'Mobile number' : 'Email'}
                 </a>
               ))}
-            </div>
+            </div>}
 
-            <form
+            <form className={mobileOn ? '' : 'mt16'}
               onSubmit={(e) => {
                 e.preventDefault();
                 if (typed) send(mode === 'mobile' ? { mobile: typed } : { email: typed });
@@ -244,7 +260,7 @@ export default function SignIn() {
             {/* Not staff yet? A member of the church can ask a super administrator for access. */}
             <div className="mt16">
               {!asking ? (
-                <button type="button" className="linkish small" onClick={() => { setAsking(true); setAskMobile(mode === 'mobile' ? mobile : ''); }}>
+                <button type="button" className="linkish small" onClick={() => { setAsking(true); setAskMobile(mode === 'mobile' ? mobile : ''); setAskEmail(mode === 'email' ? email : ''); }}>
                   Do not have access yet? Ask a super administrator
                 </button>
               ) : askAnswer ? (
@@ -253,13 +269,18 @@ export default function SignIn() {
                 <div className="card pad stack" style={{ gap: 8 }}>
                   <b className="small">Ask for access</b>
                   <span className="xs muted">A super administrator will review your request.</span>
-                  <input className="inp" type="tel" inputMode="tel" value={askMobile} placeholder="The mobile number you registered with"
-                    aria-label="Your mobile number" onChange={(e) => { setAskMobile(e.target.value); setAskError(''); }} />
+                  {mobileOn ? (
+                    <input className="inp" type="tel" inputMode="tel" value={askMobile} placeholder="The mobile number you registered with"
+                      aria-label="Your mobile number" onChange={(e) => { setAskMobile(e.target.value); setAskError(''); }} />
+                  ) : (
+                    <input className="inp" type="email" inputMode="email" value={askEmail} placeholder="The email address you registered with"
+                      aria-label="Your email address" onChange={(e) => { setAskEmail(e.target.value); setAskError(''); }} />
+                  )}
                   <input className="inp" value={askNote} maxLength={100} placeholder="Who are you, and why do you need it? (optional)"
                     aria-label="A note for the super administrator" onChange={(e) => setAskNote(e.target.value)} />
                   {askError && <div className="small" role="alert" style={{ color: 'var(--bad)', fontWeight: 600 }}>{askError}</div>}
                   <div className="row" style={{ gap: 8 }}>
-                    <button type="button" className="btn pri" disabled={askBusy || !askMobile.trim() || (needsPassphrase && !passphrase)} onClick={askForAccess}>{askBusy ? 'Sending…' : 'Send the request'}</button>
+                    <button type="button" className="btn pri" disabled={askBusy || !(mobileOn ? askMobile : askEmail).trim() || (needsPassphrase && !passphrase)} onClick={askForAccess}>{askBusy ? 'Sending…' : 'Send the request'}</button>
                     <button type="button" className="btn" onClick={() => { setAsking(false); setAskError(''); }}>Cancel</button>
                   </div>
                 </div>
@@ -275,10 +296,10 @@ export default function SignIn() {
                 <div className="card" style={{ maxHeight: 210, overflow: 'auto' }}>
                   <ul className="list">
                     {accounts.slice(0, 8).map((a) => (
-                      <li key={a.mobile} className="click" onClick={() => send({ mobile: a.mobile })}>
+                      <li key={a.mobile} className="click" onClick={() => send(mobileOn || !a.email ? { mobile: a.mobile } : { email: a.email })}>
                         <span className="grow">
                           <span className="t1">{a.name}</span>
-                          <span className="t2 mono">{a.mobile}</span>
+                          <span className="t2 mono">{mobileOn || !a.email ? a.mobile : a.email}</span>
                         </span>
                         <Icon name="chev-r" />
                       </li>

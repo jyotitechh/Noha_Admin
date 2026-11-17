@@ -57,6 +57,9 @@ Object.assign(process.env, {
   PLACES_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
 });
 delete process.env.ADMIN_PASSPHRASE;
+/* The deployed console signs in by email only; these suites sign in by number, so the harness
+   turns mobile sign-in on. MOBILE_SIGN_IN=off when starting it shows the console as deployed. */
+if (!process.env.MOBILE_SIGN_IN) process.env.MOBILE_SIGN_IN = 'on';
 
 /* Refuse the outside world. */
 const realFetch = globalThis.fetch;

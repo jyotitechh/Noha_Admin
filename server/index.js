@@ -15,7 +15,7 @@ import express from 'express';
 import cors from 'cors';
 import { db, audit, can, roleById, page, matches, find } from './db.js';
 import { channels, emailProvider } from './deliver.js';
-import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired } from './auth.js';
+import { requestCode, verifyCode, requireSession, requirePerm, signOut, viewAs, listAccounts, checkPassphrase, passphraseRequired, mobileSignIn } from './auth.js';
 import { testLoginEnabled, testLoginStatus, testOtp, listStaff } from './staff.js';
 import { demoMode, DEMO_MOBILE } from './demo.js';
 import { handleAccessRequest } from './access-requests.js';
@@ -219,10 +219,12 @@ app.get('/api/meta', (_req, res) => {
        away; the passphrase itself never leaves the server. */
     passphraseRequired: passphraseRequired(),
     /* Demo mode publishes its sign-in on purpose (see demo.js): sample data only. */
-    demo: demoMode() ? { mobile: DEMO_MOBILE, code: testOtp() } : undefined,
+    demo: demoMode() ? { mobile: DEMO_MOBILE, email: 'super@console.test', code: testOtp() } : undefined,
     /* Which ways of getting a code are really set up: the sign-in screen says
        "we will text you" or "we will email you" only when that is true. */
     codeChannels: channels(),
+    /* Off: the console signs in by email only (auth.js says how to turn it back on). The screen hides the mobile option. */
+    mobileSignIn: mobileSignIn(),
     /* Which email provider sends the code first, 'catalyst' or 'smtp' (null when email is off). */
     emailProvider: emailProvider(),
   });
@@ -253,7 +255,7 @@ app.post('/api/auth/request-access', async (req, res) => {
   try {
     const gate = checkPassphrase(req.body?.passphrase, req.ip);
     if (!gate.ok) return res.status(gate.status || 401).json({ ok: false, error: gate.error, needsPassphrase: true });
-    const { status, body } = await handleAccessRequest({ mobile: req.body?.mobile, note: req.body?.note }, req.ip);
+    const { status, body } = await handleAccessRequest({ mobile: req.body?.mobile, email: req.body?.email, note: req.body?.note }, req.ip);
     res.status(status).json(body);
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });

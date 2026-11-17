@@ -260,7 +260,16 @@ const recordSend = (key) => {
  * prototype always did, which is only acceptable locally or behind the office
  * passphrase. Test accounts get their fixed code and nothing is sent.
  */
+/* SIGNING IN BY MOBILE NUMBER IS SWITCHED OFF: the console signs in by email only (decided 17 Nov 2026).
+   The mobile-number code (WhatsApp through Zoho CPaaS, or SMS) is all still here. To turn it back on,
+   set MOBILE_SIGN_IN=on in .env.local and deploy: the sign-in screen shows the mobile option again by itself.
+   The offline test harness turns it on for its own runs, because its suites sign in by number.
+   A demo server (sample data only) keeps it, since its published sign-in is a number. */
+export const mobileSignIn = () => demoMode() || String(process.env.MOBILE_SIGN_IN ?? '').trim().toLowerCase() === 'on';
+const MOBILE_OFF = 'Sign in with your email address.';
+
 export async function requestCode({ mobile, email } = {}) {
+  if (mobile && !mobileSignIn()) return { ok: false, status: 400, error: MOBILE_OFF };
   const found = await resolveStaff({ mobile, email });
   if (!found.staff) return { ok: false, error: found.error };
   const staff = found.staff;
@@ -330,6 +339,7 @@ export async function requestCode({ mobile, email } = {}) {
 }
 
 export async function verifyCode({ mobile, email } = {}, code) {
+  if (mobile && !mobileSignIn()) return { ok: false, error: MOBILE_OFF };
   const key = keyOf({ mobile, email });
   const entry = codes.get(key);
   if (!entry) return { ok: false, error: 'Ask for a new code.' };
@@ -381,7 +391,7 @@ export async function listAccounts() {
      probing it. Empty when test login is off. */
   if (!testLoginEnabled()) return [];
   return testAccounts().map((a) => ({
-    mobile: a.mobile, name: a.name, title: a.title, role: a.role, roleName: roleById(a.role).name,
+    mobile: a.mobile, email: a.email, name: a.name, title: a.title, role: a.role, roleName: roleById(a.role).name,
   }));
 }
 

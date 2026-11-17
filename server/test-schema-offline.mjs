@@ -604,10 +604,37 @@ await withEnv({ NODE_ENV: 'production', ENABLE_TEST_LOGIN: undefined }, async ()
 });
 
 /* ================================================================== */
-section('How the code gets there: texted to a number, emailed to an address');
+section('Signing in by mobile number is switched off: email only');
 
 const D = await import('./deliver.js');
 const A = await import('./auth.js');
+const AR = await import('./access-requests.js');
+
+await withEnv({ NODE_ENV: 'test', MOBILE_SIGN_IN: undefined, ADMIN_PASSPHRASE: undefined }, async () => {
+  reset(seed());
+  check('off unless MOBILE_SIGN_IN=on', A.mobileSignIn() === false);
+  const byNumber = await A.requestCode({ mobile: '+91 90000 00555' });
+  check('asking for a code by number is refused, and says to use email', !byNumber.ok && byNumber.status === 400 && /email/.test(byNumber.error) && byNumber.devCode === undefined, JSON.stringify(byNumber));
+  const testByNumber = await A.requestCode({ mobile: '+91 90000 00001' });
+  check('...test accounts too', !testByNumber.ok && testByNumber.devCode === undefined, JSON.stringify(testByNumber));
+  check('...and no code is checked by number', !(await A.verifyCode({ mobile: '+91 90000 00001' }, '123456')).ok);
+  const byEmail = await A.requestCode({ email: 'super@console.test' });
+  check('email still works', byEmail.ok && byEmail.devCode === '123456', JSON.stringify(byEmail));
+  check('...and signs in', (await A.verifyCode({ email: 'super@console.test' }, '123456')).ok);
+  check('the test accounts carry their email for the sign-in screen', (await A.listAccounts()).every((a) => /@console\.test$/.test(a.email)));
+  const ask = await AR.handleAccessRequest({ email: 'someone@example.com', note: 'x' }, 'ip-email-test');
+  check('access can be asked for with an email address', ask.status === 200 && /address/.test(ask.body.message), JSON.stringify(ask));
+  check('...not with something that is not one', (await AR.handleAccessRequest({ email: 'nope', note: 'x' }, 'ip-email-test')).status === 400);
+});
+await withEnv({ NODE_ENV: 'test', MOBILE_SIGN_IN: 'on' }, async () => {
+  check('MOBILE_SIGN_IN=on turns it back on', A.mobileSignIn() === true);
+});
+
+/* The tests below are about the mobile-number channels, so they run with it switched on. */
+process.env.MOBILE_SIGN_IN = 'on';
+
+/* ================================================================== */
+section('How the code gets there: texted to a number, emailed to an address');
 
 /* Nothing real is sent: both transports write to an outbox instead. */
 const outbox = [];
