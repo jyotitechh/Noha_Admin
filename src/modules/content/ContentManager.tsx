@@ -318,7 +318,9 @@ function Input({ f, v, set, error, parent, book }: { f: FieldDef; v: string | bo
     }
   })();
 
-  return <Field label={<>{f.label}{f.required && <span style={{ color: 'var(--bad)' }}> *</span>}</>} hint={f.hint} error={error}>{body}</Field>;
+  /* Fields with buttons of their own must not sit in a <label> (see Field). */
+  const composite = f.kind === 'richtext' || f.kind === 'verses' || f.kind === 'member';
+  return <Field as={composite ? 'div' : 'label'} label={<>{f.label}{f.required && <span style={{ color: 'var(--bad)' }}> *</span>}</>} hint={f.hint} error={error}>{body}</Field>;
 }
 
 /* ---------- the form, in a drawer ---------- */

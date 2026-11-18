@@ -170,14 +170,20 @@ export function Empty({ icon = 'inbox', title, children }: { icon?: string; titl
 
 /* ---------- form fields ---------- */
 
-export function Field({ label, hint, error, children }: { label: ReactNode; hint?: ReactNode; error?: ReactNode; children: ReactNode }) {
+/* `as="div"` for a field that holds buttons of its own (the formatted-text box, the verses list, the writer
+   search). Inside a <label> the browser passes every click on the field to the first button in it: in the
+   formatted-text box that was Undo, so each click in the Daily Manna message undid the last change. */
+export function Field({ label, hint, error, children, as = 'label' }: {
+  label: ReactNode; hint?: ReactNode; error?: ReactNode; children: ReactNode; as?: 'label' | 'div';
+}) {
+  const Tag = as;
   return (
-    <label className="fld">
+    <Tag className="fld">
       <span className="lbl">{label}</span>
       {children}
       {hint && !error && <span className="hint">{hint}</span>}
       {error && <span className="errmsg">{error}</span>}
-    </label>
+    </Tag>
   );
 }
 

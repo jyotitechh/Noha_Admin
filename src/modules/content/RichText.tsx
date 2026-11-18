@@ -6,7 +6,7 @@
    quotes and links. It hands back HTML; the server cleans that again on every
    save (server/rich.js), so what is kept is only what this toolbar can make. */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -78,14 +78,37 @@ export function RichText({ value, onChange, invalid, label }: {
     ],
     content: toHtml(value),
     editorProps: { attributes: { class: 'rte-body', 'aria-label': label, role: 'textbox', 'aria-multiline': 'true' } },
-    onUpdate: ({ editor: e }) => onChange(e.isEmpty ? '' : e.getHTML()),
   });
 
-  /* The form owns the value; follow it if it is changed from outside (a reset). */
+  /* Every change goes to the form through the onChange of the latest render.
+
+     It used to be the editor's own onUpdate option. The editor keeps the first copy of that it was given,
+     and in the console that copy wrote to a form that was no longer on screen. So the form's message stayed
+     empty while the box showed the typing, and the moment the box lost focus (a click elsewhere,
+     double-clicking a word to make it bold) the effect below "restored" the empty value: the text vanished. */
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  /* The last HTML this box reported, so the effect below can tell its own echo from a real outside change. */
+  const reported = useRef<string | null>(null);
   useEffect(() => {
-    if (editor && value !== (editor.isEmpty ? '' : editor.getHTML()) && !editor.isFocused) {
+    if (!editor) return;
+    const send = ({ editor: e }: { editor: Editor }) => {
+      const html = e.isEmpty ? '' : e.getHTML();
+      reported.current = html;
+      onChangeRef.current(html);
+    };
+    editor.on('update', send);
+    return () => { editor.off('update', send); };
+  }, [editor]);
+
+  /* The form owns the value; follow it only when it is changed from outside (a reset, another row
+     loaded), never to undo what was just typed here. */
+  useEffect(() => {
+    if (!editor || value === reported.current) return;
+    if (value !== (editor.isEmpty ? '' : editor.getHTML())) {
       editor.commands.setContent(toHtml(value), false);
     }
+    reported.current = value;
   }, [value, editor]);
 
   if (!editor) return null;
