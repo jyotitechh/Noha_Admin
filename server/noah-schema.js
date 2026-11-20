@@ -422,7 +422,23 @@ export async function loadRegistrations() {
     const resent = state === 'pending'
       && (rejectedEarlier.length > 0 || (!!reviewed && !!submitted && +submitted > +reviewed));
 
+    /* A child's registration (FOR-CONSOLE-CHILD-REGISTRATION.md): the parent filled it in for the child, who has no phone,
+       no address, no declaration and no video. appRegistrations.parentMemberId and kidRowId are set only on these. */
+    const parentId = String(r.parentMemberId ?? '').trim();
+    const kidId = String(r.kidRowId ?? '').trim();
+    let child = null;
+    if (parentId || kidId) {
+      const parent = memberById.get(parentId);
+      child = {
+        parentId,
+        parentName: parent ? [parent.firstName, parent.middleName, parent.lastName].filter(Boolean).join(' ') : '',
+        parentPhone: parent ? phoneOf(parent, userById.get(String(parent.userId))) : '',
+        kidId,
+      };
+    }
+
     return {
+      child,
       rowId: String(r.ROWID),
       memberRowId: uid,
       id: String(r.ROWID),

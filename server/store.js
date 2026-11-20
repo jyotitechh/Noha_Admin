@@ -168,7 +168,7 @@ async function listRegistrationsRaw({ state, search } = {}) {
   if (search) {
     const s = String(search).toLowerCase();
     rows = rows.filter((r) =>
-      [r.fullName, r.mobile, r.email, r.city, r.id].some((v) => String(v || '').toLowerCase().includes(s)));
+      [r.fullName, r.mobile, r.email, r.city, r.id, r.child?.parentName, r.child?.parentPhone].some((v) => String(v || '').toLowerCase().includes(s)));
   }
   /* Oldest first: the queue is worked in the order people have waited. */
   return rows.sort((a, b) => +a.at - +b.at);

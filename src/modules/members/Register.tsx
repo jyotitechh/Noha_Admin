@@ -123,6 +123,7 @@ export default function Register() {
           <Status>{m.status}</Status>
           {m.partner && <Chip tone="brand">Partner</Chip>}
           {m.fromRegistration && <Chip tone="info" icon="mobile">From the app</Chip>}
+          {m.kid && <Chip tone="info" icon="user">Child</Chip>}
         </span>
       ),
     },

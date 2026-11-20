@@ -67,7 +67,9 @@ export default function Approved() {
   const columns: Column<Row>[] = [
     {
       key: 'fullName', label: 'Member',
-      cell: (r) => <Who name={r.fullName} sub={<span className="mono">{r.mobile}</span>} />,
+      cell: (r) => (r.child
+        ? <Who name={r.fullName} sub={<>Child of {r.child.parentName || 'a member'}</>} />
+        : <Who name={r.fullName} sub={<span className="mono">{r.mobile}</span>} />),
     },
     { key: 'city', label: 'From', cell: (r) => <>{r.city || '—'}<span className="sub">{r.country}</span></> },
     {
@@ -150,7 +152,7 @@ export default function Approved() {
         onClose={() => setOpen(null)}
         width="wide"
         title={open?.fullName ?? ''}
-        sub={open ? <><span className="mono">{open.id}</span> · {open.mobile}</> : ''}
+        sub={open ? <><span className="mono">{open.id}</span> · {open.child ? <>Child of {open.child.parentName || 'a member'}</> : open.mobile}</> : ''}
       >
         {open && (
           <>

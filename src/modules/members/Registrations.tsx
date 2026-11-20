@@ -27,7 +27,58 @@ const LANG = { en: 'English', hi: 'हिन्दी Hindi', mr: 'मराठ�
 /** What the server says about telling the member, after a decision. Absent without the Noah API. */
 interface Told { notifiedText?: string; delivered?: boolean }
 
+const yearsOld = (dob: Date) => Math.floor((Date.now() - +dob) / 31557600000);
+
+/* A child's registration: what the parent filled in for the child. There is no mobile number, address, declaration or
+   video, so those steps are not shown (FOR-CONSOLE-CHILD-REGISTRATION.md). */
+function ChildSteps({ r, auto }: { r: Registration; auto: boolean }) {
+  const c = r.child!;
+  return (
+    <div>
+      <div className="step">
+        <span className="n">1</span>
+        <div className="body">
+          <h4>Child's details</h4>
+          <Kv rows={[
+            ['Name', <b key="n">{r.fullName}</b>],
+            ['Date of birth', r.dob
+              ? <>{fd(r.dob)} <span className="muted">· {yearsOld(r.dob)} years</span></>
+              : <span className="muted">Not given</span>],
+            ['Gender', r.gender],
+            ['Email', r.email || <span className="muted">Not given</span>],
+            ['Parent', <b key="p">{c.parentName || <span className="muted">Not found</span>}</b>],
+            ['Parent\'s mobile', c.parentPhone ? <span key="pm" className="mono">{c.parentPhone}</span> : <span className="muted">Not given</span>],
+          ]} />
+        </div>
+      </div>
+
+      <div className="step">
+        <span className="n">2</span>
+        <div className="body">
+          <h4>Aadhaar</h4>
+          <Kv rows={[
+            ['Number', r.idNumber ? <span key="num" className="mono">{r.idNumber}</span> : <span className="muted">Not given</span>],
+          ]} />
+          <div className="mt12">
+            <Upload registrationId={r.id} kind="id" filename={r.idFile} sizeKb={Math.round(r.idSizeKb)} auto={auto} />
+          </div>
+        </div>
+      </div>
+
+      <div className="step">
+        <span className="n">3</span>
+        <div className="body">
+          <h4>Photograph</h4>
+          <Upload registrationId={r.id} kind="photo" filename={r.photoFile} sizeKb={Math.round(r.photoSizeKb)} auto={auto} />
+          <p className="small muted mt8 mb0">Check it against the face on the Aadhaar.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) {
+  if (r.child) return <ChildSteps r={r} auto={auto} />;
   return (
     <div>
       <div className="step">
@@ -127,16 +178,27 @@ export function Steps({ r, auto = false }: { r: Registration; auto?: boolean }) 
 /* The office's own checks. Three can be answered only by looking at the
    uploads; three the server already knows. */
 function Checks({ r, onToggle }: { r: Registration; onToggle: (k: string, v: boolean) => void }) {
-  const manual: [string, string, boolean | null][] = [
-    ['idReadable', 'The ID document is readable', r.checks.idReadable],
-    ['photoMatchesId', 'The photograph matches the ID', r.checks.photoMatchesId],
-    ['videoAudible', 'The video is clear and audible', r.checks.videoAudible],
-  ];
-  const automatic: [string, boolean][] = [
-    ['The signature matches the name', r.checks.nameMatchesSignature],
-    ['Aged 18 or over', r.checks.ageOver18],
-    ['No other member uses this number', !r.checks.duplicateMobile],
-  ];
+  /* A child has no video, signature or phone number of their own, and is under 18 by definition. */
+  const manual: [string, string, boolean | null][] = r.child
+    ? [
+      ['idReadable', 'The Aadhaar is readable', r.checks.idReadable],
+      ['photoMatchesId', 'The photograph matches the Aadhaar', r.checks.photoMatchesId],
+    ]
+    : [
+      ['idReadable', 'The ID document is readable', r.checks.idReadable],
+      ['photoMatchesId', 'The photograph matches the ID', r.checks.photoMatchesId],
+      ['videoAudible', 'The video is clear and audible', r.checks.videoAudible],
+    ];
+  const automatic: [string, boolean][] = r.child
+    ? [
+      ['Under 18', !!r.dob && yearsOld(r.dob) < 18],
+      ['Registered by their parent', !!r.child.parentName],
+    ]
+    : [
+      ['The signature matches the name', r.checks.nameMatchesSignature],
+      ['Aged 18 or over', r.checks.ageOver18],
+      ['No other member uses this number', !r.checks.duplicateMobile],
+    ];
 
   return (
     <>
@@ -232,7 +294,9 @@ export default function Registrations() {
       );
       /* The reply names the member only in the sample data; on Catalyst it
          carries their id. The name is the one already on screen. */
-      await afterDecision(`${r.fullName} is now a member (${res.member.id}). The app opens for them. ${res.notifiedText ?? ''}`.trim());
+      await afterDecision((r.child
+        ? `${r.fullName} is approved. ${r.child.parentName || 'Their parent'} is told and can log in as the child from the Child section of the app. ${res.notifiedText ?? ''}`
+        : `${r.fullName} is now a member (${res.member.id}). The app opens for them. ${res.notifiedText ?? ''}`).trim());
       /* Approved, but the member was not told: say so, rather than leaving the
          office to assume a notification went out. */
       if (res.warning) toast(res.warning, 'warn');
@@ -266,7 +330,9 @@ export default function Registrations() {
     setBusy(true);
     try {
       const res = await api.post<{ warning?: string } & Told>(`/registrations/${r.id}/reject`, { remark: remark.trim() });
-      await afterDecision(`${r.fullName}'s registration went back for correction. It returns here once they send it again. ${res.notifiedText ?? ''}`.trim());
+      await afterDecision((r.child
+        ? `${r.fullName}'s registration went back to ${r.child.parentName || 'the parent'} for correction. It returns here once they send it again. ${res.notifiedText ?? ''}`
+        : `${r.fullName}'s registration went back for correction. It returns here once they send it again. ${res.notifiedText ?? ''}`).trim());
       if (res.warning) toast(res.warning, 'warn');
       else if (res.delivered === false) toast(res.notifiedText ?? 'The member could not be reached.', 'warn');
     } catch (e) {
@@ -291,21 +357,25 @@ export default function Registrations() {
       key: 'fullName', label: 'Member',
       cell: (r) => (
         <div className="row gap6" style={{ alignItems: 'center' }}>
-          <Who name={r.fullName} sub={<span className="mono">{r.mobile}</span>} />
+          <Who name={r.fullName} sub={r.child ? <>Child of {r.child.parentName || 'a member'}</> : <span className="mono">{r.mobile}</span>} />
+          {r.child && <Chip tone="info" icon="user">Child</Chip>}
           {r.resent && <Chip tone="brand" icon="refresh">Sent again</Chip>}
         </div>
       ),
     },
-    { key: 'city', label: 'From', cell: (r) => <>{r.city}<span className="sub">{r.country}</span></> },
+    {
+      key: 'city', label: 'From',
+      cell: (r) => (r.child && !r.city ? <span className="muted">With their parent</span> : <>{r.city}<span className="sub">{r.country}</span></>),
+    },
     { key: 'idType', label: 'ID proof', cell: (r) => <>{r.idType}<span className="sub mono">{r.idNumber}</span></> },
     {
       key: 'videoSecs', label: 'Video', num: true,
-      cell: (r) => (
+      cell: (r) => (r.child ? <span className="muted">Not needed</span> : (
         <>
           {r.videoSecs}s
           {r.videoAttempt > 1 && <span className="sub">attempt {r.videoAttempt}</span>}
         </>
-      ),
+      )),
     },
     {
       key: 'at', label: 'Waiting', num: true,
@@ -376,10 +446,11 @@ export default function Registrations() {
         open={!!open}
         onClose={() => setOpen(null)}
         width="xwide"
-        title={open ? `${open.salutation} ${open.fullName}` : ''}
+        title={open ? (open.child ? open.fullName : `${open.salutation} ${open.fullName}`) : ''}
         sub={
           open && (
             <>
+              {open.child && <>Child of <b>{open.child.parentName || 'a member'}</b> · </>}
               <span className="mono">{open.id}</span> · submitted {fdt(open.at)} ·{' '}
               {open.state === 'pending'
                 ? <>waiting <Age at={open.at} warn={24} bad={48} /></>
@@ -396,9 +467,12 @@ export default function Registrations() {
           open && open.state === 'pending' ? (
             <>
               <span className="sp" style={{ flex: 1 }} />
-              <Btn variant="danger" icon="video" onClick={() => setReturning(true)} disabled={busy}>
-                Return the video
-              </Btn>
+              {/* A child records no video: to ask for a correction, reject with a note. */}
+              {!open.child && (
+                <Btn variant="danger" icon="video" onClick={() => setReturning(true)} disabled={busy}>
+                  Return the video
+                </Btn>
+              )}
               <Btn variant="danger" icon="x" onClick={() => setRejecting(true)} disabled={busy}>
                 Reject
               </Btn>
@@ -428,7 +502,7 @@ export default function Registrations() {
             {open.state === 'rejected' && (
               <div className="mb12">
                 <Note tone="bad" icon="x">
-                  <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}. Waiting for the member to correct it and send it again.</b>
+                  <b>Rejected{open.decidedAt ? ` on ${fd(open.decidedAt)}` : ''}. Waiting for {open.child ? 'the parent' : 'the member'} to correct it and send it again.</b>
                   {open.remark && <><br />“{open.remark}”</>}
                 </Note>
               </div>
@@ -498,7 +572,9 @@ export default function Registrations() {
         {open && (
           <>
             <p className="mt0">
-              {onCatalyst ? (
+              {open.child ? (
+                <>Approve <b>{open.fullName}</b>? <b>{open.child.parentName || 'Their parent'}</b> is notified and can then log in as the child from the Child section of the app.</>
+              ) : onCatalyst ? (
                 <>Approve <b>{open.fullName}</b>? They are notified and the app opens for them.</>
               ) : (
                 <>Approve <b>{open.fullName}</b> as a member of <b>{loc}</b>? The app opens for them.</>
@@ -525,7 +601,9 @@ export default function Registrations() {
         }
       >
         <div>
-          <Field label="What to correct" hint="The member sees this, corrects the registration in the app and sends it again.">
+          <Field label="What to correct" hint={open?.child
+            ? "The parent sees this, corrects the child's registration in the app and sends it again."
+            : 'The member sees this, corrects the registration in the app and sends it again.'}>
             <textarea
               className="ta"
               rows={4}

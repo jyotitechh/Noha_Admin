@@ -249,7 +249,9 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
         member,
         notified,
         ...told(notified),
-        appAccess: 'The member can now sign in to the Noah app.',
+        appAccess: r.child
+          ? `${r.child.parentName || 'The parent'} can now log in as the child from the Child section of the Noah app.`
+          : 'The member can now sign in to the Noah app.',
         warning: silent
           ? 'Approved in the tables, but the member was NOT told: NOAH_ADMIN_API_KEY is not set, so no push or email went out. Use "Tell the member" once it is.'
           : undefined,
@@ -289,6 +291,8 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
   app.post('/api/registrations/:id/return-video', ...guard('members.edit'), async (req, res) => {
     const r = live() ? await registrationById(req.params.id) : find('REGISTRATIONS', req.params.id);
     if (!r) return notFound(res);
+    /* A child records no video (FOR-CONSOLE-CHILD-REGISTRATION.md): there is nothing to return. Reject with a note instead. */
+    if (r.child) return res.status(409).json({ error: 'A child\'s registration has no video. To ask the parent to correct something, reject it with a note.', code: 'child_no_video' });
     const remark = String(req.body?.remark || '').trim();
     if (!remark) return res.status(400).json({ error: 'Say why the video is being returned. The member sees this.' });
 

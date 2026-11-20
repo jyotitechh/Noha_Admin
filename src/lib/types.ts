@@ -12,6 +12,9 @@ export interface Registration {
   marital: string; reference: string;
   /* Who referred them and whether that person is in Noah; absent without the Catalyst tables. */
   referrer?: import('@/components/ReferredBy').Referrer | null;
+  /* Set only on a child's registration, which the parent fills in for the child: the child has no phone, address,
+     declaration or video (FOR-CONSOLE-CHILD-REGISTRATION.md). Decided like any other; the parent is told. */
+  child?: { parentId: string; parentName: string; parentPhone: string; kidId: string } | null;
   /* Sent again after a rejection (or a returned video), and the newest rejection's date and note. */
   resent?: boolean;
   lastRejection?: { at: Date | null; note: string } | null;

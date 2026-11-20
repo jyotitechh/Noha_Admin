@@ -739,6 +739,42 @@ section('Attendance: every event, then who came to one');
 }
 
 /* ================================================================== */
+section('A child\'s registration: filled in by the parent, decided like any other (FOR-CONSOLE-CHILD-REGISTRATION.md)');
+
+{
+  const fakeInsert = (table, rows) =>
+    fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table, rows }) }).then((r) => r.json());
+  const KID_MEMBER = '27145000000994001';
+  const KID_REG = '27145000000994002';
+  const KID_ROW = '27145000000994003';
+  await fakeInsert('members', [{
+    ROWID: KID_MEMBER, firstName: 'Riya', middleName: 'Anand', lastName: 'Rao', isKid: true, userId: '',
+    gender: 2, dateOfBirth: '2016-04-02', emailId1: 'anand@example.com', aadharCardNumber: '123412341234', isUnVerified: true,
+  }]);
+  await fakeInsert('appRegistrations', [{
+    ROWID: KID_REG, memberRowId: KID_MEMBER, status: 'pending', submittedAt: '2026-11-20 05:00:00',
+    parentMemberId: ANAND_ID, kidRowId: KID_ROW, idProofType: 'aadhar',
+  }]);
+  await call('POST', '/refresh', null, BT);
+
+  const list = await call('GET', '/data/REGISTRATIONS?state=pending&limit=300', null, BT);
+  const kid = list.body?.rows?.find((r) => r.id === KID_REG);
+  check('a child\'s registration is in the Registrations list, marked with its parent', !!kid && kid.child?.parentId === ANAND_ID && kid.child?.kidId === KID_ROW && kid.child?.parentName === 'Anand Rao' && !!kid.child?.parentPhone, JSON.stringify(kid?.child));
+  check('...with the child\'s own name, date of birth and email', kid?.fullName === 'Riya Anand Rao' && kid?.email === 'anand@example.com' && !!kid?.dob);
+  check('every other registration has no child', list.body.rows.filter((r) => r.id !== KID_REG).every((r) => r.child === null));
+  check('the list can be searched by the parent\'s name', (await call('GET', '/data/REGISTRATIONS?state=pending&q=anand%20rao&limit=300', null, BT)).body?.rows?.some((r) => r.id === KID_REG));
+  const one = await call('GET', `/registrations/${KID_REG}`, null, BT);
+  check('the detail carries the parent too', one.status === 200 && one.body?.child?.parentName === 'Anand Rao');
+
+  const back = await call('POST', `/registrations/${KID_REG}/return-video`, { remark: 'again' }, BT);
+  check('a child\'s video cannot be returned: there is none (409)', back.status === 409 && back.body?.code === 'child_no_video', `${back.status} ${back.text.slice(0, 120)}`);
+  check('...and the registration is still waiting', (await call('GET', `/registrations/${KID_REG}`, null, BT)).body?.state === 'pending');
+
+  const yes = await call('POST', `/registrations/${KID_REG}/approve`, {}, BT);
+  check('a child\'s registration is approved like any other, and the answer names the parent', yes.status === 200 && /Anand Rao can now log in as the child/.test(yes.body?.appAccess || ''), `${yes.status} ${yes.text.slice(0, 200)}`);
+}
+
+/* ================================================================== */
 section('Member register: filter by place, mother tongue, group and event; export as CSV');
 
 {
