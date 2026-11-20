@@ -739,6 +739,51 @@ section('Attendance: every event, then who came to one');
 }
 
 /* ================================================================== */
+section('Member register: filter by place, mother tongue, group and event; export as CSV');
+
+{
+  const fakeInsert = (table, rows) =>
+    fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table, rows }) }).then((r) => r.json());
+  await fakePatch('members', ANAND_ID, { city: 'Nashik', state: 'Goa', country: 'Nepal', motherTongue: 'Marathi' });
+  await fakePatch('members', OLD_ID, { city: ' nashik ', state: 'GOA', country: 'Nepal', motherTongue: 'Hindi', address: '=HYPERLINK("http://x")' });
+  await fakeInsert('groups', [{ ROWID: '27145000000992001', name: 'WOW' }, { ROWID: '27145000000992002', name: 'Marathi' }, { ROWID: '27145000000992003', name: 'Old group', isArchived: true }]);
+  await fakeInsert('groupsConnect', [
+    { ROWID: '27145000000993001', memberId: ANAND_ID, groupId: '27145000000992001' },
+    { ROWID: '27145000000993002', memberId: ANAND_ID, groupId: '27145000000992002' },
+    { ROWID: '27145000000993003', memberId: OLD_ID, groupId: '27145000000992002' },
+    { ROWID: '27145000000993004', memberId: OLD_ID, groupId: '27145000000992003' },
+  ]);
+  await call('POST', '/refresh', null, BT);
+
+  const names = async (query) => ((await call('GET', `/data/MEMBERS?limit=500&status=&${query}`, null, BT)).body?.rows || []).map((m) => m.rowId).sort();
+  const opts = await call('GET', '/member-register/filters', null, BT);
+  const city = opts.body?.city?.find((o) => o.label.toLowerCase() === 'nashik');
+  const goa = opts.body?.state?.filter((o) => o.label.toLowerCase() === 'goa');
+  check('the filter choices are the values members have, with counts, whatever the case or spacing', opts.status === 200 && city?.count === 2 && goa?.length === 1 && goa[0].count === 2 && opts.body.tongue.length === 2, JSON.stringify(opts.body).slice(0, 300));
+  check('...groups are offered, not archived ones', opts.body?.group?.some((g) => g.label === 'WOW' && g.count === 1) && !opts.body.group.some((g) => g.label === 'Old group'));
+  check('...and only events someone came to', opts.body?.event?.length >= 1 && opts.body.event.every((e) => e.count > 0), JSON.stringify(opts.body?.event));
+  check('filter by city', JSON.stringify(await names('city=NASHIK')) === JSON.stringify([ANAND_ID, OLD_ID].sort()));
+  check('filter by state and country together', JSON.stringify(await names('state=goa&country=Nepal')) === JSON.stringify([ANAND_ID, OLD_ID].sort()));
+  check('filter by mother tongue', JSON.stringify(await names('tongue=Hindi')) === JSON.stringify([OLD_ID]));
+  check('filter by group: one person can be in several', JSON.stringify(await names('group=27145000000992002')) === JSON.stringify([ANAND_ID, OLD_ID].sort()) && JSON.stringify(await names('group=27145000000992001')) === JSON.stringify([ANAND_ID]));
+  check('filter by an event they came to (present, not just booked)', JSON.stringify(await names('event=27145000000990001')) === JSON.stringify([ANAND_ID]));
+  check('every filter must match', (await names('group=27145000000992001&tongue=Hindi')).length === 0);
+  check('one filter can take several values (Marathi or Hindi)', JSON.stringify(await names('tongue=Marathi&tongue=hindi')) === JSON.stringify([ANAND_ID, OLD_ID].sort()));
+  check('...and several groups means any of them', JSON.stringify(await names('group=27145000000992001&group=27145000000992002&tongue=Hindi')) === JSON.stringify([OLD_ID]));
+  check('the filter choices need a sign-in (401)', (await call('GET', '/member-register/filters')).status === 401);
+
+  const ex = await call('GET', '/member-register/export?status=&group=27145000000992002', null, BT);
+  const lines = ex.text.replace(/^﻿/, '').trim().split(/\r\n/);
+  check('Export CSV gives the members shown, one line each, with a header', ex.status === 200 && /text\/csv/.test(ex.type || '') && lines.length === 3 && /^Member ID,Full name,/.test(lines[0]), `${ex.status} ${lines.length}`);
+  check('...with every detail: mobile, email, address, mother tongue, groups and events attended', /Mobile/.test(lines[0]) && /Mother tongue/.test(lines[0]) && /Groups/.test(lines[0]) && /Events attended/.test(lines[0]) && lines.some((l) => /Marathi; WOW/.test(l) && /Attendance check/.test(l)));
+  check('...one line per member, however many groups they are in', lines.filter((l) => l.includes(ANAND_ID)).length === 1 && /Registration date/.test(lines[0]));
+  check('...a value a spreadsheet would run as a formula is made harmless', ex.text.includes(`"'=HYPERLINK(""http://x"")"`) && !/,=HYPERLINK/.test(ex.text));
+  check('...the export is in the audit log', (await call('GET', '/data/AUD?limit=5', null, BT)).body?.rows?.some((a) => a.action === 'Exported the member register (CSV)'));
+  check('finance may see the register but not export it (403)', (await call('GET', '/member-register/export', null, FT)).status === 403);
+  check('...nor without a sign-in (401)', (await call('GET', '/member-register/export')).status === 401);
+}
+
+/* ================================================================== */
 section('Reading less, and seeing what was spent');
 
 {

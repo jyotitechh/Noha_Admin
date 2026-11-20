@@ -37,6 +37,8 @@ import mountNoahgram from './routes/noahgram.js';
 import mountReported from './routes/reported.js';
 import mountEvents from './routes/events.js';
 import mountAttendance from './routes/attendance.js';
+import mountRegister from './routes/register.js';
+import { registerLinks, applyRegisterFilters, filtersFrom, forgetRegisterLinks } from './member-register.js';
 import { startEventSweep } from './event-announce.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
@@ -389,7 +391,12 @@ app.get('/api/data/:name', requireSession, async (req, res) => {
      while the rest of the tables are built. */
   const FROM_CATALYST = {
     REGISTRATIONS: () => listRegistrations({ state: req.query.state, search: req.query.q }),
-    MEMBERS: () => listMembers({ search: req.query.q, loc: req.query.loc, status: req.query.status }),
+    /* The register's filters (city, state, country, mother tongue, group, event attended): server/member-register.js. */
+    MEMBERS: async () => {
+      const rows = await listMembers({ search: req.query.q, loc: req.query.loc, status: req.query.status });
+      const f = filtersFrom(req.query);
+      return f ? applyRegisterFilters(rows, f, await registerLinks()) : rows;
+    },
     AUD: () => listAudit(),
     /* What members send from the app's prayer pop-up. */
     PRAYER_INBOX: () => listPrayerRequests({ state: req.query.state, search: req.query.q }),
@@ -504,6 +511,7 @@ mountNoahgram(app, { requireSession, requirePerm });
 mountReported(app, { requireSession, requirePerm });
 mountEvents(app, { requireSession, requirePerm });
 mountAttendance(app, { requireSession, requirePerm });
+mountRegister(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
@@ -519,6 +527,7 @@ app.post('/api/refresh', requireSession, (_req, res) => {
   if (wait > 0) return res.status(429).json({ error: `Refreshed a moment ago. Try again in ${Math.ceil(wait / 1000)} seconds.` });
   lastRefresh = Date.now();
   clearReads();
+  forgetRegisterLinks();
   res.json({ ok: true });
 });
 

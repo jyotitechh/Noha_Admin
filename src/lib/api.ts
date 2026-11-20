@@ -148,9 +148,13 @@ export interface Queue {
 }
 
 /** Build a query string, dropping empty values. */
-export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
+export type QueryValue = string | number | boolean | undefined | null | string[];
+
+/** A query string. A list repeats its key (city=Pune&city=Mumbai). */
+export function qs(params: Record<string, QueryValue>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) { for (const x of v) if (x !== '') p.append(k, x); continue; }
     if (v === undefined || v === null || v === '') continue;
     p.set(k, String(v));
   }
@@ -159,5 +163,5 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 }
 
 /** Read a seed collection, with optional search, filters, sort and paging. */
-export const collection = <T,>(name: string, params: Record<string, string | number | boolean | undefined | null> = {}) =>
+export const collection = <T,>(name: string, params: Record<string, QueryValue> = {}) =>
   api.get<Page<T>>(`/data/${name}${qs(params)}`);

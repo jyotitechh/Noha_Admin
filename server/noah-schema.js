@@ -551,6 +551,11 @@ export async function loadMembers() {
       g: Number(m.gender) === 2 ? 'F' : 'M',
       age: dob ? Math.floor((Date.now() - +dob) / 31557600000) : 0,
       loc: m.city || '',
+      /* For the register's filters (server/member-register.js). */
+      city: String(m.city ?? '').trim(),
+      state: String(m.state ?? '').trim(),
+      country: String(m.country ?? '').trim(),
+      motherTongue: String(m.motherTongue ?? '').trim(),
       cell: x.connectedLeader ? nameOf.get(String(x.connectedLeader)) || null : null,
       pastor: x.connectedPastor ? nameOf.get(String(x.connectedPastor)) || null : null,
       status,
@@ -574,6 +579,24 @@ export async function loadMembers() {
       crm: 'Pending', lastActive: null,
     };
   });
+}
+
+/** Every member's own columns as stored, by member row id, for the register's CSV export. Keys are MEMBER_FIELDS keys. */
+export async function memberExportRows() {
+  const { members } = await snapshot();
+  const day = (v) => (v ? String(v).slice(0, 10) : '');
+  return new Map(members.map((m) => {
+    const out = {};
+    for (const f of MEMBER_FIELDS) {
+      if (f.part) out[f.key] = referByParts(m[REFER_COLUMN])[f.part];
+      else if (f.kind === 'date') out[f.key] = day(m[f.column]);
+      else if (f.kind === 'gender') out[f.key] = ({ male: 'Male', female: 'Female', other: 'Other' })[genderOf(m.gender)] || '';
+      else out[f.key] = String(m[f.column] ?? '').trim();
+    }
+    /* When the member's record was made: the day they registered in the app (Catalyst's own clock, IST). */
+    out._registered = day(m.CREATEDTIME);
+    return [String(m.ROWID), out];
+  }));
 }
 
 /** May the app open for this person?

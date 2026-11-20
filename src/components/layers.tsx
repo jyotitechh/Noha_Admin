@@ -108,7 +108,7 @@ export function Modal({ open, onClose, title, footer, children, width = 520 }: {
   return createPortal(
     <>
       <div className="modal-scrim" onClick={onClose} />
-      <div className="modal" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : 'Dialog'} style={{ width }} ref={ref}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : 'Dialog'} style={{ width: `min(${width}px, calc(100vw - 32px))` }} ref={ref}>
         <header className="dw-h">
           <div className="grow"><h2>{title}</h2></div>
           <button className="icon-btn x" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
