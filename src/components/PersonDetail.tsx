@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useAuth } from '@/state/auth';
-import { Modal, useToast } from '@/components/layers';
+import { Drawer, Modal, useToast } from '@/components/layers';
 import { Field } from '@/components/ui';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
 import { MemberPhoto } from '@/components/MemberPhoto';
@@ -30,6 +30,22 @@ import { EditPerson, type EditSpec } from '@/components/EditPerson';
 import type { Registration } from '@/lib/types';
 
 interface Link { rowId: string; name: string; mobile?: string }
+/* One person on the family list. A child (kid) carries their details and, once the parent has registered them in the
+   app, the member record of their own (memberRowId) and how that registration stands. */
+interface FamilyRow {
+  rowId: string; name: string; rel?: string; age?: number; kid?: boolean; member?: boolean; parent?: boolean;
+  child?: { dob: string | null; gender: string | null; state: string; memberRowId: string | null; registrationId: string | null; email: string; hasPhoto: boolean };
+}
+
+/* How a child's own registration stands, in the office's words. */
+const CHILD_STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'info'; label: string }> = {
+  ready: { tone: 'info', label: 'Approved · parent has not registered them yet' },
+  draft: { tone: 'mute', label: 'Registration started, not sent' },
+  pending: { tone: 'warn', label: 'Registration waiting for a decision' },
+  approved: { tone: 'ok', label: 'Registered' },
+  rejected: { tone: 'bad', label: 'Registration sent back for correction' },
+  videoReturned: { tone: 'bad', label: 'Registration sent back for correction' },
+};
 /* A cell leader as offered to the office: how far, how many members, and how many more they can take. */
 interface Leader extends Link { where?: string; distanceKm?: number; members?: number; capacity?: number; roomLeft?: number }
 
@@ -49,7 +65,9 @@ interface Profile {
   /* Who may be picked, for someone who may edit members. */
   pastoralChoices?: { pastors: Link[]; leaders: Leader[]; here?: { where: string; shared: boolean } };
   partnership: { isPartner: boolean; expiresOn: Date | null };
-  family: { recorded: boolean; why?: string; rows: { rowId: string; name: string; rel?: string; age?: number; kid?: boolean; member?: boolean }[] };
+  family: { recorded: boolean; why?: string; rows: FamilyRow[] };
+  /* A child's parents, with their numbers (masked until revealed): a child has no number of their own. */
+  guardians?: { rowId: string; name: string; rel?: string; mobile: string }[];
   /* The relations the office can pick, for someone who may edit members. */
   relationOptions?: { code: number; label: string; extra?: boolean }[];
   groups: { recorded: boolean; why?: string; rows: { rowId: string; name: string }[] };
@@ -83,7 +101,9 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
   const q = useQuery(() => api.get<Profile>(`/people/${memberRowId}`), [memberRowId]);
   const { can } = useAuth();
   const { toast } = useToast();
-  const [contact, setContact] = useState<{ mobile: string; email: string; address: string; referrerPhone?: string } | null>(null);
+  const [contact, setContact] = useState<{ mobile: string; email: string; address: string; referrerPhone?: string; guardians?: { rowId: string; mobile: string }[] } | null>(null);
+  /* A relative opened from the Family list, on top of this page. */
+  const [relative, setRelative] = useState<{ rowId: string; name: string } | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [telling, setTelling] = useState(false);
@@ -133,7 +153,7 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
   async function reveal() {
     setRevealing(true);
     try {
-      setContact(await api.get<{ mobile: string; email: string; address: string; referrerPhone?: string }>(`/people/${memberRowId}/contact`));
+      setContact(await api.get<{ mobile: string; email: string; address: string; referrerPhone?: string; guardians?: { rowId: string; mobile: string }[] }>(`/people/${memberRowId}/contact`));
     } catch (e) {
       toast((e as Error).message, 'bad');
     } finally {
@@ -279,6 +299,11 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           ['Name', <b key="n">{member.name}</b>],
           ['Member number', <span key="i" className="mono">{member.id}</span>],
           ['Mobile', <span key="m" className="mono">{(contact?.mobile ?? member.mobile) || '—'}</span>],
+          /* A child is reached through their parents. */
+          ...(q.data.guardians ?? []).map((g) => [
+            `${g.rel || 'Parent'}'s mobile`,
+            <span key={'g' + g.rowId}><span className="mono">{(contact?.guardians?.find((x) => x.rowId === g.rowId)?.mobile ?? g.mobile) || '—'}</span> <span className="muted">· {g.name}</span></span>,
+          ] as [string, React.ReactNode]),
           ['Email', (contact?.email ?? member.email) || '—'],
           ['Age and gender', member.age ? `${member.age} · ${member.g === 'F' ? 'Female' : 'Male'}` : '—'],
           ['Language', member.lang || '—'],
@@ -462,19 +487,34 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           <p className="muted small">No one else is on their household record.</p>
         ) : (
           <ul className="list">
-            {family.rows.map((f) => (
-              <li key={f.rowId}>
-                {/* A member shows their own photograph; a child has no account, so initials. */}
-                <MemberPhoto id={f.member && !f.kid ? f.rowId : null} name={f.name} />
-                <span className="grow">
-                  <span className="t1">{f.name}</span>
-                  <span className="t2">{[f.rel, f.age ? `${f.age} years` : '', f.kid ? 'child' : ''].filter(Boolean).join(' · ')}</span>
-                </span>
-                {relationOptions && f.member && !f.kid && (
-                  <Btn sm disabled={savingRel} onClick={() => removeRelative(f.rowId, f.name)}>Remove</Btn>
-                )}
-              </li>
-            ))}
+            {family.rows.map((f) => {
+              const c = f.child;
+              const st = c ? CHILD_STATE[c.state] ?? { tone: 'mute' as const, label: c.state } : null;
+              /* The record to open: a member's own, or a registered child's. */
+              const opens = c ? c.memberRowId : f.member ? f.rowId : null;
+              return (
+                <li key={f.rowId} style={{ alignItems: 'flex-start' }}>
+                  {/* A member, or a registered child, shows their own photograph; otherwise initials. */}
+                  <MemberPhoto id={c ? (c.hasPhoto ? c.memberRowId : null) : f.member ? f.rowId : null} name={f.name} />
+                  <span className="grow">
+                    <span className="t1">{f.name}</span>
+                    <span className="t2">{[f.rel, f.age != null ? `${f.age} years` : '', c?.gender, c?.dob ? `born ${fd(new Date(c.dob + 'T00:00:00'))}` : ''].filter(Boolean).join(' · ')}</span>
+                    {c && (
+                      <span className="row wrap gap6" style={{ alignItems: 'center', marginTop: 4 }}>
+                        <Chip tone={st!.tone === 'info' ? 'brand' : st!.tone}>{st!.label}</Chip>
+                        {c.email && <span className="t2">{c.email}</span>}
+                      </span>
+                    )}
+                  </span>
+                  <span className="row gap6">
+                    {opens && <Btn sm icon="user" onClick={() => setRelative({ rowId: opens, name: f.name })}>Open</Btn>}
+                    {relationOptions && f.member && !f.kid && !f.parent && (
+                      <Btn sm disabled={savingRel} onClick={() => removeRelative(f.rowId, f.name)}>Remove</Btn>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -556,6 +596,11 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
           </ul>
         )}
       </section>
+
+      {/* A child or relative opened from the Family list: their own record, on top of this one. */}
+      <Drawer open={!!relative} onClose={() => setRelative(null)} width="wide" title={relative?.name ?? ''}>
+        {relative && <PersonDetail memberRowId={relative.rowId} onChanged={() => { q.reload(); onChanged?.(); }} onGone={() => setRelative(null)} />}
+      </Drawer>
     </div>
   );
 }

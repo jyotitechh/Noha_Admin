@@ -1613,15 +1613,25 @@ export async function loadPerson(memberRowId) {
 
   const x = raw.extras.find((e) => same(e.id, member.rowId)) || {};
   const byRow = new Map(raw.members.map((m) => [String(m.ROWID), m]));
+  const userOf = (m) => raw.users.find((u) => same(u.ROWID, m?.userId)) || null;
   const who = (id) => {
     const m = id ? byRow.get(String(id)) : null;
     return m ? { rowId: String(m.ROWID), name: memberFullName(m), mobile: phoneOf(m) } : null;
   };
+  const familyGroups = await familyAndGroups(member.rowId, byRow);
+  const row = raw.members.find((m) => same(m.ROWID, member.rowId));
 
   return {
     member,
+    /* A child has no number of their own: they are reached through their parents (masked on the page like any number). */
+    guardians: familyGroups.family.rows.filter((f) => f.parent).map((f) => {
+      const p = byRow.get(f.rowId);
+      return { rowId: f.rowId, name: f.name, rel: f.rel, mobile: phoneOf(p, userOf(p)) };
+    }),
     /* What the edit form starts from: the stored values, as the form holds them. */
-    editable: editableFrom(raw.members.find((m) => same(m.ROWID, member.rowId))),
+    editable: { ...editableFrom(row), mobile: phoneOf(row, userOf(row)) },
+    /* Whether this person signs in with a number of their own (a login row). A child does not. */
+    hasLogin: !!String(row?.userId ?? '').trim(),
     registration: mine[0] ?? null,
     earlier: mine.slice(1).map((r) => ({ id: r.id, state: r.state, at: r.at, remark: r.remark })),
     pastoral: { pastor: who(x.connectedPastor), cellLeader: who(x.connectedLeader), cell: null },
@@ -1630,8 +1640,42 @@ export async function loadPerson(memberRowId) {
       isPartner: asBool(x.isPartner),
       expiresOn: utc(x.partnershipExpireOn),
     },
-    ...(await familyAndGroups(member.rowId, byRow)),
+    ...familyGroups,
   };
+}
+
+/**
+ * Change a member's mobile number: the one they sign in to the app with. The app reads it from `members` (countryCode +
+ * mobileNumber1) and signs them in by `users` (countryCode + number), so both are written; writing one alone would show a
+ * number they cannot sign in with. A number another member or login already has is refused: two people on one number
+ * would hand one account to the other. `mobile` is already checked (+ and the country code, then the number).
+ * Returns { changed: false } when it is the same number, else { changed: true, before, after }.
+ */
+export async function updateMemberMobile(memberRowId, mobile) {
+  clearCache();
+  const { members, users } = await snapshot();
+  const row = members.find((m) => same(m.ROWID, memberRowId));
+  if (!row) throw Object.assign(new Error('No such member.'), { code: 'not_found' });
+  if (asBool(row.isKid) && !String(row.userId ?? '').trim()) {
+    throw Object.assign(new Error('A child has no mobile number of their own: they are reached through their parent.'), { code: 'child' });
+  }
+  const user = users.find((u) => same(u.ROWID, row.userId)) || null;
+  const before = phoneOf(row, user);
+  const { cc, number } = splitPhone(mobile);
+  if (digits(before) === cc + number) return { changed: false };
+
+  const taken = members.find((m) => !same(m.ROWID, row.ROWID) && !asBool(m.archived)
+      && digits(m.mobileNumber1) === number && (digits(m.countryCode) || cc) === cc)
+    || users.find((u) => !same(u.ROWID, row.userId) && !asBool(u.archived) && digits(u.number) === number && (digits(u.countryCode) || cc) === cc);
+  if (taken) {
+    throw Object.assign(new Error('Another member already uses this number. Each member needs their own.'), { code: 'taken' });
+  }
+
+  /* Stored as the rest of the code stores them: the dial code with its +, the number as digits. */
+  await io.update(T.members, { ROWID: String(row.ROWID), countryCode: '+' + cc, mobileNumber1: number });
+  if (user) await io.update(T.users, { ROWID: String(user.ROWID), countryCode: '+' + cc, number });
+  clearCache();
+  return { changed: true, before, after: '+' + cc + number, login: !!user };
 }
 
 /* ---------- family and groups ----------
@@ -1689,16 +1733,58 @@ async function familyAndGroups(memberRowId, memberByRow) {
 
   const kidById = new Map(h.kids.filter(isLiveRow).map((k) => [String(k.ROWID ?? k.id), k]));
   const kidByAnyId = (id) => kidById.get(String(id)) || h.kids.filter(isLiveRow).find((k) => String(k.id) === String(id));
+
+  /* A child the office approved (Family requests) is a `kids` row. Once the parent registers the child in the app
+     (FOR-CONSOLE-CHILD-REGISTRATION.md) the child also has a `members` row of their own, found through the registration's
+     kidRowId. Read from the same one-minute snapshot as everything else. */
+  const { regs } = await snapshot().catch(() => ({ regs: [] }));
+  const regOfKid = new Map();
+  for (const r of regs) {
+    const k = String(r.kidRowId ?? '').trim();
+    if (k && (!regOfKid.has(k) || when(r) > when(regOfKid.get(k)))) regOfKid.set(k, r);
+  }
+  const GENDER_WORD = { 1: 'Male', 2: 'Female', 3: 'Other' };
+
   for (const l of h.kidLinks.filter(isLiveRow)) {
     if (String(l.memberId ?? '') !== me) continue;
     const k = kidByAnyId(l.kidId);
     if (!k) continue;
-    const code = Number(l.relationship);
+    const reg = regOfKid.get(String(k.ROWID)) || regOfKid.get(String(k.id ?? ''));
+    const childMember = reg ? memberByRow.get(String(reg.memberRowId)) : null;
+    const dob = utc(k.dateOfBirth);
     rows.push({
       rowId: String(k.ROWID), name: [k.firstName, k.middleName, k.lastName].filter(Boolean).join(' ') || '(child, no name)',
       /* kidsConnect says what the member is to the child; the child is the other side of it. */
-      rel: kidLabel(k), age: ageOf(utc(k.dateOfBirth)), kid: true,
+      rel: kidLabel(k), age: ageOf(dob), kid: true,
+      child: {
+        dob: dob ? dob.toISOString().slice(0, 10) : null,
+        gender: GENDER_WORD[Number(k.gender)] || null,
+        /* ready = approved by the office, the parent has not registered the child yet. */
+        state: reg ? stateOf(reg.status) : 'ready',
+        memberRowId: childMember ? String(childMember.ROWID) : null,
+        registrationId: reg ? String(reg.ROWID) : null,
+        email: childMember?.emailId1 || '',
+        hasPhoto: !!childMember?.photo,
+      },
     });
+  }
+
+  /* A child's own page: their parents, from the registration that made their account. */
+  const asChild = regs.find((r) => String(r.memberRowId) === me && String(r.kidRowId ?? '').trim());
+  if (asChild) {
+    const kidRow = String(asChild.kidRowId);
+    const parentIds = new Set(h.kidLinks.filter(isLiveRow).filter((l) => String(l.kidId) === kidRow).map((l) => String(l.memberId)));
+    if (asChild.parentMemberId) parentIds.add(String(asChild.parentMemberId));
+    for (const pid of parentIds) {
+      if (rows.some((x) => x.rowId === pid)) continue;
+      const p = memberByRow.get(pid);
+      if (!p) continue;
+      rows.push({
+        rowId: pid, name: memberFullName(p),
+        rel: Number(p.gender) === 2 ? 'Mother' : Number(p.gender) === 1 ? 'Father' : 'Parent',
+        age: ageOf(utc(p.dateOfBirth)), kid: false, member: true, parent: true,
+      });
+    }
   }
 
   const groupById = new Map(h.groups.filter(isLiveRow).map((g) => [String(g.id ?? g.ROWID), g]));

@@ -532,9 +532,9 @@ section('Correcting a person, and what the app asks to have changed');
   check('...and the permission to edit (finance gets 403)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'X' } }, FT)).status === 403);
   check('nothing to save is refused', (await call('PATCH', `/people/${ANAND_ID}`, { changes: {} }, membership.token)).status === 400 && (await call('PATCH', `/people/${ANAND_ID}`, {}, membership.token)).status === 400);
 
-  const bad = await call('PATCH', `/people/${ANAND_ID}`, { changes: { email: 'nope', mobile: '9999999999', dateOfBirth: '31/12/1990' } }, membership.token);
+  const bad = await call('PATCH', `/people/${ANAND_ID}`, { changes: { email: 'nope', mobile: 'call me', dateOfBirth: '31/12/1990' } }, membership.token);
   check('invalid details are refused, each one named', bad.status === 400 && !!bad.body?.errors?.email && !!bad.body?.errors?.mobile && !!bad.body?.errors?.dateOfBirth, bad.text.slice(0, 200));
-  check('...and the login number cannot be edited at all', /not a field that can be edited/.test(bad.body?.errors?.mobile || ''));
+  check('...a mobile number that is not one is refused, and says how to write it', /country code/.test(bad.body?.errors?.mobile || ''), bad.body?.errors?.mobile);
   check('...nothing was changed by a refused save', (await call('GET', `/people/${ANAND_ID}`, null, BT)).body?.member?.name === 'Anand Rao');
 
   const saved = await call('PATCH', `/people/${ANAND_ID}`, { changes: { firstName: 'Anandan', gender: 'female' } }, membership.token);
@@ -772,6 +772,36 @@ section('A child\'s registration: filled in by the parent, decided like any othe
 
   const yes = await call('POST', `/registrations/${KID_REG}/approve`, {}, BT);
   check('a child\'s registration is approved like any other, and the answer names the parent', yes.status === 200 && /Anand Rao can now log in as the child/.test(yes.body?.appAccess || ''), `${yes.status} ${yes.text.slice(0, 200)}`);
+
+  /* The child on the parent's page, and the parent on the child's. */
+  await fakeInsert('kids', [{ ROWID: KID_ROW, firstName: 'Riya', middleName: 'Anand', lastName: 'Rao', gender: 2, dateOfBirth: '2016-04-02 00:00:00', archived: false }]);
+  await fakeInsert('kidsConnect', [{ ROWID: '27145000000994004', memberId: ANAND_ID, kidId: KID_ROW, relationship: 3, isArchived: false }]);
+  await call('POST', '/refresh', null, BT);
+  const parentPage = await call('GET', `/people/${ANAND_ID}`, null, BT);
+  const riya = parentPage.body?.family?.rows?.find((f) => f.rowId === KID_ROW);
+  check('the parent\'s Family lists the child with their details', !!riya && riya.kid && riya.rel === 'Daughter' && riya.child?.dob === '2016-04-02' && riya.child?.gender === 'Female', JSON.stringify(riya));
+  check('...with how the child\'s registration stands, and the child\'s own record to open', riya?.child?.state === 'approved' && riya?.child?.memberRowId === KID_MEMBER && riya?.child?.email === 'anand@example.com');
+  const kidPage = await call('GET', `/people/${KID_MEMBER}`, null, BT);
+  check('the child\'s own page lists their parent', kidPage.status === 200 && kidPage.body?.family?.rows?.some((f) => f.rowId === ANAND_ID && f.parent && f.rel === 'Father'), JSON.stringify(kidPage.body?.family?.rows));
+  check('...and shows the parent\'s mobile, masked until revealed', kidPage.body?.guardians?.[0]?.rowId === ANAND_ID && /•/.test(kidPage.body.guardians[0].mobile || ''), JSON.stringify(kidPage.body?.guardians));
+  const kidContact = await call('GET', `/people/${KID_MEMBER}/contact`, null, BT);
+  check('...revealing the child\'s contact details shows the parent\'s number', /^\+\d{10,}$/.test(kidContact.body?.guardians?.[0]?.mobile || ''), JSON.stringify(kidContact.body?.guardians));
+  check('a child\'s edit form has no sign-in number of their own', !(kidPage.body?.edit?.fields || []).some((f) => f.key === 'mobile'));
+  check('...and the server refuses one (409)', (await call('PATCH', `/people/${KID_MEMBER}`, { changes: { mobile: '+91 98111 00001' } }, BT)).status === 409);
+
+  /* A member's mobile number: the one they sign in with, edited from the console. */
+  const was = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile;
+  check('the edit form offers the mobile number, as a contact detail', (parentPage.body?.edit?.fields || []).some((f) => f.key === 'mobile' && f.contact && f.kind === 'mobile') && /^\+\d+$/.test(was || ''), was);
+  const moved = await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '98111 22334' } }, BT);
+  const now = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body;
+  check('the mobile number can be changed (ten digits are taken as +91)', moved.status === 200 && moved.body?.changed?.includes('Mobile number') && now?.mobile === '+919811122334' && now?.values?.mobile === '+919811122334', `${moved.status} ${moved.text.slice(0, 160)} ${now?.mobile}`);
+  check('...and the change is in the audit log, without the number', (await call('GET', '/data/AUD?limit=10', null, BT)).body?.rows?.some((a) => a.action === "Changed a member's mobile number" && !JSON.stringify(a).includes('9811122334')));
+  const clash = await call('PATCH', `/people/${OLD_ID}`, { changes: { mobile: '+91 98111 22334' } }, BT);
+  check('a number another member already has is refused (409), and named on the field', clash.status === 409 && /Another member already uses this number/.test(clash.body?.errors?.mobile || ''), `${clash.status} ${clash.text.slice(0, 120)}`);
+  check('...a number with a country code that is too short is refused (400)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '+91 123' } }, BT)).status === 400);
+  check('...and changing it needs the permission to see contact details (finance gets 403)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '+91 98111 22335' } }, FT)).status === 403);
+  /* Back as it was, for the sections that sign in with it. */
+  check('...and it can be put back', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: was } }, BT)).status === 200);
 }
 
 /* ================================================================== */

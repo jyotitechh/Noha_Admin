@@ -16,7 +16,7 @@ import { Drawer, useToast } from '@/components/layers';
 import { Btn, Field, Note } from '@/components/ui';
 
 export interface EditSpec {
-  fields: { key: string; label: string; group: string; kind: 'text' | 'email' | 'date' | 'gender' | 'phone'; max?: number; required: boolean; contact: boolean; locked: boolean; multiline?: boolean }[];
+  fields: { key: string; label: string; group: string; kind: 'text' | 'email' | 'date' | 'gender' | 'phone' | 'mobile'; max?: number; required: boolean; contact: boolean; locked: boolean; multiline?: boolean; hint?: string }[];
   values: Record<string, string>;
 }
 
@@ -109,13 +109,13 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
       }
     >
       <div className="stack">
-        <p className="muted small" style={{ margin: 0 }}>Their own mobile number and ID numbers cannot be changed here.</p>
+        <p className="muted small" style={{ margin: 0 }}>ID numbers cannot be changed here.</p>
         {groups.map((g) => (
           <section key={g.name}>
             <div className="sect-title">{g.name}</div>
             <div className="stack gap8">
               {g.fields.map((f) => (
-                <Field key={`${g.name}${f.key}`} label={f.label} error={errors[f.key]}>
+                <Field key={`${g.name}${f.key}`} label={f.label} error={errors[f.key]} hint={f.hint}>
                   {f.kind === 'gender' ? (
                     <select className="sel" value={now[f.key] ?? ''} onChange={(e) => set(f.key, e.target.value)}>
                       <option value="">Not given</option>
@@ -134,9 +134,10 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
                   ) : (
                     <input
                       className={'inp' + (errors[f.key] ? ' err' : '')}
-                      type={f.kind === 'date' ? 'date' : f.kind === 'email' ? 'email' : f.kind === 'phone' ? 'tel' : 'text'}
-                      inputMode={f.kind === 'phone' ? 'numeric' : undefined}
-                      maxLength={f.kind === 'phone' ? 20 : f.max}
+                      type={f.kind === 'date' ? 'date' : f.kind === 'email' ? 'email' : f.kind === 'phone' || f.kind === 'mobile' ? 'tel' : 'text'}
+                      inputMode={f.kind === 'phone' ? 'numeric' : f.kind === 'mobile' ? 'tel' : undefined}
+                      maxLength={f.kind === 'phone' || f.kind === 'mobile' ? 20 : f.max}
+                      placeholder={f.kind === 'mobile' ? '+91 98765 43210' : undefined}
                       value={now[f.key] ?? ''}
                       onChange={(e) => set(f.key, e.target.value)}
                     />
@@ -151,7 +152,7 @@ export function EditPerson({ memberRowId, name, edit, open, onClose, onSaved }: 
           canContact ? (
             <section>
               <div className="sect-title">Contact details</div>
-              <p className="small muted mt0">Email, addresses and the referrer's number are hidden. Showing them to edit is recorded in the audit log.</p>
+              <p className="small muted mt0">The mobile number, email, addresses and the referrer's number are hidden. Showing them to edit is recorded in the audit log.</p>
               <Btn icon="lock" disabled={busy} onClick={reveal}>Show contact details to edit</Btn>
             </section>
           ) : (

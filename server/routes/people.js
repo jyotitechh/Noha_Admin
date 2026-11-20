@@ -21,10 +21,10 @@
    nobody edits what they may not read. */
 
 import { personProfile, writeAudit, live, isNoah } from '../store.js';
-import { updateMemberFields, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, setMemberArchived, deleteMemberForGood, memberPhotoFileId, io, NOAH_TABLES, fileMeta } from '../noah-schema.js';
+import { updateMemberFields, updateMemberMobile, pastoralChoices, setPastoral, addRelation, removeRelation, relationCandidates, setMemberArchived, deleteMemberForGood, memberPhotoFileId, io, NOAH_TABLES, fileMeta } from '../noah-schema.js';
 import { noahConfigured, getFile } from '../noah-api.js';
 import { relationOptions } from '../relations.js';
-import { MEMBER_FIELDS, checkPatch } from '../member-fields.js';
+import { MEMBER_FIELDS, checkPatch, checkMobile } from '../member-fields.js';
 import { can, roleById } from '../db.js';
 import { explainCatalyst } from '../catalyst.js';
 
@@ -53,6 +53,8 @@ function shape(p, role) {
   };
   /* The referrer's number is masked like the member's own, and revealed with it. */
   if (p.referrer) out.referrer = { ...p.referrer, phone: maskMobile(p.referrer.phone) };
+  /* A child's parents: their numbers masked the same way, and revealed with the child's contact details. */
+  out.guardians = (p.guardians || []).map((g) => ({ ...g, mobile: maskMobile(g.mobile) }));
 
   /* The registration carries the ID number and leads to the uploads. */
   if (!can(role, 'members.edit')) {
@@ -65,9 +67,15 @@ function shape(p, role) {
      may change them: their values come from the audited reveal. */
   if (p.editable && can(role, 'members.edit') && live() && isNoah()) {
     const canContact = can(role, 'members.pii');
+    /* The mobile number they sign in with. Not one of MEMBER_FIELDS: it lives in two tables (members and users) and is
+       changed by updateMemberMobile. A child has none of their own (they are reached through their parent). */
+    const mobileField = p.hasLogin || !p.member.kid
+      ? [{ key: 'mobile', label: 'Mobile number', group: 'Contact', kind: 'mobile', required: !!p.hasLogin, contact: true, locked: !canContact,
+        hint: p.hasLogin ? 'They sign in to the Noah app with this number. From now on they sign in with the new one.' : undefined }]
+      : [];
     out.edit = {
-      fields: MEMBER_FIELDS.map(({ key, label, group, kind, max, required, contact, multiline }) =>
-        ({ key, label, group, kind, max, required: !!required, contact: !!contact, locked: !!contact && !canContact, multiline: !!multiline })),
+      fields: [...mobileField, ...MEMBER_FIELDS.map(({ key, label, group, kind, max, required, contact, multiline }) =>
+        ({ key, label, group, kind, max, required: !!required, contact: !!contact, locked: !!contact && !canContact, multiline: !!multiline }))],
       values: Object.fromEntries(MEMBER_FIELDS.filter((f) => !f.contact).map((f) => [f.key, p.editable[f.key]])),
     };
   }
@@ -257,10 +265,11 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
     res.json({
       mobile: p.member.mobile, email: p.member.email, address: p.member.address,
       referrerPhone: p.referrer?.phone || '',
+      guardians: (p.guardians || []).map((g) => ({ rowId: g.rowId, mobile: g.mobile })),
       /* For the edit form: every contact field's stored value. Only to someone
          who may edit; the reveal above is what was audited. */
       values: p.editable && can(req.session.role, 'members.edit')
-        ? Object.fromEntries(MEMBER_FIELDS.filter((f) => f.contact).map((f) => [f.key, p.editable[f.key]]))
+        ? { ...Object.fromEntries(MEMBER_FIELDS.filter((f) => f.contact).map((f) => [f.key, p.editable[f.key]])), mobile: p.editable.mobile || '' }
         : undefined,
     });
   });
@@ -272,22 +281,53 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
       return res.status(409).json({ error: 'Editing a member needs the Catalyst connection. The sample data cannot be saved.' });
     }
     const role = req.session.role;
-    const { values, errors } = checkPatch(req.body?.changes, { canContact: can(role, 'members.pii') });
+    const canContact = can(role, 'members.pii');
+    /* The mobile number is checked and written on its own (see updateMemberMobile); everything else goes through MEMBER_FIELDS. */
+    const { mobile: mobileRaw, ...rest } = req.body?.changes || {};
+    const hasMobile = req.body?.changes && Object.hasOwn(req.body.changes, 'mobile');
+    const { values, errors } = checkPatch(rest, { canContact });
+    let mobile = null;
+    if (hasMobile) {
+      if (!canContact) errors.mobile = 'Changing contact details needs permission to see them.';
+      else {
+        const m = checkMobile(mobileRaw);
+        if (m.error) errors.mobile = m.error; else mobile = m.value;
+      }
+    }
     if (Object.keys(errors).length) return res.status(400).json({ error: 'Some details cannot be saved.', errors });
-    if (!Object.keys(values).length) return res.status(400).json({ error: 'Nothing to save.' });
+    if (!Object.keys(values).length && !mobile) return res.status(400).json({ error: 'Nothing to save.' });
 
     try {
-      const { changed } = await updateMemberFields(req.params.id, values);
+      /* The number first: it is the change most likely to be refused (someone else has it), and nothing else is written then. */
+      let mobileChange = { changed: false };
+      if (mobile) {
+        try {
+          mobileChange = await updateMemberMobile(req.params.id, mobile);
+        } catch (err) {
+          if (err.code === 'taken' || err.code === 'child') return res.status(409).json({ error: err.message, errors: { mobile: err.message } });
+          throw err;
+        }
+        if (mobileChange.changed) {
+          await writeAudit({
+            actor: req.user.name, role: roleById(role).name,
+            action: "Changed a member's mobile number", module: 'Membership', record: req.params.id,
+            before: { 'Mobile number': '(contact detail)' }, after: { 'Mobile number': '(contact detail)', 'Signs in with it': mobileChange.login ? 'yes' : 'no login yet' },
+            remark: '', ip: req.ip || '',
+          });
+        }
+      }
+      const { changed: fieldChanges } = Object.keys(values).length ? await updateMemberFields(req.params.id, values) : { changed: [] };
+      const changed = [...(mobileChange.changed ? [{ label: 'Mobile number', contact: true }] : []), ...fieldChanges];
       if (!changed.length) return res.json({ ok: true, changed: [], person: shape(await personProfile(req.params.id), role) });
 
       /* The audit says WHAT changed. For contact details it does not say to
          what: the log is read by more people than may see an address. */
       const show = (c, side) => (c.contact ? '(contact detail)' : c[side] || '(empty)');
-      await writeAudit({
+      if (fieldChanges.length) await writeAudit({
         actor: req.user.name, role: roleById(role).name,
         action: 'Edited member details', module: 'Membership', record: req.params.id,
-        before: Object.fromEntries(changed.map((c) => [c.label, show(c, 'before')])),
-        after: Object.fromEntries(changed.map((c) => [c.label, show(c, 'after')])),
+        before: Object.fromEntries(fieldChanges.map((c) => [c.label, show(c, 'before')])),
+        after: Object.fromEntries(fieldChanges.map((c) => [c.label, show(c, 'after')])),
         remark: '', ip: req.ip || '',
       });
 

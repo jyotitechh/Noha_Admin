@@ -80,6 +80,23 @@ export function joinReferBy(stored, next) {
 
 export const fieldByKey = (key) => MEMBER_FIELDS.find((f) => f.key === key);
 
+/**
+ * A member's mobile number, the one they sign in with (not one of MEMBER_FIELDS: see updateMemberMobile in noah-schema.js).
+ * "+91 98765 43210", "+971501234567", or ten digits on their own (taken as India, +91). Returns { value: '+<digits>' } or { error }.
+ */
+export function checkMobile(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return { error: 'The mobile number cannot be empty: they sign in with it.' };
+  if (!/^\+?[\d\s()-]+$/.test(s)) return { error: 'Use digits only, with the country code, like +91 98765 43210.' };
+  const d = s.replace(/\D/g, '');
+  if (!s.startsWith('+')) {
+    if (d.length === 10) return { value: '+91' + d };
+    return { error: 'Start with + and the country code, like +91 98765 43210.' };
+  }
+  if (d.length < 8 || d.length > 15) return { error: 'That is not a full mobile number with its country code.' };
+  return { value: '+' + d };
+}
+
 /** A field by its key, its column, or — loosely — its name with the case and
     punctuation ignored. The app's change requests name a field and the exact
     spelling is not documented, so be forgiving but never guess between two. */
