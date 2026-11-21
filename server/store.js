@@ -284,7 +284,8 @@ export async function memberByMobile(mobile) {
   const wanted = digits(mobile);
   if (!live()) return db.MEMBERS.find((m) => digits(m.mobile) === wanted) || null;
   const rows = isNoah() ? await loadMembers() : (await getRows(TABLES.Members)).map(toMember);
-  return rows.find((m) => digits(m.mobile) === wanted) || null;
+  /* A child under 15 carries their parent's number (FOR-CONSOLE-CHILD-AGE-15.md): the number belongs to the grown-up. */
+  return rows.find((m) => digits(m.mobile) === wanted && !m.kid) || rows.find((m) => digits(m.mobile) === wanted) || null;
 }
 
 export async function listMembers({ search, loc, status } = {}) {

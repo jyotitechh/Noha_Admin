@@ -80,6 +80,8 @@ export const MODULES: ModuleDef[] = [
         desc: 'Relatives members ask to add from Me > Family in the app: a spouse, child, parent, brother, sister or anyone else. Approve one and both accounts show each other.' },
       { id: 'changes', label: 'Changes asked for', perm: 'members.edit', status: 'built',
         desc: 'Details members ask the app to change after they were approved. Approve one and it is written to their record.' },
+      { id: 'children', label: 'Children', status: 'built',
+        desc: 'Children under 18 that parents added in the app: their registration, and the notice at 15 that they can add a number of their own.' },
       { id: 'register', label: 'Member register', status: 'built',
         desc: 'Everyone on the roll. Open a person for their full record: registration and video, pastor, partnership, family and groups.' },
       { id: 'quality', label: 'Duplicates and data', perm: 'members.edit', status: 'planned', from: 'Membership → Duplicates and data',

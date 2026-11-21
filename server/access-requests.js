@@ -77,7 +77,7 @@ export async function handleAccessRequest({ mobile, email, note }, ip = '') {
   /* Only with Catalyst: on the sample data there is no register of real members to ask from. */
   if (live() && isNoah()) {
     try {
-      const member = (await loadMembers()).find((m) => mobileKey(m.mobile) === key && m.approved && !m.blocked && !m.name.startsWith('('));
+      const member = (await loadMembers()).find((m) => mobileKey(m.mobile) === key && m.approved && !m.blocked && !m.kid && !m.name.startsWith('('));
       if (member) await requestConsoleAccess(member.rowId, note);
     } catch {
       /* Not told to the caller either: the answer must not depend on what happened behind it. */

@@ -439,6 +439,30 @@ http.createServer(async (req, res) => {
     announced.add(e.ROWID);
     return { ok: { event: { id: e.ROWID, name: e.name }, members: 3, notified: 2 } };
   };
+  /* FOR-CONSOLE-CHILD-AGE-15.md: tell the parent and the child, once, when an approved child is 15 or more. */
+  if (req.method === 'POST' && path === '/admin/children/age-notices') {
+    const list = (tables['tbl:notifications'] ||= []);
+    const told = new Set(list.filter((n) => n.type === 'child_age_notice').map((n) => {
+      try { return JSON.parse(JSON.parse(n.data).data).kidId; } catch { return ''; }
+    }));
+    const age = (d) => { const x = new Date(String(d).slice(0, 10) + 'T00:00:00Z'); return (Date.now() - +x) / 31557600000; };
+    const due = (tables[T.appRegistrations] || []).filter((r) => r.status === 'approved' && r.parentMemberId && r.kidRowId)
+      .map((r) => ({ r, m: tables[T.members].find((x) => x.ROWID === String(r.memberRowId)) }))
+      .filter(({ m }) => m?.dateOfBirth && age(m.dateOfBirth) >= 15);
+    let sent = 0;
+    for (const { r } of due) {
+      if (told.has(String(r.kidRowId))) continue;
+      for (const to of [r.parentMemberId, r.memberRowId]) {
+        list.push({
+          ROWID: String(27145000000196000 + list.length), type: 'child_age_notice', notifiable_type: 'Member', notifiable_id: String(to),
+          CREATEDTIME: new Date(Date.now() + 5.5 * 36e5).toISOString().slice(0, 19).replace('T', ' ') + ':000',
+          data: JSON.stringify({ title: 'You can add your mobile number', body: 'You are now 15.', data: JSON.stringify({ kidId: String(r.kidRowId) }) }),
+        });
+      }
+      sent += 1;
+    }
+    return send(res, 200, { checked: due.length, sent });
+  }
   if (req.method === 'POST' && path === '/admin/events/announce-due') {
     const hours = Math.min(24, Math.max(1, Number(body.hours) || 24));
     const due = eventsTable().filter((e) => publishMs(e) <= Date.now() && publishMs(e) > Date.now() - hours * 3600_000 && !announced.has(e.ROWID));

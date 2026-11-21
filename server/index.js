@@ -38,6 +38,8 @@ import mountReported from './routes/reported.js';
 import mountEvents from './routes/events.js';
 import mountAttendance from './routes/attendance.js';
 import mountRegister from './routes/register.js';
+import mountChildren from './routes/children.js';
+import { startChildNoticeSweep } from './children.js';
 import { registerLinks, applyRegisterFilters, filtersFrom, forgetRegisterLinks } from './member-register.js';
 import { startEventSweep } from './event-announce.js';
 
@@ -512,6 +514,7 @@ mountReported(app, { requireSession, requirePerm });
 mountEvents(app, { requireSession, requirePerm });
 mountAttendance(app, { requireSession, requirePerm });
 mountRegister(app, { requireSession, requirePerm });
+mountChildren(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
@@ -587,4 +590,5 @@ app.listen(PORT, () => {
   console.log(`  Real staff sign in with their mobile number; see docs/CONSOLE-ACCESS.md.
 `);
   startEventSweep();
+  startChildNoticeSweep();
 });

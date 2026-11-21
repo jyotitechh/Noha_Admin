@@ -1,0 +1,10 @@
+{
+	"name": "noah_function",
+	"version": "1.0.0",
+	"main": "index.js",
+	"author": "mehak@karunasadan.com",
+	"dependencies": {
+		"@zcatalyst/auth": "latest",
+		"@zcatalyst/cache": "latest"
+	}
+}

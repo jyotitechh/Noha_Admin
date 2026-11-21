@@ -43,6 +43,7 @@ const CHILD_STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'info
   draft: { tone: 'mute', label: 'Registration started, not sent' },
   pending: { tone: 'warn', label: 'Registration waiting for a decision' },
   approved: { tone: 'ok', label: 'Registered' },
+  member: { tone: 'ok', label: 'Now a member with their own number' },
   rejected: { tone: 'bad', label: 'Registration sent back for correction' },
   videoReturned: { tone: 'bad', label: 'Registration sent back for correction' },
 };

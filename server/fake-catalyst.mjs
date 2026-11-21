@@ -54,6 +54,11 @@ S.io.update = async (id, row) => {
 /* File Store: which stored files were deleted (by store id), so a test can see them go. */
 export const storedDeleted = [];
 S.io.deleteStoredFile = async (storeId) => { storedDeleted.push(String(storeId)); return true; };
+/* The notices about children turning 15, newest first. */
+S.io.childAgeNotices = async () => (tables['tbl:notifications'] || [])
+  .filter((n) => n.type === 'child_age_notice')
+  .sort((a, b) => String(b.CREATEDTIME).localeCompare(String(a.CREATEDTIME)))
+  .map((n) => ({ ...n }));
 /* The one query the console runs on notifications: the "please correct" messages, newest first. */
 S.io.rejectionNotices = async () => (tables['tbl:notifications'] || [])
   .filter((n) => n.type === 'registration_rejected')

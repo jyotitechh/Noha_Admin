@@ -125,6 +125,10 @@ export const io = {
   deleteStoredFile: (storeId) => deleteFile(storeId),
   /* The "Please correct your registration" messages the Noah API sent, newest first. One query,
      not the whole notifications table (it holds every message to every member). */
+  /* The notices the Noah API sent about children turning 15 (FOR-CONSOLE-CHILD-AGE-15.md), newest first. */
+  childAgeNotices: () => query(
+    "SELECT notifiable_id, data, CREATEDTIME FROM notifications WHERE type = 'child_age_notice' ORDER BY CREATEDTIME DESC LIMIT 300",
+  ),
   rejectionNotices: () => query(
     "SELECT notifiable_id, data, CREATEDTIME FROM notifications WHERE type = 'registration_rejected' ORDER BY CREATEDTIME DESC LIMIT 300",
   ),
@@ -1226,6 +1230,8 @@ export function referrerIndex(members, users) {
     if (!map.get(key).includes(m)) map.get(key).push(m);
   };
   for (const m of members) {
+    /* A child under 15 carries their parent's number: the referrer is the parent, never the child. */
+    if (asBool(m.isKid) && !String(m.userId ?? '').trim()) continue;
     const u = userById.get(String(m.userId));
     for (const p of [m.mobileNumber1, m.mobileNumber2, u?.number]) {
       const k = phoneKey(p);
@@ -1664,7 +1670,10 @@ export async function updateMemberMobile(memberRowId, mobile) {
   const { cc, number } = splitPhone(mobile);
   if (digits(before) === cc + number) return { changed: false };
 
-  const taken = members.find((m) => !same(m.ROWID, row.ROWID) && !asBool(m.archived)
+  /* A child under 15 carries their parent's number on their own row (FOR-CONSOLE-CHILD-AGE-15.md): one number, two rows, by
+     design. Such a child (isKid, no login of their own) never makes a number "taken". */
+  const childOnParentsNumber = (m) => asBool(m.isKid) && !String(m.userId ?? '').trim();
+  const taken = members.find((m) => !same(m.ROWID, row.ROWID) && !asBool(m.archived) && !childOnParentsNumber(m)
       && digits(m.mobileNumber1) === number && (digits(m.countryCode) || cc) === cc)
     || users.find((u) => !same(u.ROWID, row.userId) && !asBool(u.archived) && digits(u.number) === number && (digits(u.countryCode) || cc) === cc);
   if (taken) {
@@ -1674,6 +1683,16 @@ export async function updateMemberMobile(memberRowId, mobile) {
   /* Stored as the rest of the code stores them: the dial code with its +, the number as digits. */
   await io.update(T.members, { ROWID: String(row.ROWID), countryCode: '+' + cc, mobileNumber1: number });
   if (user) await io.update(T.users, { ROWID: String(user.ROWID), countryCode: '+' + cc, number });
+
+  /* Their children under 15 carry the parent's number: move them to the new one too, so the office's records agree. */
+  const { regs } = await snapshot();
+  const kidRows = new Set(regs.filter((r) => same(r.parentMemberId, row.ROWID)).map((r) => String(r.memberRowId)));
+  const oldDigits = digits(before);
+  for (const m of members) {
+    if (!kidRows.has(String(m.ROWID)) || !childOnParentsNumber(m)) continue;
+    if (digits(m.countryCode) + digits(m.mobileNumber1) !== oldDigits) continue;
+    await io.update(T.members, { ROWID: String(m.ROWID), countryCode: '+' + cc, mobileNumber1: number });
+  }
   clearCache();
   return { changed: true, before, after: '+' + cc + number, login: !!user };
 }
@@ -1759,8 +1778,9 @@ async function familyAndGroups(memberRowId, memberByRow) {
       child: {
         dob: dob ? dob.toISOString().slice(0, 10) : null,
         gender: GENDER_WORD[Number(k.gender)] || null,
-        /* ready = approved by the office, the parent has not registered the child yet. */
-        state: reg ? stateOf(reg.status) : 'ready',
+        /* ready = approved by the office, the parent has not registered the child yet. member = from 15 the child added a
+           number of their own and now signs in as a member (FOR-CONSOLE-CHILD-AGE-15.md). */
+        state: String(childMember?.userId ?? '').trim() ? 'member' : reg ? stateOf(reg.status) : 'ready',
         memberRowId: childMember ? String(childMember.ROWID) : null,
         registrationId: reg ? String(reg.ROWID) : null,
         email: childMember?.emailId1 || '',
@@ -1801,6 +1821,83 @@ async function familyAndGroups(memberRowId, memberByRow) {
     family: { recorded: true, rows },
     groups: { recorded: true, rows: groupRows.sort((x, y) => x.name.localeCompare(y.name)) },
   };
+}
+
+/* ---------- every child, for the office's Children list ----------
+
+   FOR-CONSOLE-CHILD-REGISTRATION.md and FOR-CONSOLE-CHILD-AGE-15.md. A child the office approved is a `kids` row, linked to each
+   parent in `kidsConnect`. Once the parent registers the child, the child has a `members` row too (the registration's
+   kidRowId). From 15 the Noah API tells the parent and the child, once, that the child can add a number of their own
+   (`child_age_notice`); with one, the child signs in as a member (a login of their own). */
+
+const ageOn = (dob, today = new Date()) => {
+  if (!dob) return null;
+  let y = today.getUTCFullYear() - dob.getUTCFullYear();
+  if (today.getUTCMonth() < dob.getUTCMonth() || (today.getUTCMonth() === dob.getUTCMonth() && today.getUTCDate() < dob.getUTCDate())) y -= 1;
+  return y < 0 ? null : y;
+};
+
+/** The child each age notice was about, and when it was first sent. The notice names the child in `data.data.kidId`. */
+async function ageNoticeByKid() {
+  let rows = [];
+  try { rows = await io.childAgeNotices(); } catch (err) {
+    console.error(`[children] the age notices could not be read: ${err.message}`);
+    return { ok: false, by: new Map() };
+  }
+  const by = new Map();
+  for (const n of rows) {
+    let kidId = '';
+    try {
+      const outer = typeof n.data === 'string' ? JSON.parse(n.data) : (n.data || {});
+      const inner = typeof outer.data === 'string' ? JSON.parse(outer.data) : (outer.data || {});
+      kidId = String(inner.kidId ?? outer.kidId ?? '');
+    } catch { /* not JSON: not one of these */ }
+    if (!kidId) continue;
+    const at = ist(n.CREATEDTIME);
+    const was = by.get(kidId);
+    if (!was || (at && +at < +was)) by.set(kidId, at);
+  }
+  return { ok: true, by };
+}
+
+export async function loadChildren() {
+  const [h, { regs, members, users }, notices] = await Promise.all([householdRows(), snapshot(), ageNoticeByKid()]);
+  const byRow = new Map(members.map((m) => [String(m.ROWID), m]));
+  const userOf = (m) => users.find((u) => same(u.ROWID, m?.userId)) || null;
+  const regOfKid = new Map();
+  for (const r of regs) {
+    const k = String(r.kidRowId ?? '').trim();
+    if (k && (!regOfKid.has(k) || when(r) > when(regOfKid.get(k)))) regOfKid.set(k, r);
+  }
+  const links = h.kidLinks.filter(isLiveRow);
+  const GENDER_WORD = { 1: 'Male', 2: 'Female', 3: 'Other' };
+
+  return h.kids.filter(isLiveRow).map((k) => {
+    const kidId = String(k.ROWID);
+    const parents = links.filter((l) => String(l.kidId) === kidId || (k.id && String(l.kidId) === String(k.id)))
+      .map((l) => byRow.get(String(l.memberId))).filter(Boolean)
+      .map((p) => ({ rowId: String(p.ROWID), name: memberFullName(p), mobile: phoneOf(p, userOf(p)) }));
+    const reg = regOfKid.get(kidId);
+    const child = reg ? byRow.get(String(reg.memberRowId)) : null;
+    const dob = utc(k.dateOfBirth);
+    const age = ageOn(dob);
+    const ownNumber = !!String(child?.userId ?? '').trim();
+    return {
+      kidId,
+      name: [k.firstName, k.middleName, k.lastName].filter(Boolean).join(' ') || '(no name yet)',
+      gender: GENDER_WORD[Number(k.gender)] || null,
+      dob: dob ? dob.toISOString().slice(0, 10) : null,
+      age,
+      parents,
+      state: ownNumber ? 'member' : reg ? stateOf(reg.status) : 'ready',
+      memberRowId: child ? String(child.ROWID) : null,
+      /* 15 or more: the age the Noah API tells them at. */
+      fifteen: age != null && age >= 15,
+      noticeAt: notices.by.get(kidId) ?? null,
+      noticesRead: notices.ok,
+      addedAt: ist(k.CREATEDTIME),
+    };
+  }).sort((a, b) => (b.age ?? -1) - (a.age ?? -1) || a.name.localeCompare(b.name));
 }
 
 /* ---------- adding and removing a relation ----------
