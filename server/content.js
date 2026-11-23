@@ -55,7 +55,7 @@ function shape(def, row, id) {
   const out = { id };
   for (const f of def.fields) out[f.key] = readValue(f, row[columnFor(f.key)] ?? row[f.key]);
   out.live = def.publish ? !!out[def.publish] : true;
-  /* A machine translation of another entry (server/manna-translate.js): which one. */
+  /* A machine translation of another entry (server/content-translate.js): which one. */
   if (String(row.translatingParentId ?? '').trim()) out.translatedFrom = String(row.translatingParentId);
   out.createdAt = row.CREATEDTIME ? stampIst(row.CREATEDTIME) : row.createdAt ?? null;
   out.updatedAt = row.MODIFIEDTIME ? stampIst(row.MODIFIEDTIME) : row.updatedAt ?? null;

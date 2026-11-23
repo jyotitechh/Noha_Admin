@@ -3,18 +3,33 @@
    `zoho.ai.translate(text, target, source)` runs only inside a Deluge script
    (https://www.zoho.com/deluge/help/ai-tasks/translate.html), so the console calls a small Deluge function
    that does it and is published as a REST API in a Zoho product the office already has (Zoho CRM: Setup >
-   Developer Hub > Functions > "REST API" with an API key). docs/KANNADA-TRANSLATION.md has the function to paste.
+   Developer Hub > Functions > "REST API" with an API key). docs/TRANSLATION.md has the function to paste.
 
      ZOHO_TRANSLATE_URL     that function's REST API address, with its key (zapikey=...). A secret: .env.local only.
-     CONTENT_TRANSLATE_TO   the languages to translate into, as two-letter codes, comma-separated. Default: kn (Kannada).
+     CONTENT_TRANSLATE_TO   the languages to translate into until the office chooses them in Content > Languages
+                            (server/translation-settings.js), as two-letter codes, comma-separated. Default: kn (Kannada).
 
-   The function is called with the arguments { text, target, source } and answers the translated text. The
-   console accepts the answer as Zoho CRM wraps it ({ details: { output } }), as Deluge's own map
+   The function is called with { text, target, source } and answers { translated } or { error } (docs/TRANSLATION.md has it).
+   The console also accepts the answer as Zoho CRM wraps it ({ details: { output } }), as Deluge's own map
    ({ translation: [{ translate }] }), or as plain text. */
 
-/** The app's contentLanguage numbers (docs/FLUTTER-CONTENT-INTEGRATION.md), by the ISO code Deluge uses. */
-export const LANGUAGE_CODES = { en: 1, hi: 2, mr: 3, te: 4, ml: 5, ta: 6, kn: 7 };
-export const LANGUAGE_NAMES = { en: 'English', hi: 'Hindi', mr: 'Marathi', te: 'Telugu', ml: 'Malayalam', ta: 'Tamil', kn: 'Kannada' };
+/* Every language content can be in: the number the app stores in `contentLanguage` (docs/FOR-FLUTTER-TRANSLATIONS.md) and the
+   two-letter code Zoho's translate takes. The one list the console reads: the language box on every form, the Languages screen
+   and the translations all come from here.
+
+   To add a language later: one line here with the next number (8, 9...) and its code from Zoho's list
+   (https://www.zoho.com/deluge/help/ai-tasks/translate.html), and the same number in the app's language list. Nothing else. */
+export const TRANSLATION_LANGUAGES = [
+  { iso: 'en', code: 1, name: 'English', native: 'English' },
+  { iso: 'hi', code: 2, name: 'Hindi', native: 'हिन्दी' },
+  { iso: 'mr', code: 3, name: 'Marathi', native: 'मराठी' },
+  { iso: 'te', code: 4, name: 'Telugu', native: 'తెలుగు' },
+  { iso: 'ml', code: 5, name: 'Malayalam', native: 'മലയാളം' },
+  { iso: 'ta', code: 6, name: 'Tamil', native: 'தமிழ்' },
+  { iso: 'kn', code: 7, name: 'Kannada', native: 'ಕನ್ನಡ' },
+];
+export const LANGUAGE_CODES = Object.fromEntries(TRANSLATION_LANGUAGES.map((l) => [l.iso, l.code]));
+export const LANGUAGE_NAMES = Object.fromEntries(TRANSLATION_LANGUAGES.map((l) => [l.iso, l.name]));
 export const isoOf = (contentLanguage) =>
   Object.keys(LANGUAGE_CODES).find((k) => LANGUAGE_CODES[k] === Number(contentLanguage)) || 'en';
 
@@ -22,10 +37,16 @@ const URL_ = () => String(process.env.ZOHO_TRANSLATE_URL || '').trim();
 /* https only; plain http only to this machine, for the offline stand-in. */
 export const translationReady = () => /^https:\/\//.test(URL_()) || /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(URL_());
 
-/** The languages Daily Manna is translated into, as ISO codes the app knows. */
+/** Language codes out of a list or "kn, hi": only ones the app knows, never English (the original), each once, in the list's order. */
+export function parseLanguages(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(',');
+  const want = new Set(list.map((s) => String(s).trim().toLowerCase()));
+  return TRANSLATION_LANGUAGES.filter((l) => l.iso !== 'en' && want.has(l.iso)).map((l) => l.iso);
+}
+
+/** The languages to translate into before the office has chosen any (CONTENT_TRANSLATE_TO, default Kannada). */
 export function targetLanguages() {
-  const raw = String(process.env.CONTENT_TRANSLATE_TO ?? 'kn');
-  return [...new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter((s) => LANGUAGE_CODES[s] && s !== 'en'))];
+  return parseLanguages(process.env.CONTENT_TRANSLATE_TO ?? 'kn');
 }
 
 export class TranslateError extends Error {
@@ -39,8 +60,10 @@ function readAnswer(body) {
     try { b = JSON.parse(b); } catch { return b; }
   }
   if (b && typeof b === 'object') {
+    /* The function's own refusal: { "error": "..." } (docs/TRANSLATION.md), also when Zoho CRM wraps it in details.output. */
+    if (typeof b.error === 'string' && b.error) throw new TranslateError(`Zoho could not translate it: ${b.error}`);
     if (b.code && b.code !== 'success' && !b.details) throw new TranslateError(b.message || `Zoho answered ${b.code}.`);
-    const out = b.details?.output ?? b.output ?? b.translated ?? b.text;
+    const out = b.translated ?? b.details?.output ?? b.output ?? b.text;
     if (out !== undefined) return readAnswer(out);
     const t = b.translation?.[0]?.translate;
     if (typeof t === 'string') return t;
@@ -49,25 +72,59 @@ function readAnswer(body) {
   throw new TranslateError('Zoho answered, but with no translated text in it.');
 }
 
-/** One text, translated. Empty text is not sent. */
-export async function translateText(text, target, source = 'en') {
-  const s = String(text ?? '');
-  if (!s.trim()) return s;
-  if (!translationReady()) throw new TranslateError('Translation is not set up: ZOHO_TRANSLATE_URL is empty.', 'not_set_up');
+/* How the function is called. Zoho CRM's REST functions take their arguments as one JSON value named `arguments` (the
+   default, "crm"); a function in Zoho Creator or Flow, or behind another gateway, takes the JSON itself ("json").
+     ZOHO_TRANSLATE_FORMAT    crm | json. Default crm.
+     ZOHO_TRANSLATE_HEADERS   extra headers as JSON, e.g. {"Authorization":"Zoho-oauthtoken ..."} when the function wants a
+                              token rather than the zapikey in its address. A secret: .env.local only. */
+function requestFor(payload) {
+  let extra = {};
+  try { extra = JSON.parse(process.env.ZOHO_TRANSLATE_HEADERS || '{}') || {}; } catch { extra = {}; }
+  if (String(process.env.ZOHO_TRANSLATE_FORMAT || 'crm').toLowerCase() === 'json') {
+    return { headers: { 'content-type': 'application/json', ...extra }, body: JSON.stringify(payload) };
+  }
+  return {
+    headers: { 'content-type': 'application/x-www-form-urlencoded', ...extra },
+    body: new URLSearchParams({ arguments: JSON.stringify(payload) }).toString(),
+  };
+}
+
+/* Zoho does not say how long a text its translate task takes, so no call sends more than this; a longer paragraph is cut at
+   the ends of sentences (or, for one endless sentence, at a space) and the pieces put back together. */
+export const MAX_CHARS = 3000;
+const SENTENCE = /[^.!?।॥؟]+[.!?।॥؟]*["')]’”]*s*/g;
+
+/** One paragraph in pieces of at most `limit` characters, cut at sentence ends where possible. */
+export function splitForLimit(text, limit = MAX_CHARS) {
+  if (text.length <= limit) return [text];
+  const chunks = [];
+  let cur = '';
+  const flush = () => { if (cur.trim()) chunks.push(cur.trim()); cur = ''; };
+  for (let piece of text.match(SENTENCE) || [text]) {
+    while (piece.length > limit) {
+      let cut = piece.lastIndexOf(' ', limit);
+      if (cut < limit / 2) cut = limit;
+      flush();
+      chunks.push(piece.slice(0, cut).trim());
+      piece = piece.slice(cut);
+    }
+    if ((cur + piece).length > limit) flush();
+    cur += piece;
+  }
+  flush();
+  return chunks;
+}
+
+/** One call to the function. */
+async function callZoho(text, target, source) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30_000);
   try {
-    /* Zoho CRM's REST functions take their arguments as one JSON value named `arguments`. */
-    const res = await fetch(URL_(), {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ arguments: JSON.stringify({ text: s, target, source }) }).toString(),
-      signal: ctrl.signal,
-    });
+    const res = await fetch(URL_(), { method: 'POST', ...requestFor({ text, target, source }), signal: ctrl.signal });
     const raw = await res.text();
     if (!res.ok) {
       let msg = raw.slice(0, 200);
-      try { const j = JSON.parse(raw); msg = j.message || j.code || msg; } catch { /* not JSON */ }
+      try { const j = JSON.parse(raw); msg = j.error || j.message || j.code || msg; } catch { /* not JSON */ }
       throw new TranslateError(`Zoho refused the translation (${res.status}): ${msg}`);
     }
     return String(readAnswer(raw)).trim();
@@ -77,6 +134,16 @@ export async function translateText(text, target, source = 'en') {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** One text, translated. Empty text is not sent; a long one goes in pieces. */
+export async function translateText(text, target, source = 'en') {
+  const s = String(text ?? '');
+  if (!s.trim()) return s;
+  if (!translationReady()) throw new TranslateError('Translation is not set up: ZOHO_TRANSLATE_URL is empty.', 'not_set_up');
+  const out = [];
+  for (const piece of splitForLimit(s.trim())) out.push(await callZoho(piece, target, source));
+  return out.join(' ');
 }
 
 /* ---------- formatted text ---------- */
@@ -97,7 +164,7 @@ async function translateAll(texts, target, source) {
 }
 
 /**
- * Formatted text (the Daily Manna message or prayer), translated block by block with the blocks kept. Text saved before
+ * Formatted text (a message, prayer or meaning from the editor), translated block by block with the blocks kept. Text saved before
  * the editor existed (no tags) is translated line by line.
  */
 export async function translateHtml(html, target, source = 'en') {

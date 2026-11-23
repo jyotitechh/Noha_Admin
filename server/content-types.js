@@ -29,11 +29,10 @@
    because there is nowhere to put them. `ministryId` is left empty: every member
    row in the project has it empty, so this project does not use it. */
 
-/** The seven languages content is written in. The stored value is the number. */
-export const LANGUAGES = [
-  { v: '1', l: 'English' }, { v: '2', l: 'Hindi' }, { v: '3', l: 'Marathi' },
-  { v: '4', l: 'Telugu' }, { v: '5', l: 'Malayalam' }, { v: '6', l: 'Tamil' }, { v: '7', l: 'Kannada' },
-];
+import { TRANSLATION_LANGUAGES } from './translate.js';
+
+/** The languages content is written in (server/translate.js keeps the list). The stored value is the number. */
+export const LANGUAGES = TRANSLATION_LANGUAGES.map((l) => ({ v: String(l.code), l: l.name }));
 
 export const SECTIONS = {
   content: { label: 'Content', desc: 'What the Noah app reads each day.' },

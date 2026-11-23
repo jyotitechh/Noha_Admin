@@ -236,15 +236,18 @@ http.createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
 
-  /* The Deluge translate function, as Zoho CRM answers a REST function: { code, details: { output } }. A text holding
-     "FAIL-TRANSLATE" is refused, so a test can see a failed translation leave the original saved. */
+  /* The Deluge translate function in docs/TRANSLATION.md, as Zoho CRM answers a REST function: { code, details: { output } },
+     the output being the function's map as text, { translated } or { error }. A text holding "FAIL-TRANSLATE" gets
+     { error }, so a test can see a failed translation leave the original saved. */
   if (req.method === 'POST' && path === '/_fake/translate') {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const args = JSON.parse(new URLSearchParams(Buffer.concat(chunks).toString()).get('arguments') || '{}');
     (globalThis.translateCalls ||= []).push(args);
-    if (String(args.text).includes('FAIL-TRANSLATE')) return send(res, 400, { code: 'INVALID_DATA', message: 'The function failed.' });
-    return send(res, 200, { code: 'success', details: { output: `[${args.target}] ${args.text}`, output_type: 'string' }, message: 'function executed successfully' });
+    const output = String(args.text).includes('FAIL-TRANSLATE')
+      ? { error: 'Zoho Translate returned nothing' }
+      : { translated: `[${args.target}] ${args.text}` };
+    return send(res, 200, { code: 'success', details: { output: JSON.stringify(output), output_type: 'map' }, message: 'function executed successfully' });
   }
   if (req.method === 'GET' && path === '/_fake/translate-calls') return send(res, 200, { calls: globalThis.translateCalls || [] });
 

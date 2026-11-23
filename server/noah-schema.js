@@ -63,6 +63,9 @@ const TABLE_NAMES = [
   'membersRelations', 'kids', 'kidsConnect', 'groups', 'groupsConnect',
   /* Noahgram: the posts and reels, and the comments under them (server/noahgram.js). */
   'noahGram', 'comments',
+  /* The app's settings, keyCol = value. The console keeps one row there: the languages content is translated into
+     (server/translation-settings.js). */
+  'globalSettings',
 ];
 
 /** The six columns on membersExtra that hold a member's console role. */

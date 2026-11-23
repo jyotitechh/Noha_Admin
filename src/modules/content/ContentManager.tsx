@@ -48,12 +48,14 @@ interface TypeDef {
   dateKey: string | null; publish: string | null; intro: string; fields: FieldDef[];
   /** Whether the Noah app can read this kind today; absent when it has not been checked. */
   inApp?: boolean;
+  /** Saved entries are translated into the languages switched on in Content > Languages. */
+  translated?: boolean;
   /** Fields shown as extra columns in the list. */
   columns?: string[];
 }
 
 interface Row { id: string; live: boolean; [k: string]: unknown }
-/* What the server did to a Daily Manna entry's translations after a save (server/manna-translate.js). */
+/* What the server did to an entry's translations after a save (server/content-translate.js). */
 interface Translation { ready: boolean; said?: string; results: { lang: string; name: string; ok: boolean; action?: string; error?: string }[] }
 
 interface List {
@@ -368,7 +370,7 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
           : publishAs === false && row ? `The ${def.singular} is taken down.`
             : `The ${def.singular} is saved.`,
       );
-      /* Daily Manna: what happened to its translations (a failure there does not undo the save). */
+      /* What happened to its translations (a failure there does not undo the save). */
       const t = res?.translation;
       if (t?.said) toast(t.said, t.results.some((x) => !x.ok) ? 'warn' : 'ok');
       onDone();
@@ -424,8 +426,8 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
             {row && canPublish && (
               <Btn variant="danger" icon="trash" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete</Btn>
             )}
-            {/* Daily Manna: make its translations again from scratch (replaces corrections made to them by hand). */}
-            {row && def.id === 'manna' && !row.translatedFrom && (
+            {/* Make its translations again from scratch (replaces corrections made to them by hand). */}
+            {row && def.translated && !row.translatedFrom && (
               <Btn icon="globe" disabled={busy} onClick={translateAgain}>Translate again</Btn>
             )}
             <span className="sp" style={{ flex: 1 }} />

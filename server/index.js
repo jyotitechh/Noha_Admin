@@ -39,8 +39,10 @@ import mountEvents from './routes/events.js';
 import mountAttendance from './routes/attendance.js';
 import mountRegister from './routes/register.js';
 import mountChildren from './routes/children.js';
+import mountTranslation from './routes/translation.js';
 import { startChildNoticeSweep } from './children.js';
 import { registerLinks, applyRegisterFilters, filtersFrom, forgetRegisterLinks } from './member-register.js';
+import { forgetChosenLanguages } from './translation-settings.js';
 import { startEventSweep } from './event-announce.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
@@ -515,6 +517,7 @@ mountEvents(app, { requireSession, requirePerm });
 mountAttendance(app, { requireSession, requirePerm });
 mountRegister(app, { requireSession, requirePerm });
 mountChildren(app, { requireSession, requirePerm });
+mountTranslation(app, { requireSession, requirePerm });
 mountAdmin(app, { requireSession, requirePerm });
 mountApp(app);
 
@@ -531,6 +534,7 @@ app.post('/api/refresh', requireSession, (_req, res) => {
   lastRefresh = Date.now();
   clearReads();
   forgetRegisterLinks();
+  forgetChosenLanguages();
   res.json({ ok: true });
 });
 

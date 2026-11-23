@@ -165,6 +165,8 @@ export const MODULES: ModuleDef[] = [
         desc: 'A commentary on one chapter of the Bible: pick the book, then one of its chapters.' },
       { id: 'announce', label: 'Banners and announcements', status: 'built',
         desc: 'The carousel on the app’s home screen, and the notices above it.' },
+      { id: 'languages', label: 'Languages', status: 'built',
+        desc: 'The languages the Daily Manna, prayers, confessions, dream dictionary and commentary are translated into for the app.' },
     ],
   },
   {
