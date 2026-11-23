@@ -421,7 +421,9 @@ http.createServer(async (req, res) => {
       if (r.kid) {
         const [first, ...rest] = r.name.split(' ');
         const kidId = nextId();
-        tables[T.kids].push({ ROWID: kidId, id: kidId, firstName: first, lastName: rest.join(' '), gender: r.gender === 'male' ? 1 : 2, dateOfBirth: `${r.dob} 00:00:00`, archived: false });
+        /* docs/FOR-NOAH-API-CHILD-APPROVAL.md: the child is made only now, with the photo and Aadhaar the parent gave. */
+        tables[T.kids].push({ ROWID: kidId, id: kidId, firstName: first, lastName: rest.join(' '), gender: r.gender === 'male' ? 1 : 2, dateOfBirth: `${r.dob} 00:00:00`, archived: false,
+          photoFileId: r.photoFileId || '', aadhaarNo: String(r.aadhaarNo || '').replace(/\s+/g, ''), aadhaarFileId: r.aadhaarFileId || '' });
         const linkId = nextId();
         tables[T.kidsConnect].push({ ROWID: linkId, id: linkId, kidId, memberId: r.requesterId, relationship: 9, isArchived: false });
       } else {

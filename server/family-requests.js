@@ -53,8 +53,12 @@ export function shape(r) {
     /* "Make member": the child's own number, and the Aadhaar the parents gave. Shown in full only to staff who may see contact
        details (routes/family.js masks them for everyone else); the picture is read through the audited file route. */
     childMobile: r.kind === 'member' ? String(r.mobile || '') : '',
-    aadhaarNo: r.kind === 'member' ? String(r.aadhaarNo || '').replace(/\s+/g, '') : '',
-    aadhaarFileId: r.kind === 'member' && /^\d{6,}$/.test(String(r.aadhaarFileId ?? '')) ? String(r.aadhaarFileId) : null,
+    /* The Aadhaar: given at Make member, or (docs/FOR-NOAH-API-CHILD-APPROVAL.md) when a parent adds a new child, which then
+       waits for the office as a 'child' request with the child's photo. */
+    aadhaarNo: r.kind !== 'relative' ? String(r.aadhaarNo || '').replace(/\s+/g, '') : '',
+    aadhaarFileId: r.kind !== 'relative' && /^\d{6,}$/.test(String(r.aadhaarFileId ?? '')) ? String(r.aadhaarFileId) : null,
+    photoFileId: r.kind !== 'relative' && /^\d{6,}$/.test(String(r.photoFileId ?? '')) ? String(r.photoFileId) : null,
+    middleName: String(r.middleName || '').trim(),
     memberId: r.memberId != null && r.memberId !== '' ? String(r.memberId) : null,
     name: String(r.name || '').trim(),
     gender: r.gender || null,

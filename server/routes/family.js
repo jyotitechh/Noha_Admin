@@ -40,9 +40,10 @@ export default function mountFamily(app, { requireSession, requirePerm }) {
     }
   });
 
-  /* The Aadhaar picture of a "Make member" request, for the office to check against the number and the child's name and date
-     of birth. Read through the Noah API's file call, like a registration's ID, and written to the audit log. */
-  app.get('/api/family-requests/:id/aadhaar', ...guard, async (req, res) => {
+  /* The pictures on a child's request, for the office to check: the Aadhaar (against the number and the child's name and date
+     of birth) and, on a new child, the photo the parent gave. Read through the Noah API's file call, like a registration's ID;
+     opening an Aadhaar is written to the audit log. */
+  const picture = (which) => async (req, res) => {
     if (!noahConfigured()) return res.status(409).json({ error: NEEDS_KEY, needsAdminKey: true });
     try {
       let r = null;
@@ -51,20 +52,26 @@ export default function mountFamily(app, { requireSession, requirePerm }) {
         if (r) break;
       }
       if (!r) return res.status(404).json({ error: 'No such request.' });
-      if (!r.aadhaarFileId) return res.status(404).json({ error: 'There is no Aadhaar picture on this request.' });
-      await writeAudit({
-        actor: req.user.name, role: roleById(req.session.role).name,
-        action: 'Viewed the Aadhaar on a Make member request', module: 'Membership', record: r.id,
-        before: null, after: { child: r.name }, remark: '', ip: req.ip || '',
-      });
-      const { buffer, contentType } = await getFile(r.aadhaarFileId, { actor: req.user.name });
+      const fileId = which === 'aadhaar' ? r.aadhaarFileId : r.photoFileId;
+      if (!fileId) return res.status(404).json({ error: which === 'aadhaar' ? 'There is no Aadhaar picture on this request.' : 'There is no photo on this request.' });
+      if (which === 'aadhaar') {
+        await writeAudit({
+          actor: req.user.name, role: roleById(req.session.role).name,
+          action: r.kind === 'member' ? 'Viewed the Aadhaar on a Make member request' : "Viewed the Aadhaar on a new child's request",
+          module: 'Membership', record: r.id,
+          before: null, after: { child: r.name }, remark: '', ip: req.ip || '',
+        });
+      }
+      const { buffer, contentType } = await getFile(fileId, { actor: req.user.name });
       res.setHeader('content-type', !contentType || /octet-stream/i.test(contentType) ? 'image/jpeg' : contentType);
       res.setHeader('cache-control', 'private, max-age=300');
       res.send(buffer);
     } catch (err) {
       fail(res, err);
     }
-  });
+  };
+  app.get('/api/family-requests/:id/aadhaar', ...guard, picture('aadhaar'));
+  app.get('/api/family-requests/:id/photo', ...guard, picture('photo'));
 
   app.post('/api/family-requests/:id/decide', ...guard, async (req, res) => {
     const decision = req.body?.decision;

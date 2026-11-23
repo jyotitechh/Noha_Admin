@@ -879,6 +879,25 @@ section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHIL
   const rejected = await call('POST', `/family-requests/${TAKEN_REQ}/decide`, { decision: 'Rejected', remark: "Please give the child's own number." }, BT);
   check('...so it is rejected with a reason for both parents', rejected.status === 200 && rejected.body?.request?.state === 'Rejected', rejected.text.slice(0, 200));
 
+  /* Every new child waits for the office (docs/FOR-NOAH-API-CHILD-APPROVAL.md): the request carries the photo and Aadhaar. */
+  const NEW_KID_REQ = '100596000000071097';
+  await fetch(CONTROL + '/_fake/family-request', { method: 'POST', body: JSON.stringify({
+    id: NEW_KID_REQ, kind: 'child', relation: 'son', kid: true, name: 'Noel Rao', gender: 'male', dob: '2019-06-01',
+    photoFileId: AADHAAR_FILE, aadhaarNo: '5555 6666 7777', aadhaarFileId: AADHAAR_FILE, requesterId: ANAND_ID, existingMemberId: null,
+  }) });
+  await call('POST', '/refresh', null, BT);
+  const newKid = ((await call('GET', '/family-requests?state=Pending', null, BT)).body?.rows || []).find((r) => r.id === NEW_KID_REQ);
+  check('a new child waits for the office, with the photo and the Aadhaar', newKid?.kind === 'child' && newKid.photoFileId === AADHAAR_FILE && newKid.aadhaarNo === '555566667777' && newKid.aadhaarFileId === AADHAAR_FILE, JSON.stringify(newKid));
+  const kidPhoto = await call('GET', `/family-requests/${NEW_KID_REQ}/photo`, null, BT);
+  check("...the child's photo can be opened", kidPhoto.status === 200 && /image\//.test(kidPhoto.type || ''), `${kidPhoto.status} ${kidPhoto.type}`);
+  check('...and so can the Aadhaar', (await call('GET', `/family-requests/${NEW_KID_REQ}/aadhaar`, null, BT)).status === 200);
+  check('...the queue counts it', ((await call('GET', '/queues', null, BT)).body || []).find?.((q) => q.id === 'family')?.count >= 1);
+  const addKid = await call('POST', `/family-requests/${NEW_KID_REQ}/decide`, { decision: 'Approved' }, BT);
+  check('approving adds the child to the family', addKid.status === 200, addKid.text.slice(0, 200));
+  await call('POST', '/refresh', null, BT);
+  const noel = ((await call('GET', '/children', null, BT)).body?.rows || []).find((c) => c.name === 'Noel Rao');
+  check('...with the photo and Aadhaar the parent gave', !!noel && noel.kidPhoto === true && noel.aadhaar === true, JSON.stringify(noel));
+
   /* Opening a child shows the child's own record, not a parent's. */
   const kid = await call('GET', `/children/${MEERA_KID}`, null, BT);
   check("a child's own record opens: the child's name, date of birth and Aadhaar", kid.status === 200 && kid.body?.kidId === MEERA_KID && kid.body?.name === 'Meera Rao' && kid.body?.dob === '2010-01-05' && kid.body?.aadhaarNo === '432143214321', kid.text.slice(0, 300));
