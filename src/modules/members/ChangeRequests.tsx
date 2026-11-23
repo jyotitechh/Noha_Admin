@@ -25,7 +25,7 @@ import { fdt, since } from '@/lib/format';
 
 interface Request {
   id: string; memberRowId: string | null; memberName: string; fieldId: string; fieldLabel: string | null;
-  known: boolean; contact: boolean; photo?: boolean; blocked: string | null; saves: { label: string; value: string }[] | null; problem: string | null;
+  known: boolean; contact: boolean; photo?: boolean; blocked: string | null; signIn?: boolean; saves: { label: string; value: string }[] | null; problem: string | null;
   oldValue: string; newValue: string; status: 'pending' | 'approved' | 'rejected';
   note: string; at: Date | null; decidedAt: Date | null; masked?: boolean;
 }
@@ -69,7 +69,13 @@ export default function ChangeRequests() {
   async function decide(r: Request, approve: boolean, note = '') {
     setBusy(r.id);
     try {
-      const out = await api.post<{ applied: string[]; via?: 'api' | 'table'; notified?: { pushed?: number } | null }>(`/change-requests/${r.id}/decide`, { approve, note });
+      const out = await api.post<{ applied: string[]; via?: 'api' | 'table' | 'console'; signIn?: boolean; notified?: { pushed?: number } | null }>(`/change-requests/${r.id}/decide`, { approve, note });
+      /* The sign-in number: the console changed it in both places itself. */
+      if (out.signIn) {
+        toast(out.applied.length ? 'The mobile number is changed. They sign in to the app with the new number from now on.' : 'Approved. They already had that number.');
+        setTurning(null); setReason(''); q.reload();
+        return;
+      }
       /* Say whether the member was told: through the API they are, by the table they are not. */
       const told = out.via === 'api'
         ? (out.notified?.pushed ? ' The member was notified.' : ' No phone could be reached to notify the member.')
@@ -155,6 +161,9 @@ export default function ChangeRequests() {
                   <span className="t2" style={{ display: 'block', color: 'var(--warn)' }}>
                     The console does not know which detail “{r.fieldId}” is, so it cannot apply this. It can be turned down.
                   </span>
+                )}
+                {r.signIn && r.status === 'pending' && !r.masked && (
+                  <span className="t2" style={{ display: 'block' }}>Approving changes the number they sign in to the app with.</span>
                 )}
                 {r.blocked && r.status === 'pending' && (
                   <span className="t2" style={{ display: 'block', color: 'var(--warn)' }}>{r.blocked}</span>

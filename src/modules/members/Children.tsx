@@ -1,8 +1,10 @@
-/* Children under 18 that parents added in the Noah app (FOR-CONSOLE-CHILD-REGISTRATION.md, FOR-CONSOLE-CHILD-AGE-15.md).
+/* Children under 18 that parents added in the Noah app (FOR-CONSOLE-CHILDREN.md).
 
-   A child is approved under Family requests, then registered by the parent (App registrations). At 15 the Noah API tells
-   the parent and the child, once, that the child can add a mobile number of their own; the console asks it to every few
-   hours, and Send notices now asks at once. Open a child for their own record (once registered) or a parent for theirs. */
+   A parent adds a child (photo, name, date of birth, Aadhaar if they have it) and the child is in the family at once. At 15
+   the Noah API tells both parents, once, to press Make member; the console asks it to every few hours, and Send notices
+   now asks at once. The parents then give the child's own number and Aadhaar, the office approves that under Family
+   requests, the child signs in and sends the consent and video, and the office approves that under App registrations.
+   Open a child who is a member for their own record, or any other child for the parent's. */
 
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
@@ -13,21 +15,22 @@ import { PersonDetail } from '@/components/PersonDetail';
 import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Who } from '@/components/ui';
 import { fd } from '@/lib/format';
+import { AuthImage } from '@/components/AuthImage';
 
 interface Child {
-  kidId: string; name: string; gender: string | null; dob: string | null; age: number | null;
+  kidId: string; name: string; gender: string | null; dob: string | null; age: number | null; kidPhoto?: boolean; aadhaar?: boolean;
   parents: { rowId: string; name: string; mobile: string }[];
   state: string; memberRowId: string | null; fifteen: boolean; noticeAt: Date | null; noticesRead: boolean;
 }
 
 const STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'brand'; label: string }> = {
-  ready: { tone: 'brand', label: 'Not registered yet' },
-  draft: { tone: 'mute', label: 'Registration started' },
-  pending: { tone: 'warn', label: 'Waiting for a decision' },
-  approved: { tone: 'ok', label: 'Registered' },
-  rejected: { tone: 'bad', label: 'Sent back for correction' },
-  videoReturned: { tone: 'bad', label: 'Sent back for correction' },
-  member: { tone: 'ok', label: 'Member with own number' },
+  young: { tone: 'mute', label: 'Under 15' },
+  none: { tone: 'brand', label: 'Not a member yet' },
+  requested: { tone: 'warn', label: 'Make member asked for' },
+  login: { tone: 'brand', label: 'Made a member · consent not sent yet' },
+  waiting: { tone: 'warn', label: 'Consent waiting for a decision' },
+  member: { tone: 'ok', label: 'Member' },
+  consentBack: { tone: 'bad', label: 'Consent sent back' },
 };
 
 const day = (d: string | null) => (d ? fd(new Date(d + 'T00:00:00')) : '');
@@ -50,7 +53,7 @@ export default function Children() {
   }, [all, search, only15]);
   const tally = {
     all: all.length,
-    registered: all.filter((c) => c.state === 'approved' || c.state === 'member').length,
+    members: all.filter((c) => c.state === 'member').length,
     fifteen: all.filter((c) => c.fifteen && c.state !== 'member').length,
     told: all.filter((c) => c.fifteen && c.noticeAt).length,
   };
@@ -73,7 +76,12 @@ export default function Children() {
   const columns: Column<Child>[] = [
     {
       key: 'name', label: 'Child',
-      cell: (c) => <Who name={c.name} sub={[c.gender, c.dob ? `born ${day(c.dob)}` : ''].filter(Boolean).join(' · ')} />,
+      cell: (c) => (
+        <div className="row gap8" style={{ alignItems: 'center' }}>
+          {c.kidPhoto && <AuthImage path={`/children/${c.kidId}/photo`} alt={c.name} width={36} height={36} fit="cover" />}
+          <Who name={c.name} sub={[c.gender, c.dob ? `born ${day(c.dob)}` : '', c.aadhaar ? 'Aadhaar given' : ''].filter(Boolean).join(' · ')} />
+        </div>
+      ),
     },
     { key: 'age', label: 'Age', num: true, cell: (c) => (c.age != null ? `${c.age}` : '—') },
     {
@@ -83,14 +91,14 @@ export default function Children() {
         : <span className="muted">Not linked</span>),
     },
     {
-      key: 'state', label: 'Registration',
+      key: 'state', label: 'Membership',
       cell: (c) => { const s = STATE[c.state] ?? { tone: 'mute' as const, label: c.state }; return <Chip tone={s.tone}>{s.label}</Chip>; },
     },
     {
       key: 'noticeAt', label: 'Notice at 15', sortBy: (c) => (c.noticeAt ? +c.noticeAt : 0),
       cell: (c) => (!c.fifteen ? <span className="muted">Under 15</span>
-        : c.state === 'member' ? <span className="muted">Not needed</span>
-          : c.noticeAt ? <Chip tone="ok" icon="check">Told {fd(c.noticeAt)}</Chip>
+        : c.noticeAt ? <Chip tone="ok" icon="check">Told {fd(c.noticeAt)}</Chip>
+          : c.state !== 'none' && c.state !== 'young' ? <span className="muted">Not needed</span>
             : c.noticesRead ? <Chip tone="warn">Not told yet</Chip> : <span className="muted">Unknown</span>),
     },
   ];
@@ -101,9 +109,9 @@ export default function Children() {
     <div className="stack">
       <Kpis>
         <Kpi label="Children" value={tally.all} icon="heart" detail="added by their parents" />
-        <Kpi label="Registered" value={tally.registered} icon="user-check" detail="approved by the office" />
-        <Kpi label="Aged 15 or more" value={tally.fifteen} icon="user" detail="can add a number of their own" />
-        <Kpi label="Families told" value={tally.told} icon="bell" detail="the notice at 15" />
+        <Kpi label="Members" value={tally.members} icon="user-check" detail="made members, consent approved" />
+        <Kpi label="Aged 15 or more" value={tally.fifteen} icon="user" detail="not members yet" />
+        <Kpi label="Families told" value={tally.told} icon="bell" detail="to press Make member" />
       </Kpis>
 
       {q.loading && !q.data ? (
@@ -133,7 +141,7 @@ export default function Children() {
               )}
             </>
           }
-          empty={<Empty icon="heart" title="No children yet">Children appear here once the office approves a parent's request.</Empty>}
+          empty={<Empty icon="heart" title="No children yet">Children appear here once a parent adds them in the app.</Empty>}
         />
       )}
 

@@ -1408,7 +1408,7 @@ reset(seed());
   const refuses = async (id, opts = { canContact: true }) => { try { await S.decideChangeRequest({ id, approve: true, ...opts }); return null; } catch (e) { return e; } };
 
   check('a documented id is recognised and labelled (first_name)', byId(CR.firstName).known && byId(CR.firstName).fieldLabel === 'First name');
-  check('the sign-in number is known but never applied, and the reason is given', byId(CR.phone1).known === false && /signs in/.test(byId(CR.phone1).blocked || ''), String(byId(CR.phone1).blocked));
+  check('the sign-in number is known, marked as such, and can be approved', byId(CR.phone1).known === true && byId(CR.phone1).signIn === true && !byId(CR.phone1).blocked && !byId(CR.phone1).problem, JSON.stringify(byId(CR.phone1)));
   check('an address is shown split into address and area before anyone approves it',
     byId(CR.address).saves?.map((s) => `${s.label}:${s.value}`).join('|') === 'Address:14 Church Road, Near the school|Area:Dadar', JSON.stringify(byId(CR.address).saves));
   check('a location without a city, a state and a country is flagged before approving', /city, a state and a country/.test(byId(CR.locBad).problem || ''), String(byId(CR.locBad).problem));
@@ -1435,7 +1435,12 @@ reset(seed());
     .every((id) => tables[T.appChangeRequests].find((r) => r.ROWID === id).status === 'approved'));
 
   const loginErr = await refuses(CR.phone1);
-  check('the sign-in number cannot be approved, and the request stays pending', loginErr?.code === 'blocked_field' && mem().mobileNumber1 === '9000000779' && tables[T.appChangeRequests].find((r) => r.ROWID === CR.phone1).status === 'pending', loginErr?.message);
+  check('the sign-in number is never applied through the ordinary map', loginErr?.code === 'sign_in_number' && mem().mobileNumber1 === '9000000779' && tables[T.appChangeRequests].find((r) => r.ROWID === CR.phone1).status === 'pending', loginErr?.message);
+  const signIn = await S.approveMobileChange({ id: CR.phone1 });
+  check('...it is approved on its own path: members and users both get the new number', signIn.applied.join() === 'Mobile number' && mem().mobileNumber1 === '9876500000' && tables[T.appChangeRequests].find((r) => r.ROWID === CR.phone1).status === 'approved'
+    && tables[T.users].find((u) => u.ROWID === String(mem().userId))?.number === '9876500000', JSON.stringify(signIn));
+  await S.updateMemberMobile(M.approved, '+919000000779');
+  check('...and it can be put back', mem().mobileNumber1 === '9000000779');
   const locErr = await refuses(CR.locBad);
   check('a location with one part is refused, and nothing is written', locErr?.code === 'invalid_value' && mem().city === 'Pune');
   check('a blood group that does not exist is refused', (await refuses(CR.bloodBad))?.code === 'invalid_value' && !mem().bloodGroup);
@@ -1489,7 +1494,14 @@ reset(seed());
   check('a blood group is upper-cased and checked', v('blood_group', 'o-')[0] === 'O-' && !!r('blood_group', 'Q+').error);
   check('an id the console does not know is refused, and so are names that only exist on every object', r('favouriteColour', 'x').code === 'unknown_field' && r('constructor', 'x').code === 'unknown_field' && r('__proto__', 'x').code === 'unknown_field');
   check('an older spelling that names a console field still works', v('firstName', 'Asha')[0] === 'Asha' && r('emailId1', 'a@b.co').contact === true);
-  check('describing a field says what it is without applying it', CF.describeChangeField('pan').contact === true && CF.describeChangeField('nope').known === false && CF.describeChangeField('phone1').blocked !== null);
+  {
+    const { checkMobile } = await import('./member-fields.js');
+    check('a mobile number of ten digits is taken as India', checkMobile('98111 22334').value === '+919811122334');
+    check('...but only one that starts 6 to 9, as Indian mobiles do', !!checkMobile('3690852147').error && !!checkMobile('+91 3690852147').error);
+    check('...and a number from abroad keeps its country code', checkMobile('+971 50 123 4567').value === '+971501234567');
+    check('...and words are refused', !!checkMobile('call me').error);
+  }
+  check('describing a field says what it is without applying it', CF.describeChangeField('pan').contact === true && CF.describeChangeField('nope').known === false && CF.describeChangeField('phone1').signIn === true && CF.describeChangeField('phone1').blocked === null);
 }
 
 /* ================================================================== */

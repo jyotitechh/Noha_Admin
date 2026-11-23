@@ -81,7 +81,7 @@ export const MODULES: ModuleDef[] = [
       { id: 'changes', label: 'Changes asked for', perm: 'members.edit', status: 'built',
         desc: 'Details members ask the app to change after they were approved. Approve one and it is written to their record.' },
       { id: 'children', label: 'Children', status: 'built',
-        desc: 'Children under 18 that parents added in the app: their registration, and the notice at 15 that they can add a number of their own.' },
+        desc: 'Children under 18 that parents added in the app. From 15 the parents ask to make them a member (Family requests), then the child sends their consent (App registrations).' },
       { id: 'register', label: 'Member register', status: 'built',
         desc: 'Everyone on the roll. Open a person for their full record: registration and video, pastor, partnership, family and groups.' },
       { id: 'quality', label: 'Duplicates and data', perm: 'members.edit', status: 'planned', from: 'Membership → Duplicates and data',

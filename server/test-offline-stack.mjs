@@ -596,7 +596,7 @@ section('Correcting a person, and what the app asks to have changed');
   const fresh = (await call('GET', '/change-requests?status=pending', null, BT)).body?.rows || [];
   const byField = (f) => fresh.find((r) => r.fieldId === f);
   check('a documented id is labelled for the office (first_name is "First name")', byField('first_name')?.fieldLabel === 'First name' && byField('first_name')?.known === true);
-  check('the sign-in number is listed with the reason it cannot be applied', byField('phone1')?.known === false && /signs in/.test(byField('phone1')?.blocked || ''), JSON.stringify(byField('phone1')));
+  check('the sign-in number is listed as one that can be approved', byField('phone1')?.known === true && byField('phone1')?.signIn === true && !byField('phone1')?.blocked, JSON.stringify(byField('phone1')));
   /* Through the Noah API the API itself checks and converts the value; only the table path previews it. */
   check('the list says which way requests are decided', (await call('GET', '/change-requests?status=pending', null, BT)).body?.via === (NO_KEY ? 'table' : 'api'));
   if (NO_KEY) {
@@ -604,8 +604,15 @@ section('Correcting a person, and what the app asks to have changed');
     check('a location that cannot be split is flagged in the list', fresh.some((r) => r.fieldId === 'location' && /city, a state and a country/.test(r.problem || '')));
   }
   const phoneReq = byField('phone1');
-  const blocked = await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, BT);
-  check('approving the sign-in number is refused (409)', blocked.status === 409 && blocked.body?.code === (NO_KEY ? 'blocked_field' : 'change_by_hand'), blocked.text.slice(0, 160));
+  const anandWas = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile;
+  const noPiiTry = await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, FT);
+  check('approving the sign-in number needs permission to edit members (finance 403)', noPiiTry.status === 403);
+  const signedIn = await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, BT);
+  check('approving the sign-in number changes it, in both places the app reads', signedIn.status === 200 && signedIn.body?.signIn === true && signedIn.body?.applied?.join() === 'Mobile number'
+    && (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile === '+919876500000', signedIn.text.slice(0, 160));
+  check('...and the request is approved', ((await call('GET', '/change-requests?status=approved', null, BT)).body?.rows || []).some((r) => r.id === phoneReq.id));
+  check('...a request decided already is refused (409)', (await call('POST', `/change-requests/${phoneReq.id}/decide`, { approve: true }, BT)).status === 409);
+  check('...and the number can be put back', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: anandWas } }, BT)).status === 200);
   const badLoc = fresh.find((r) => r.id === '27145000000160010');
   check('a location that cannot be split is refused when approved (422)', (await call('POST', `/change-requests/${badLoc.id}/decide`, { approve: true }, BT)).status === 422);
   const addr = await call('POST', `/change-requests/${byField('address').id}/decide`, { approve: true }, BT);
@@ -741,7 +748,7 @@ section('Attendance: every event, then who came to one');
 }
 
 /* ================================================================== */
-section('A child\'s registration: filled in by the parent, decided like any other (FOR-CONSOLE-CHILD-REGISTRATION.md)');
+section("A child's consent in Registrations: marked with the parent, decided like any other (FOR-CONSOLE-CHILDREN.md)");
 
 {
   const fakeInsert = (table, rows) =>
@@ -768,12 +775,9 @@ section('A child\'s registration: filled in by the parent, decided like any othe
   const one = await call('GET', `/registrations/${KID_REG}`, null, BT);
   check('the detail carries the parent too', one.status === 200 && one.body?.child?.parentName === 'Anand Rao');
 
-  const back = await call('POST', `/registrations/${KID_REG}/return-video`, { remark: 'again' }, BT);
-  check('a child\'s video cannot be returned: there is none (409)', back.status === 409 && back.body?.code === 'child_no_video', `${back.status} ${back.text.slice(0, 120)}`);
-  check('...and the registration is still waiting', (await call('GET', `/registrations/${KID_REG}`, null, BT)).body?.state === 'pending');
 
   const yes = await call('POST', `/registrations/${KID_REG}/approve`, {}, BT);
-  check('a child\'s registration is approved like any other, and the answer names the parent', yes.status === 200 && /Anand Rao can now log in as the child/.test(yes.body?.appAccess || ''), `${yes.status} ${yes.text.slice(0, 200)}`);
+  check('a child\'s consent is approved like any other registration, and the answer says the parents are told', yes.status === 200 && /The child can now use the Noah app as a member/.test(yes.body?.appAccess || ''), `${yes.status} ${yes.text.slice(0, 200)}`);
 
   /* The child on the parent's page, and the parent on the child's. */
   await fakeInsert('kids', [{ ROWID: KID_ROW, firstName: 'Riya', middleName: 'Anand', lastName: 'Rao', gender: 2, dateOfBirth: '2016-04-02 00:00:00', archived: false }]);
@@ -782,14 +786,14 @@ section('A child\'s registration: filled in by the parent, decided like any othe
   const parentPage = await call('GET', `/people/${ANAND_ID}`, null, BT);
   const riya = parentPage.body?.family?.rows?.find((f) => f.rowId === KID_ROW);
   check('the parent\'s Family lists the child with their details', !!riya && riya.kid && riya.rel === 'Daughter' && riya.child?.dob === '2016-04-02' && riya.child?.gender === 'Female', JSON.stringify(riya));
-  check('...with how the child\'s registration stands, and the child\'s own record to open', riya?.child?.state === 'approved' && riya?.child?.memberRowId === KID_MEMBER && riya?.child?.email === 'anand@example.com');
+  check('...with how the child stands (a member), and the child\'s own record to open', riya?.child?.state === 'member' && riya?.child?.memberRowId === KID_MEMBER && riya?.child?.email === 'anand@example.com', JSON.stringify(riya?.child));
   const kidPage = await call('GET', `/people/${KID_MEMBER}`, null, BT);
   check('the child\'s own page lists their parent', kidPage.status === 200 && kidPage.body?.family?.rows?.some((f) => f.rowId === ANAND_ID && f.parent && f.rel === 'Father'), JSON.stringify(kidPage.body?.family?.rows));
   check('...and shows the parent\'s mobile, masked until revealed', kidPage.body?.guardians?.[0]?.rowId === ANAND_ID && /•/.test(kidPage.body.guardians[0].mobile || ''), JSON.stringify(kidPage.body?.guardians));
   const kidContact = await call('GET', `/people/${KID_MEMBER}/contact`, null, BT);
   check('...revealing the child\'s contact details shows the parent\'s number', /^\+\d{10,}$/.test(kidContact.body?.guardians?.[0]?.mobile || ''), JSON.stringify(kidContact.body?.guardians));
-  check('a child\'s edit form has no sign-in number of their own', !(kidPage.body?.edit?.fields || []).some((f) => f.key === 'mobile'));
-  check('...and the server refuses one (409)', (await call('PATCH', `/people/${KID_MEMBER}`, { changes: { mobile: '+91 98111 00001' } }, BT)).status === 409);
+  check('a child made a member has their own number, which the office can change', (kidPage.body?.edit?.fields || []).some((f) => f.key === 'mobile')
+    && (await call('PATCH', `/people/${KID_MEMBER}`, { changes: { mobile: '+91 98111 00001' } }, BT)).status === 200);
 
   /* A member's mobile number: the one they sign in with, edited from the console. */
   const was = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile;
@@ -807,7 +811,7 @@ section('A child\'s registration: filled in by the parent, decided like any othe
 }
 
 /* ================================================================== */
-section('Children: the list, the notice at 15 (FOR-CONSOLE-CHILD-AGE-15.md), and a child on the parent\'s number');
+section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHILDREN.md)');
 
 {
   const fakeInsert = (table, rows) =>
@@ -816,15 +820,15 @@ section('Children: the list, the notice at 15 (FOR-CONSOLE-CHILD-AGE-15.md), and
   const TEEN = '27145000000997001', TEEN_REG = '27145000000997002', TEEN_KID = '27145000000997003';
   await fakeInsert('kids', [{ ROWID: TEEN_KID, firstName: 'Kiran', lastName: 'Rao', gender: 1, dateOfBirth: '2009-02-10 00:00:00', archived: false }]);
   await fakeInsert('kidsConnect', [{ ROWID: '27145000000997004', memberId: ANAND_ID, kidId: TEEN_KID, relationship: 2, isArchived: false }]);
-  await fakeInsert('members', [{ ROWID: TEEN, firstName: 'Kiran', lastName: 'Rao', isKid: true, userId: '', gender: 1, dateOfBirth: '2009-02-10', countryCode: '+91', mobileNumber1: '9000000779' }]);
-  await fakeInsert('appRegistrations', [{ ROWID: TEEN_REG, memberRowId: TEEN, status: 'approved', submittedAt: '2026-11-10 05:00:00', parentMemberId: ANAND_ID, kidRowId: TEEN_KID }]);
+  await fakeInsert('members', [{ ROWID: TEEN, firstName: 'Kiran', lastName: 'Rao', isKid: true, userId: '', gender: 1, dateOfBirth: '2009-02-10', countryCode: '+91', mobileNumber1: '9811100077' }]);
+  await fakeInsert('appRegistrations', [{ ROWID: TEEN_REG, memberRowId: TEEN, status: 'draft', parentMemberId: ANAND_ID, kidRowId: TEEN_KID }]);
   await call('POST', '/refresh', null, BT);
 
   const list = await call('GET', '/children', null, BT);
   const kiran = list.body?.rows?.find((c) => c.kidId === TEEN_KID);
-  check('the Children list has every child, with age, parents and registration', list.status === 200 && kiran?.age === 17 && kiran?.fifteen === true && kiran?.state === 'approved' && kiran?.parents?.[0]?.rowId === ANAND_ID, JSON.stringify(kiran));
+  check('the Children list has every child, with age, parents and membership', list.status === 200 && kiran?.age === 17 && kiran?.fifteen === true && kiran?.state === 'login' && kiran?.parents?.[0]?.rowId === ANAND_ID, JSON.stringify(kiran));
   check('...parents\' numbers masked', /•/.test(kiran?.parents?.[0]?.mobile || ''));
-  check('...a younger child is under 15', list.body.rows.some((c) => c.fifteen === false));
+  check('...a younger child is under 15', list.body.rows.some((c) => c.fifteen === false && c.state === 'young'));
   check('...and not told yet', kiran?.noticeAt === null && kiran?.noticesRead === true);
   check('only 15 or more, when asked', (await call('GET', '/children?age=15', null, BT)).body?.rows?.every((c) => c.fifteen));
   check('the list needs permission to see members (401 without a sign-in)', (await call('GET', '/children')).status === 401);
@@ -837,13 +841,30 @@ section('Children: the list, the notice at 15 (FOR-CONSOLE-CHILD-AGE-15.md), and
   check('...and the list shows when the family was told', !!after?.noticeAt, JSON.stringify(after));
   check('sending needs permission to edit members (finance gets 403)', (await call('POST', '/children/age-notices', null, FT)).status === 403);
 
-  /* Under 15 the child's row carries the parent's number (here Kiran's is the parent's too). */
-  const before = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile;
-  const moved = await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '+91 98222 33445' } }, BT);
-  check('a parent\'s number can change although their child carries it too', moved.status === 200, `${moved.status} ${moved.text.slice(0, 160)}`);
-  check('...and the child moves to the new number with them', (await call('GET', `/people/${TEEN}/contact`, null, BT)).body?.mobile === '+919822233445');
-  check('...the number still finds the parent, not the child', (await call('GET', '/people/' + ANAND_ID, null, BT)).status === 200);
-  check('...and it can be put back', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: before } }, BT)).status === 200);
+  /* A child of 15 or more becomes a member when the office approves "Make member" (FOR-CONSOLE-CHILDREN.md). */
+  const MEERA_KID = '27145000000998001', AADHAAR_FILE = '27145000000998002', MM_REQ = '100596000000071099';
+  await fakeInsert('kids', [{ ROWID: MEERA_KID, firstName: 'Meera', lastName: 'Rao', gender: 2, dateOfBirth: '2010-01-05 00:00:00', archived: false, photoFileId: AADHAAR_FILE, aadhaarNo: '432143214321' }]);
+  await fakeInsert('kidsConnect', [{ ROWID: '27145000000998003', memberId: ANAND_ID, kidId: MEERA_KID, relationship: 3, isArchived: false }]);
+  await fakeInsert('files', [{ ROWID: AADHAAR_FILE, path: 'x', remoteSource: JSON.stringify({ purpose: 'post', mimeType: 'image/png', name: 'aadhaar.png' }) }]);
+  await fetch(CONTROL + '/_fake/family-request', { method: 'POST', body: JSON.stringify({
+    id: MM_REQ, kind: 'member', relation: 'daughter', kid: true, kidId: MEERA_KID, name: 'Meera Rao', gender: 'female', dob: '2010-01-05',
+    mobile: '+919811100055', aadhaarNo: '4321 4321 4321', aadhaarFileId: AADHAAR_FILE, requesterId: ANAND_ID, existingMemberId: null,
+  }) });
+  await call('POST', '/refresh', null, BT);
+  const fam = (await call('GET', '/family-requests?state=Pending', null, BT)).body?.rows || [];
+  const mm = fam.find((r) => r.id === MM_REQ);
+  check('a Make member request is listed as kind member, with the child\'s own number and Aadhaar', mm?.kind === 'member' && mm.kidId === MEERA_KID && mm.childMobile === '+919811100055' && mm.aadhaarNo === '432143214321' && mm.aadhaarFileId === AADHAAR_FILE, JSON.stringify(mm));
+  const aad = await call('GET', `/family-requests/${MM_REQ}/aadhaar`, null, BT);
+  check('...the Aadhaar picture can be opened', aad.status === 200 && /image\/png/.test(aad.type || ''), `${aad.status} ${aad.type}`);
+  check('...and opening it is in the audit log', ((await call('GET', '/data/AUD?limit=20', null, BT)).body?.rows || []).some((a) => a.action === 'Viewed the Aadhaar on a Make member request'));
+  check('...the Children list says Make member was asked for', (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.kidId === MEERA_KID)?.state === 'requested');
+  check('...and shows the photo the parents gave', (await call('GET', `/children/${MEERA_KID}/photo`, null, BT)).status === 200);
+  const made = await call('POST', `/family-requests/${MM_REQ}/decide`, { decision: 'Approved' }, BT);
+  check('approving Make member makes the child a member', made.status === 200 && made.body?.result?.kind === 'member' && !!made.body?.result?.memberId, made.text.slice(0, 200));
+  await call('POST', '/refresh', null, BT);
+  check('...who now waits to send their consent', (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.kidId === MEERA_KID)?.state === 'login');
+  const draft = (await call('GET', '/data/REGISTRATIONS?state=draft&limit=300', null, BT)).body?.rows?.find((r) => r.child?.kidId === MEERA_KID);
+  check('...with a registration for the consent, marked Child of the parent', draft?.child?.parentName === 'Anand Rao', JSON.stringify(draft?.child));
 }
 
 /* ================================================================== */
@@ -1146,7 +1167,8 @@ if (NO_KEY) {
   check('the number they typed is masked too', /•/.test(broRow?.mobile || '') && !/9000000100/.test(inbox.text), broRow?.mobile);
 
   const approvedList = await call('GET', '/family-requests?state=Approved', null, BT);
-  check('the Approved list holds only what was approved', approvedList.body?.rows?.length === 1 && approvedList.body.rows[0].id === FR.done, approvedList.text.slice(0, 160));
+  /* The Make member request approved in the Children section is approved too. */
+  check('the Approved list holds only what was approved', approvedList.body?.rows?.length >= 1 && approvedList.body.rows.every((r) => r.state === 'Approved') && approvedList.body.rows.some((r) => r.id === FR.done), approvedList.text.slice(0, 160));
   const cancelledList = await call('GET', '/family-requests?state=Cancelled', null, BT);
   check('a request the member withdrew is in Cancelled', cancelledList.body?.rows?.length === 1 && cancelledList.body.rows[0].state === 'Cancelled');
   check('a status that does not exist falls back to Waiting', (await call('GET', '/family-requests?state=Nonsense', null, BT)).body?.rows?.length === 4);

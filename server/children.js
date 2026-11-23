@@ -1,9 +1,9 @@
-/* Children: the office's list, and the notice at 15 (FOR-CONSOLE-CHILD-AGE-15.md).
+/* Children: the office's list, and the notice at 15 (FOR-CONSOLE-CHILDREN.md).
 
-   The Noah API tells a child's parent and the child, once, when the child is 15 or more: the child can add a mobile number
-   of their own and become a member. It does this when a parent opens the Child section of the app, and when it is asked to
-   by POST /admin/children/age-notices, which is safe to call as often as you like (nobody is told twice). The note asks for
-   that call once a day; this server makes it every few hours, so a family that never opens the Child section is still told.
+   The Noah API tells both parents, once, when a child is 15 or more: press Make member, give the child's own number and the
+   Aadhaar. It does this when a parent opens Family in the app, and when it is asked to by POST /admin/children/age-notices,
+   which is safe to call as often as you like (nobody is told twice). The note asks for that call once a day; this server
+   makes it every few hours, so a family that never opens the app is still told.
 
      CHILD_NOTICE_SWEEP          on | off. On by default in production, off otherwise (as EVENT_SWEEP).
      CHILD_NOTICE_SWEEP_HOURS    how often, 1 to 24. Default 6.

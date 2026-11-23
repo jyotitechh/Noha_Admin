@@ -23,6 +23,7 @@ import { Drawer, Modal, useToast } from '@/components/layers';
 import { Field } from '@/components/ui';
 import { Btn, Chip, Failed, Kv, Loading, Note, Status } from '@/components/ui';
 import { MemberPhoto } from '@/components/MemberPhoto';
+import { AuthImage } from '@/components/AuthImage';
 import { ReferredBy, type Referrer } from '@/components/ReferredBy';
 import { fd, fdt } from '@/lib/format';
 import { Steps } from '@/modules/members/Registrations';
@@ -34,18 +35,18 @@ interface Link { rowId: string; name: string; mobile?: string }
    app, the member record of their own (memberRowId) and how that registration stands. */
 interface FamilyRow {
   rowId: string; name: string; rel?: string; age?: number; kid?: boolean; member?: boolean; parent?: boolean;
-  child?: { dob: string | null; gender: string | null; state: string; memberRowId: string | null; registrationId: string | null; email: string; hasPhoto: boolean };
+  child?: { dob: string | null; gender: string | null; state: string; memberRowId: string | null; registrationId: string | null; email: string; hasPhoto: boolean; kidPhoto?: boolean; aadhaar?: boolean };
 }
 
 /* How a child's own registration stands, in the office's words. */
-const CHILD_STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'info'; label: string }> = {
-  ready: { tone: 'info', label: 'Approved · parent has not registered them yet' },
-  draft: { tone: 'mute', label: 'Registration started, not sent' },
-  pending: { tone: 'warn', label: 'Registration waiting for a decision' },
-  approved: { tone: 'ok', label: 'Registered' },
-  member: { tone: 'ok', label: 'Now a member with their own number' },
-  rejected: { tone: 'bad', label: 'Registration sent back for correction' },
-  videoReturned: { tone: 'bad', label: 'Registration sent back for correction' },
+const CHILD_STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'brand'; label: string }> = {
+  young: { tone: 'mute', label: 'Under 15' },
+  none: { tone: 'brand', label: 'Not a member yet' },
+  requested: { tone: 'warn', label: 'Make member asked for' },
+  login: { tone: 'brand', label: 'Made a member · consent not sent yet' },
+  waiting: { tone: 'warn', label: 'Consent waiting for a decision' },
+  member: { tone: 'ok', label: 'Member' },
+  consentBack: { tone: 'bad', label: 'Consent sent back' },
 };
 /* A cell leader as offered to the office: how far, how many members, and how many more they can take. */
 interface Leader extends Link { where?: string; distanceKm?: number; members?: number; capacity?: number; roomLeft?: number }
@@ -495,14 +496,17 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
               const opens = c ? c.memberRowId : f.member ? f.rowId : null;
               return (
                 <li key={f.rowId} style={{ alignItems: 'flex-start' }}>
-                  {/* A member, or a registered child, shows their own photograph; otherwise initials. */}
-                  <MemberPhoto id={c ? (c.hasPhoto ? c.memberRowId : null) : f.member ? f.rowId : null} name={f.name} />
+                  {/* A child shows the photo the parents gave; a member their own photograph; otherwise initials. */}
+                  {c?.kidPhoto
+                    ? <AuthImage path={`/children/${f.rowId}/photo`} alt={f.name} width={36} height={36} fit="cover" />
+                    : <MemberPhoto id={c ? (c.hasPhoto ? c.memberRowId : null) : f.member ? f.rowId : null} name={f.name} />}
                   <span className="grow">
                     <span className="t1">{f.name}</span>
                     <span className="t2">{[f.rel, f.age != null ? `${f.age} years` : '', c?.gender, c?.dob ? `born ${fd(new Date(c.dob + 'T00:00:00'))}` : ''].filter(Boolean).join(' · ')}</span>
                     {c && (
                       <span className="row wrap gap6" style={{ alignItems: 'center', marginTop: 4 }}>
-                        <Chip tone={st!.tone === 'info' ? 'brand' : st!.tone}>{st!.label}</Chip>
+                        <Chip tone={st!.tone}>{st!.label}</Chip>
+                        {c.aadhaar && <Chip tone="plain" icon="check">Aadhaar given</Chip>}
                         {c.email && <span className="t2">{c.email}</span>}
                       </span>
                     )}

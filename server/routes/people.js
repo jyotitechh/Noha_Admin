@@ -68,11 +68,9 @@ function shape(p, role) {
   if (p.editable && can(role, 'members.edit') && live() && isNoah()) {
     const canContact = can(role, 'members.pii');
     /* The mobile number they sign in with. Not one of MEMBER_FIELDS: it lives in two tables (members and users) and is
-       changed by updateMemberMobile. A child has none of their own (they are reached through their parent). */
-    const mobileField = p.hasLogin || !p.member.kid
-      ? [{ key: 'mobile', label: 'Mobile number', group: 'Contact', kind: 'mobile', required: !!p.hasLogin, contact: true, locked: !canContact,
-        hint: p.hasLogin ? 'They sign in to the Noah app with this number. From now on they sign in with the new one.' : undefined }]
-      : [];
+       changed by updateMemberMobile. A child made a member has their own (FOR-CONSOLE-CHILDREN.md). */
+    const mobileField = [{ key: 'mobile', label: 'Mobile number', group: 'Contact', kind: 'mobile', required: !!p.hasLogin, contact: true, locked: !canContact,
+      hint: 'They sign in to the Noah app with this number. From now on they sign in with the new one.' }];
     out.edit = {
       fields: [...mobileField, ...MEMBER_FIELDS.map(({ key, label, group, kind, max, required, contact, multiline }) =>
         ({ key, label, group, kind, max, required: !!required, contact: !!contact, locked: !!contact && !canContact, multiline: !!multiline }))],
@@ -304,7 +302,7 @@ export default function mountPeople(app, { requireSession, requirePerm }) {
         try {
           mobileChange = await updateMemberMobile(req.params.id, mobile);
         } catch (err) {
-          if (err.code === 'taken' || err.code === 'child') return res.status(409).json({ error: err.message, errors: { mobile: err.message } });
+          if (err.code === 'taken') return res.status(409).json({ error: err.message, errors: { mobile: err.message } });
           throw err;
         }
         if (mobileChange.changed) {

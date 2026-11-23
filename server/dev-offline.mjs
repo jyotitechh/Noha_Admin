@@ -248,6 +248,14 @@ http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && path === '/_fake/translate-calls') return send(res, 200, { calls: globalThis.translateCalls || [] });
 
+  /* Add a family request (FOR-CONSOLE-CHILDREN.md: kind 'member' is "Make member"), for tests that need one. */
+  if (req.method === 'POST' && path === '/_fake/family-request') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    familyRequests.push({ state: 'Pending', at: new Date().toISOString(), note: '', ...JSON.parse(Buffer.concat(chunks).toString() || '{}') });
+    return send(res, 200, { ok: true });
+  }
+
   /* Put rows straight into a NOAH table (by name, e.g. 'events', 'passes'), for tests that need bookings. */
   if (req.method === 'POST' && path === '/_fake/insert') {
     const chunks = [];
@@ -393,6 +401,17 @@ http.createServer(async (req, res) => {
     if (!['Approved', 'Rejected'].includes(body.decision)) return err(res, 400, 'bad_decision', 'Decide Approved or Rejected.');
     r.state = body.decision;
     r.remark = body.remark || '';
+    if (body.decision === 'Approved' && r.kind === 'member') {
+      const digits = String(r.mobile || '').replace(/\D/g, '');
+      if (tables[T.members].some((x) => digits.endsWith(String(x.mobileNumber1 || '-')))) { r.state = 'Pending'; return err(res, 409, 'phone_in_use', 'That number belongs to another member.'); }
+      const [first, ...rest] = r.name.split(' ');
+      const memberId = nextId();
+      tables[T.members].push({ ROWID: memberId, firstName: first, lastName: rest.join(' '), isKid: true, gender: r.gender === 'male' ? 1 : 2,
+        dateOfBirth: r.dob, countryCode: '+' + digits.slice(0, 2), mobileNumber1: digits.slice(2), aadharNo: r.aadhaarNo || '' });
+      tables[T.appRegistrations].push({ ROWID: nextId(), memberRowId: memberId, status: 'draft', parentMemberId: String(r.requesterId), kidRowId: String(r.kidId) });
+      S.clearCache();
+      return send(res, 200, { id: r.id, state: 'Approved', kind: 'member', memberId });
+    }
     if (body.decision === 'Approved') {
       const me = tables[T.members].find((x) => x.ROWID === String(r.requesterId));
       if (r.kid) {
@@ -454,24 +473,24 @@ http.createServer(async (req, res) => {
     announced.add(e.ROWID);
     return { ok: { event: { id: e.ROWID, name: e.name }, members: 3, notified: 2 } };
   };
-  /* FOR-CONSOLE-CHILD-AGE-15.md: tell the parent and the child, once, when an approved child is 15 or more. */
+  /* FOR-CONSOLE-CHILDREN.md: tell both parents, once, when a child who is not a member yet is 15 or more. */
   if (req.method === 'POST' && path === '/admin/children/age-notices') {
     const list = (tables['tbl:notifications'] ||= []);
     const told = new Set(list.filter((n) => n.type === 'child_age_notice').map((n) => {
       try { return JSON.parse(JSON.parse(n.data).data).kidId; } catch { return ''; }
     }));
     const age = (d) => { const x = new Date(String(d).slice(0, 10) + 'T00:00:00Z'); return (Date.now() - +x) / 31557600000; };
-    const due = (tables[T.appRegistrations] || []).filter((r) => r.status === 'approved' && r.parentMemberId && r.kidRowId)
-      .map((r) => ({ r, m: tables[T.members].find((x) => x.ROWID === String(r.memberRowId)) }))
-      .filter(({ m }) => m?.dateOfBirth && age(m.dateOfBirth) >= 15);
+    const isMember = (kidId) => (tables[T.appRegistrations] || []).some((r) => String(r.kidRowId) === kidId && r.status === 'approved');
+    const due = (tables[T.kids] || []).filter((k) => !k.archived && k.dateOfBirth && age(k.dateOfBirth) >= 15 && !isMember(String(k.ROWID)));
     let sent = 0;
-    for (const { r } of due) {
-      if (told.has(String(r.kidRowId))) continue;
-      for (const to of [r.parentMemberId, r.memberRowId]) {
+    for (const k of due) {
+      if (told.has(String(k.ROWID))) continue;
+      const parents = (tables[T.kidsConnect] || []).filter((l) => String(l.kidId) === String(k.ROWID) && !l.isArchived).map((l) => l.memberId);
+      for (const to of parents) {
         list.push({
           ROWID: String(27145000000196000 + list.length), type: 'child_age_notice', notifiable_type: 'Member', notifiable_id: String(to),
           CREATEDTIME: new Date(Date.now() + 5.5 * 36e5).toISOString().slice(0, 19).replace('T', ' ') + ':000',
-          data: JSON.stringify({ title: 'You can add your mobile number', body: 'You are now 15.', data: JSON.stringify({ kidId: String(r.kidRowId) }) }),
+          data: JSON.stringify({ title: `Please make ${k.firstName} a member`, body: 'Open Family and press Make member.', data: JSON.stringify({ kidId: String(k.ROWID) }) }),
         });
       }
       sent += 1;

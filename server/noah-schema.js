@@ -37,7 +37,7 @@
 import {
   getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile, query,
 } from './catalyst.js';
-import { MEMBER_FIELDS, REFER_COLUMN, referByParts, joinReferBy } from './member-fields.js';
+import { MEMBER_FIELDS, REFER_COLUMN, referByParts, joinReferBy, checkMobile } from './member-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
 import { kidLabel, relationLabel, reverseRelation, isOffered, genderedCode, EXTRA_CODES } from './relations.js';
 
@@ -1230,8 +1230,6 @@ export function referrerIndex(members, users) {
     if (!map.get(key).includes(m)) map.get(key).push(m);
   };
   for (const m of members) {
-    /* A child under 15 carries their parent's number: the referrer is the parent, never the child. */
-    if (asBool(m.isKid) && !String(m.userId ?? '').trim()) continue;
     const u = userById.get(String(m.userId));
     for (const p of [m.mobileNumber1, m.mobileNumber2, u?.number]) {
       const k = phoneKey(p);
@@ -1662,18 +1660,12 @@ export async function updateMemberMobile(memberRowId, mobile) {
   const { members, users } = await snapshot();
   const row = members.find((m) => same(m.ROWID, memberRowId));
   if (!row) throw Object.assign(new Error('No such member.'), { code: 'not_found' });
-  if (asBool(row.isKid) && !String(row.userId ?? '').trim()) {
-    throw Object.assign(new Error('A child has no mobile number of their own: they are reached through their parent.'), { code: 'child' });
-  }
   const user = users.find((u) => same(u.ROWID, row.userId)) || null;
   const before = phoneOf(row, user);
   const { cc, number } = splitPhone(mobile);
   if (digits(before) === cc + number) return { changed: false };
 
-  /* A child under 15 carries their parent's number on their own row (FOR-CONSOLE-CHILD-AGE-15.md): one number, two rows, by
-     design. Such a child (isKid, no login of their own) never makes a number "taken". */
-  const childOnParentsNumber = (m) => asBool(m.isKid) && !String(m.userId ?? '').trim();
-  const taken = members.find((m) => !same(m.ROWID, row.ROWID) && !asBool(m.archived) && !childOnParentsNumber(m)
+  const taken = members.find((m) => !same(m.ROWID, row.ROWID) && !asBool(m.archived)
       && digits(m.mobileNumber1) === number && (digits(m.countryCode) || cc) === cc)
     || users.find((u) => !same(u.ROWID, row.userId) && !asBool(u.archived) && digits(u.number) === number && (digits(u.countryCode) || cc) === cc);
   if (taken) {
@@ -1684,15 +1676,6 @@ export async function updateMemberMobile(memberRowId, mobile) {
   await io.update(T.members, { ROWID: String(row.ROWID), countryCode: '+' + cc, mobileNumber1: number });
   if (user) await io.update(T.users, { ROWID: String(user.ROWID), countryCode: '+' + cc, number });
 
-  /* Their children under 15 carry the parent's number: move them to the new one too, so the office's records agree. */
-  const { regs } = await snapshot();
-  const kidRows = new Set(regs.filter((r) => same(r.parentMemberId, row.ROWID)).map((r) => String(r.memberRowId)));
-  const oldDigits = digits(before);
-  for (const m of members) {
-    if (!kidRows.has(String(m.ROWID)) || !childOnParentsNumber(m)) continue;
-    if (digits(m.countryCode) + digits(m.mobileNumber1) !== oldDigits) continue;
-    await io.update(T.members, { ROWID: String(m.ROWID), countryCode: '+' + cc, mobileNumber1: number });
-  }
   clearCache();
   return { changed: true, before, after: '+' + cc + number, login: !!user };
 }
@@ -1778,13 +1761,16 @@ async function familyAndGroups(memberRowId, memberByRow) {
       child: {
         dob: dob ? dob.toISOString().slice(0, 10) : null,
         gender: GENDER_WORD[Number(k.gender)] || null,
-        /* ready = approved by the office, the parent has not registered the child yet. member = from 15 the child added a
-           number of their own and now signs in as a member (FOR-CONSOLE-CHILD-AGE-15.md). */
-        state: String(childMember?.userId ?? '').trim() ? 'member' : reg ? stateOf(reg.status) : 'ready',
+        /* FOR-CONSOLE-CHILDREN.md: none = not a member (yet); once the office approves "Make member" the child has a member
+           row and a registration waiting for their consent (draft), which they send (pending) and the office decides. */
+        state: childState(reg, ageOf(dob)),
         memberRowId: childMember ? String(childMember.ROWID) : null,
         registrationId: reg ? String(reg.ROWID) : null,
         email: childMember?.emailId1 || '',
         hasPhoto: !!childMember?.photo,
+        /* The photo the parents gave when adding the child (kids.photoFileId), and whether the Aadhaar was given. */
+        kidPhoto: /^\d{6,}$/.test(String(k.photoFileId ?? '')),
+        aadhaar: !!String(k.aadhaarNo ?? '').trim(),
       },
     });
   }
@@ -1821,6 +1807,14 @@ async function familyAndGroups(memberRowId, memberByRow) {
     family: { recorded: true, rows },
     groups: { recorded: true, rows: groupRows.sort((x, y) => x.name.localeCompare(y.name)) },
   };
+}
+
+/** Where a child stands (FOR-CONSOLE-CHILDREN.md), from the registration the "Make member" approval made, and the age. */
+const CHILD_AGE = () => Number(process.env.CHILD_MEMBER_AGE) || 15;
+function childState(reg, age) {
+  if (!reg) return age != null && age < CHILD_AGE() ? 'young' : 'none';
+  const s = stateOf(reg.status);
+  return { draft: 'login', pending: 'waiting', approved: 'member', rejected: 'consentBack', videoReturned: 'consentBack' }[s] || s;
 }
 
 /* ---------- every child, for the office's Children list ----------
@@ -1860,6 +1854,14 @@ async function ageNoticeByKid() {
   return { ok: true, by };
 }
 
+/** The file id of a child's photo (kids.photoFileId), or null. */
+export async function kidPhotoFileId(kidId) {
+  const h = await householdRows();
+  const k = h.kids.find((x) => same(x.ROWID, kidId) || (x.id && same(x.id, kidId)));
+  const id = String(k?.photoFileId ?? '').trim();
+  return /^\d{6,}$/.test(id) ? id : null;
+}
+
 export async function loadChildren() {
   const [h, { regs, members, users }, notices] = await Promise.all([householdRows(), snapshot(), ageNoticeByKid()]);
   const byRow = new Map(members.map((m) => [String(m.ROWID), m]));
@@ -1881,7 +1883,6 @@ export async function loadChildren() {
     const child = reg ? byRow.get(String(reg.memberRowId)) : null;
     const dob = utc(k.dateOfBirth);
     const age = ageOn(dob);
-    const ownNumber = !!String(child?.userId ?? '').trim();
     return {
       kidId,
       name: [k.firstName, k.middleName, k.lastName].filter(Boolean).join(' ') || '(no name yet)',
@@ -1889,10 +1890,12 @@ export async function loadChildren() {
       dob: dob ? dob.toISOString().slice(0, 10) : null,
       age,
       parents,
-      state: ownNumber ? 'member' : reg ? stateOf(reg.status) : 'ready',
+      state: childState(reg, age),
       memberRowId: child ? String(child.ROWID) : null,
-      /* 15 or more: the age the Noah API tells them at. */
-      fifteen: age != null && age >= 15,
+      kidPhoto: /^\d{6,}$/.test(String(k.photoFileId ?? '')),
+      aadhaar: !!String(k.aadhaarNo ?? '').trim(),
+      /* 15 or more: the age the Noah API tells the parents to press "Make member". */
+      fifteen: age != null && age >= CHILD_AGE(),
       noticeAt: notices.by.get(kidId) ?? null,
       noticesRead: notices.ok,
       addedAt: ist(k.CREATEDTIME),
@@ -2222,7 +2225,9 @@ export async function loadChangeRequests({ status } = {}) {
       const field = describeChangeField(r.fieldId);
       const pending = normStatus(r.status) === 'pending';
       /* What approving would save, so a value that is split (an address, a phone) can be checked before it is. */
-      const plan = pending && field.known ? resolveChange(r.fieldId, r.newValue, m) : null;
+      const plan = pending && field.known && !field.signIn ? resolveChange(r.fieldId, r.newValue, m) : null;
+      /* The sign-in number: what it would be saved as, or why it cannot be. */
+      const mobile = pending && field.signIn ? checkMobile(r.newValue) : null;
       return {
         id: String(r.ROWID),
         memberRowId: r.memberRowId ? String(r.memberRowId) : null,
@@ -2234,12 +2239,13 @@ export async function loadChangeRequests({ status } = {}) {
         contact: field.contact,
         /* Known, but deliberately not applied from here: the reason, in words. */
         blocked: field.blocked,
+        signIn: !!field.signIn,
         /* More than one column, or a value that is changed on the way in: what each will hold. */
         saves: plan?.parts && (plan.parts.length > 1 || plan.parts[0].shown !== String(r.newValue ?? '').trim())
           ? plan.parts.map((p) => ({ label: p.label, value: String(p.shown ?? '') }))
-          : null,
+          : mobile?.value && mobile.value !== String(r.newValue ?? '').trim() ? [{ label: 'Mobile number', value: mobile.value }] : null,
         /* A value that cannot be applied as it stands, found now rather than when someone presses Approve. */
-        problem: plan?.error || null,
+        problem: plan?.error || mobile?.error || null,
         oldValue: r.oldValue ?? '',
         newValue: r.newValue ?? '',
         status: normStatus(r.status),
@@ -2250,6 +2256,29 @@ export async function loadChangeRequests({ status } = {}) {
       };
     })
     .sort((a, b) => +(b.at ?? 0) - +(a.at ?? 0));
+}
+
+/**
+ * Approve a request to change the mobile number the member signs in with: the number is written to members and users
+ * (updateMemberMobile: refused when another member has it), then the request is marked approved. The Noah API does not
+ * apply this one (409 change_by_hand), so the console does, and marks the row itself. Returns { status, applied, before, after }.
+ */
+export async function approveMobileChange({ id, memberRowId, newValue, byMemberRowId }) {
+  crSnap = null;
+  const all = await changeRequestRows();
+  const row = all.find((r) => same(r.ROWID, id));
+  if (!row) throw Object.assign(new Error('No such request.'), { code: 'not_found' });
+  if (normStatus(row.status) !== 'pending') throw Object.assign(new Error('That request has already been decided.'), { code: 'not_pending' });
+  const who = memberRowId ?? row.memberRowId;
+  const m = checkMobile(newValue ?? row.newValue);
+  if (m.error) throw Object.assign(new Error(`The new number cannot be used: ${m.error}`), { code: 'invalid_value' });
+  const out = await updateMemberMobile(who, m.value);
+  await io.update(T.appChangeRequests, {
+    ROWID: String(row.ROWID), status: 'approved', note: '', reviewedAt: stamp(),
+    ...(byMemberRowId ? { reviewedByRowId: String(byMemberRowId) } : {}),
+  });
+  crSnap = null;
+  return { status: 'approved', applied: out.changed ? ['Mobile number'] : [], login: out.login };
 }
 
 /**

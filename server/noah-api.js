@@ -192,11 +192,11 @@ export const announceEvent = (id, { force = false, actor } = {}) =>
 export const announceDue = ({ hours, actor } = {}) =>
   call('/admin/events/announce-due', { method: 'POST', actor, body: hours ? { hours } : {} });
 
-/* ---------- children at 15 (FOR-CONSOLE-CHILD-AGE-15.md) ----------
+/* ---------- children at 15 (FOR-CONSOLE-CHILDREN.md) ----------
 
    POST /admin/children/age-notices  {}  -> { checked, sent }
-   Tells the parent and the child (push and the app's notification list, type child_age_notice), once per child, that a child
-   aged 15 or more can add a mobile number of their own. Safe to call as often as you like: nobody is told twice. */
+   Tells both parents (push and the app's notification list, type child_age_notice), once per child, that a child aged 15 or
+   more can be made a member: Make member in Family. Safe to call as often as you like: nobody is told twice. */
 export const childAgeNotices = ({ actor } = {}) =>
   call('/admin/children/age-notices', { method: 'POST', actor, body: {} });
 

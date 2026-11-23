@@ -89,11 +89,15 @@ export function checkMobile(raw) {
   if (!s) return { error: 'The mobile number cannot be empty: they sign in with it.' };
   if (!/^\+?[\d\s()-]+$/.test(s)) return { error: 'Use digits only, with the country code, like +91 98765 43210.' };
   const d = s.replace(/\D/g, '');
+  /* An Indian mobile number is ten digits starting 6, 7, 8 or 9. */
+  const indian = (n) => /^[6-9]\d{9}$/.test(n);
   if (!s.startsWith('+')) {
-    if (d.length === 10) return { value: '+91' + d };
+    if (d.length === 10 && indian(d)) return { value: '+91' + d };
+    if (d.length === 10) return { error: 'An Indian mobile number starts with 6, 7, 8 or 9. If it is from another country, add its country code.' };
     return { error: 'Start with + and the country code, like +91 98765 43210.' };
   }
   if (d.length < 8 || d.length > 15) return { error: 'That is not a full mobile number with its country code.' };
+  if (d.startsWith('91') && !indian(d.slice(2))) return { error: 'An Indian mobile number is ten digits starting with 6, 7, 8 or 9.' };
   return { value: '+' + d };
 }
 

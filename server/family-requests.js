@@ -44,8 +44,18 @@ export function shape(r) {
     state: STATES.includes(r.state) ? r.state : 'Pending',
     relation,
     relationLabel: LABEL[relation] || 'Other',
-    /* A child under 18: no account and no phone number, so approving adds a record rather than linking one. */
-    kid: !!r.kid,
+    /* What is asked (FOR-CONSOLE-CHILDREN.md): 'relative' (link two members), 'child' (an older app's "add a child"), or
+       'member' ("Make member": a child of 15 or more becomes a member with their own number). */
+    kind: ['relative', 'child', 'member'].includes(r.kind) ? r.kind : (r.kid ? 'child' : 'relative'),
+    /* A child under 18: no account of their own until made a member. */
+    kid: !!r.kid || r.kind === 'child' || r.kind === 'member',
+    kidId: r.kidId != null && r.kidId !== '' ? String(r.kidId) : null,
+    /* "Make member": the child's own number, and the Aadhaar the parents gave. Shown in full only to staff who may see contact
+       details (routes/family.js masks them for everyone else); the picture is read through the audited file route. */
+    childMobile: r.kind === 'member' ? String(r.mobile || '') : '',
+    aadhaarNo: r.kind === 'member' ? String(r.aadhaarNo || '').replace(/\s+/g, '') : '',
+    aadhaarFileId: r.kind === 'member' && /^\d{6,}$/.test(String(r.aadhaarFileId ?? '')) ? String(r.aadhaarFileId) : null,
+    memberId: r.memberId != null && r.memberId !== '' ? String(r.memberId) : null,
     name: String(r.name || '').trim(),
     gender: r.gender || null,
     dob: r.dob || null,

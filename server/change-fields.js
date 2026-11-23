@@ -18,11 +18,11 @@
      location     "Mumbai, Maharashtra, India" -> city + state + country
      (corr_* likewise, for the postal address)
 
-   Not applied from here, and why:
+   Applied on its own path:
      phone1   it is the member's sign-in number (`users.number`). Writing it to `members` alone would show a number they
-              cannot sign in with, and changing the login would hand the account to whoever holds the new number. The Noah
-              API refuses it too (409 change_by_hand): change it by hand in `users` and `members`, then turn the request down
-              with a note such as "Changed".
+              cannot sign in with, so approving it goes to approveMobileChange (noah-schema.js): members and users together,
+              refused when another member has the number. The Noah API refuses it (409 change_by_hand), so the console
+              applies it and marks the request itself.
 
    WHO APPLIES IT. When the Noah API key is set the API decides (GET /admin/profile-requests, POST .../decide): it writes the
    value in the right format and sends the member a push. This file's map is then used only to label a request, to guard the
@@ -290,11 +290,9 @@ export const CHANGE_FIELDS = {
   voter: idNumber('voterId', 'Voter ID'),
   dl: idNumber('drivingLicense', 'Driving licence'),
 
-  /* The sign-in number: see the top of this file. Known, shown, but never applied here. */
-  phone1: {
-    label: 'Mobile number', contact: true,
-    blocked: 'This is the number the member signs in with. Changing it here would show a number they cannot sign in with, and changing the login hands the account to whoever holds the new number. Change it by hand in `users` and `members`, then turn the request down with a note such as “Changed”.',
-  },
+  /* The sign-in number. Not applied through this map: approving it goes to approveMobileChange (noah-schema.js), which writes
+     members AND users together and refuses a number another member has (routes/changes.js). */
+  phone1: { label: 'Mobile number', contact: true, signIn: true },
   phone2: phone('mobileNumber2', 'mobileNumber2CountryCode', 'WhatsApp number'),
   landline: phone('landlineNumber', 'landlineCountryCode', 'Landline'),
 
@@ -327,7 +325,7 @@ export function normStatus(v) {
 /** What the console can say about a field before anything is decided. */
 export function describeChangeField(fieldId) {
   const f = Object.hasOwn(CHANGE_FIELDS, fieldId) ? CHANGE_FIELDS[fieldId] : null;
-  if (f) return { label: f.label, known: !f.blocked, contact: !!f.contact, blocked: f.blocked || null };
+  if (f) return { label: f.label, known: !f.blocked, contact: !!f.contact, blocked: f.blocked || null, signIn: !!f.signIn };
   const legacy = fieldByName(fieldId);
   return legacy
     ? { label: legacy.label, known: true, contact: !!legacy.contact, blocked: null }
@@ -342,6 +340,7 @@ export function resolveChange(fieldId, newValue, member) {
   if (Object.hasOwn(CHANGE_FIELDS, fieldId)) {
     const f = CHANGE_FIELDS[fieldId];
     if (f.blocked) return { error: f.blocked, code: 'blocked_field' };
+    if (f.signIn) return { error: 'The sign-in number is applied on its own, to both of its tables.', code: 'sign_in_number' };
     const r = f.apply(newValue, member);
     return r.error ? r : { ...r, label: f.label, contact: !!f.contact };
   }

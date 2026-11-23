@@ -4,12 +4,14 @@
    checks and decides here. The Noah API does the rest and tells both people, so nothing is written to the tables from
    this screen.
 
-   Two kinds of request, and the screen says which it is because approving them does different things:
+   Three kinds of request, and the screen says which it is because approving them does different things:
      - a grown-up has their own Noah account, found by the mobile number the member typed. If they have not joined yet,
        the request is still approved and the two are linked the moment they join. If the typed number is not the one they
        joined with, the office can pick the right member by hand.
-     - a child under 18 has no account and no phone. Approving adds the child, and links them to the member and to the
-       member's spouse when one is already linked. */
+     - a child under 18 added by an older version of the app ('child'). Approving adds the child to the family.
+     - "Make member" ('member', FOR-CONSOLE-CHILDREN.md): at 15 the parents give the child's own mobile number and the
+       Aadhaar. Approving makes the child a member with that number; the child then signs in and sends the consent and
+       video, which come to App registrations. The office checks the Aadhaar picture against the number, name and age. */
 
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
@@ -20,12 +22,16 @@ import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Field, Kpi, Kpis, Note, Age, Failed, Loading, Empty, Who } from '@/components/ui';
 import { fdt, since } from '@/lib/format';
 import { MemberPhoto } from '@/components/MemberPhoto';
+import { AuthImage } from '@/components/AuthImage';
 
 type State = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
 
 interface FamilyRequest {
   id: string; state: State;
   relation: string; relationLabel: string; kid: boolean;
+  kind: 'relative' | 'child' | 'member'; kidId: string | null;
+  /* "Make member": the child's own number and the Aadhaar (masked for a role that may not see contact details). */
+  childMobile: string; aadhaarNo: string; aadhaarFileId: string | null; memberId: string | null; masked?: boolean;
   name: string; gender: string | null; dob: string | null; age: number | null;
   mobile: string; note: string;
   requesterId: string; requesterName: string; requesterMobile: string;
@@ -37,6 +43,12 @@ interface Candidate { rowId: string; name: string; where: string }
 
 const TONE: Record<State, 'warn' | 'ok' | 'bad' | 'mute'> = { Pending: 'warn', Approved: 'ok', Rejected: 'bad', Cancelled: 'mute' };
 
+const MEMBER_REASONS = [
+  'The Aadhaar picture is not clear. Please send it again.',
+  "The Aadhaar does not match the child's name or date of birth. Please check it and send it again.",
+  "This number does not look like the child's own. Please give the child's own mobile number.",
+];
+
 const REASONS = [
   'We could not find a member with that number. Please check it and ask again.',
   'This is not the right person to add. Please check the name and send it again.',
@@ -45,6 +57,9 @@ const REASONS = [
 
 /** What approving will do, in words the office can check before pressing the button. */
 function effect(r: FamilyRequest): string {
+  if (r.kind === 'member') {
+    return `${r.name || 'The child'} becomes a member with the number ${r.childMobile || 'given'}. Both parents are told. The child then signs in with that number and sends their consent and video, which come to App registrations for you to approve.`;
+  }
   if (r.kid) {
     return `Adds ${r.name || 'the child'} as a child record and links them to ${r.requesterName || 'the member'}, and to their spouse if one is already linked.`;
   }
@@ -56,6 +71,7 @@ function effect(r: FamilyRequest): string {
 
 export default function FamilyRequests() {
   const [state, setState] = useState<State>('Pending');
+  const [kindShown, setKindShown] = useState<'' | 'member' | 'other'>('');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<FamilyRequest | null>(null);
   const [rejecting, setRejecting] = useState(false);
@@ -81,19 +97,20 @@ export default function FamilyRequests() {
     const rows = waiting.data?.rows ?? [];
     return {
       pending: rows.length,
-      kids: rows.filter((r) => r.kid).length,
+      members: rows.filter((r) => r.kind === 'member').length,
+      kids: rows.filter((r) => r.kid && r.kind !== 'member').length,
       adults: rows.filter((r) => !r.kid).length,
       oldest: rows.map((r) => r.at).filter(Boolean).sort((a, b) => +a! - +b!)[0] ?? null,
     };
   }, [waiting.data]);
 
   const rows = useMemo(() => {
-    const all = q.data?.rows ?? [];
+    const all = (q.data?.rows ?? []).filter((r) => !kindShown || (kindShown === 'member') === (r.kind === 'member'));
     const s = search.trim().toLowerCase();
     return s
       ? all.filter((r) => [r.name, r.requesterName, r.relationLabel, r.existingMemberName ?? ''].some((v) => v.toLowerCase().includes(s)))
       : all;
-  }, [q.data, search]);
+  }, [q.data, search, kindShown]);
 
   const reset = () => {
     setOpen(null); setRejecting(false); setRemark('');
@@ -122,8 +139,9 @@ export default function FamilyRequests() {
       q.reload(); waiting.reload(); queues.refresh();
       toast(
         decision === 'Approved'
-          ? r.kid ? `Approved. ${r.name} is added to ${r.requesterName}'s family.` : 'Approved. Both accounts now show each other.'
-          : 'Rejected. The member sees your reason.',
+          ? r.kind === 'member' ? `Approved. ${r.name} is now a member and can sign in with their own number to send the consent and video.`
+            : r.kid ? `Approved. ${r.name} is added to ${r.requesterName}'s family.` : 'Approved. Both accounts now show each other.'
+          : r.kind === 'member' ? 'Rejected. Both parents see your reason and can send it again.' : 'Rejected. The member sees your reason.',
         decision === 'Approved' ? 'ok' : 'warn',
       );
     } catch (e) {
@@ -153,7 +171,9 @@ export default function FamilyRequests() {
     },
     {
       key: 'kind', label: 'Kind',
-      cell: (r) => r.kid
+      cell: (r) => r.kind === 'member'
+        ? <Chip tone="brand" icon="user-plus">Child to member</Chip>
+        : r.kid
         ? <Chip tone="info" icon="user">Child under 18</Chip>
         : r.existingMemberName
           ? <Chip tone="ok" icon="check">Member: {r.existingMemberName}</Chip>
@@ -180,8 +200,8 @@ export default function FamilyRequests() {
       <Kpis>
         <Kpi label="Waiting" value={tally.pending} icon="users" tone={tally.pending > 4 ? 'warn' : undefined}
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={48} bad={96} /></> : 'nothing waiting'} />
+        <Kpi label="Child to member" value={tally.members} icon="user-plus" detail="aged 15 or more, their own number" />
         <Kpi label="Grown-ups" value={tally.adults} icon="user" detail="linked to their own account" />
-        <Kpi label="Children under 18" value={tally.kids} icon="heart" detail="added as a record" />
         <Kpi label="Target" value="2 days" icon="clock" detail="members are waiting to see their family" />
       </Kpis>
 
@@ -204,6 +224,11 @@ export default function FamilyRequests() {
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
                 <option value="Cancelled">Withdrawn by the member</option>
+              </select>
+              <select className="sel" value={kindShown} onChange={(e) => setKindShown(e.target.value as typeof kindShown)} aria-label="Filter by kind">
+                <option value="">Every kind</option>
+                <option value="member">Child to member ({tally.members})</option>
+                <option value="other">Relatives and children</option>
               </select>
               <span className="sp" style={{ flex: 1 }} />
               <span className="small muted">Oldest first</span>
@@ -250,27 +275,48 @@ export default function FamilyRequests() {
             <div className="row wrap gap6 mb12">
               <Chip icon="users">{open.relationLabel}</Chip>
               <Chip tone={TONE[open.state]}>{open.state}</Chip>
-              {open.kid ? <Chip tone="info" icon="user">Child under 18</Chip> : <Chip tone="plain" icon="user">Grown-up</Chip>}
+              {open.kind === 'member' ? <Chip tone="brand" icon="user-plus">Child to member</Chip>
+                : open.kid ? <Chip tone="info" icon="user">Child under 18</Chip> : <Chip tone="plain" icon="user">Grown-up</Chip>}
             </div>
 
-            <div className="sect-title">Who they want to add</div>
+            <div className="sect-title">{open.kind === 'member' ? 'The child to make a member' : 'Who they want to add'}</div>
             <div className="card pad">
               <b style={{ fontSize: 16 }}>{open.name || 'No name given'}</b>
               <div className="muted small mt4">
                 {open.relationLabel}
                 {open.gender && <> · {open.gender}</>}
                 {open.dob && <> · born {open.dob}{open.age != null && <> ({open.age} yr)</>}</>}
-                {open.mobile && <> · <span className="mono">{open.mobile}</span></>}
+                {open.mobile && open.kind !== 'member' && <> · <span className="mono">{open.mobile}</span></>}
               </div>
               {open.note && <p style={{ margin: '10px 0 0' }}>“{open.note}”</p>}
             </div>
+
+            {open.kind === 'member' && (
+              <div className="mt16">
+                <div className="sect-title">Their own number and Aadhaar</div>
+                <div className="card pad stack" style={{ gap: 10 }}>
+                  <div><span className="muted small">Mobile number</span><br /><b className="mono">{open.childMobile || 'Not given'}</b></div>
+                  {open.existingMemberName && (
+                    <Note tone="bad" icon="alert">This number already belongs to {open.existingMemberName}. It cannot be approved with it.</Note>
+                  )}
+                  <div><span className="muted small">Aadhaar number</span><br /><b className="mono">{open.aadhaarNo || 'Not given'}</b></div>
+                  {open.aadhaarFileId
+                    ? <AuthImage path={`/family-requests/${open.id}/aadhaar`} alt="Aadhaar" width={320} open />
+                    : <span className="muted small">No Aadhaar picture.</span>}
+                  {open.masked && <span className="xs muted">The number and Aadhaar are partly hidden for your role.</span>}
+                </div>
+                {open.state === 'Pending' && (
+                  <p className="small muted mt8 mb0">Check that the Aadhaar picture matches its number and the child's name and date of birth, and that the mobile number is the child's own.</p>
+                )}
+              </div>
+            )}
 
             <div className="mt16">
               <div className="sect-title">Asked by</div>
               <Who name={open.requesterName || 'A member'} sub={<span className="mono">{open.requesterMobile}</span>} photoId={open.requesterId} />
             </div>
 
-            {!open.kid && (
+            {!open.kid && open.kind !== 'member' && (
               <div className="mt16">
                 <div className="sect-title">Their account</div>
                 {open.existingMemberName ? (
@@ -321,13 +367,13 @@ export default function FamilyRequests() {
             {rejecting && (
               <div className="mt20">
                 <div>
-                  <Field label="Reason" hint="The member sees this.">
-                    <textarea className="ta" rows={3} value={remark} autoFocus placeholder={REASONS[0]}
+                  <Field label="Reason" hint={open.kind === 'member' ? 'Both parents see this.' : 'The member sees this.'}>
+                    <textarea className="ta" rows={3} value={remark} autoFocus placeholder={(open.kind === 'member' ? MEMBER_REASONS : REASONS)[0]}
                       onChange={(e) => setRemark(e.target.value)} />
                   </Field>
                 </div>
                 <div className="row wrap gap6 mt12">
-                  {REASONS.map((t) => (
+                  {(open.kind === 'member' ? MEMBER_REASONS : REASONS).map((t) => (
                     <button key={t} className="btn sm" onClick={() => setRemark(t)}>{t.slice(0, 34)}…</button>
                   ))}
                 </div>

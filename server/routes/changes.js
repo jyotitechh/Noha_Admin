@@ -10,9 +10,10 @@
        marks the request. Nobody is told, and the screen says so. server/change-fields.js holds the map it uses.
 
    Same permission as editing a member (members.edit), and applying a change to a contact detail needs members.pii on top,
-   as editing one does. The member's sign-in number is never applied: the API refuses it (change_by_hand) and so does this. */
+   as editing one does. The member's sign-in number (phone1) the API refuses (change_by_hand), so the console applies it itself:
+   approveMobileChange writes members and users together, refuses a number another member has, and marks the request. */
 
-import { loadChangeRequests, decideChangeRequest, clearCache } from '../noah-schema.js';
+import { loadChangeRequests, decideChangeRequest, approveMobileChange, clearCache } from '../noah-schema.js';
 import { writeAudit, live, isNoah } from '../store.js';
 import { can, roleById } from '../db.js';
 import { explainCatalyst } from '../catalyst.js';
@@ -31,7 +32,7 @@ function fail(res, err) {
     const status = err.status === 404 ? 404 : err.status === 409 ? 409 : [400, 422].includes(err.status) ? 422 : 502;
     return res.status(status).json({ error: err.message, code: status === 422 ? 'invalid_value' : err.code });
   }
-  const local = { not_found: 404, not_pending: 409, unknown_field: 409, blocked_field: 409, forbidden_field: 403, invalid_value: 422 }[err.code];
+  const local = { not_found: 404, not_pending: 409, unknown_field: 409, blocked_field: 409, forbidden_field: 403, invalid_value: 422, taken: 409 }[err.code];
   if (local) return res.status(local).json({ error: err.message, code: err.code });
   const explained = explainCatalyst(err);
   return res.status(explained?.status ?? 502).json({
@@ -102,6 +103,15 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
       module: 'Membership', record: req.params.id, before: null, after, remark: '', ip: req.ip || '',
     });
 
+    /* The sign-in number, approved: written by the console to both tables (the API does not apply it), whichever path lists it. */
+    const applyMobile = async (r) => {
+      if (!can(role, 'members.pii')) return res.status(403).json({ error: 'Applying a change to contact details needs permission to see them.', code: 'forbidden_field' });
+      const out = await approveMobileChange({ id: r.id, memberRowId: r.memberRowId, newValue: r.newValue, byMemberRowId: req.session.memberRowId });
+      clearCache();
+      await record('Approved a change asked for from the app', { status: 'approved', applied: 'Mobile number (they sign in with it)', via: 'console' });
+      return res.json({ ok: true, status: 'approved', applied: out.applied, notified: null, via: 'console', signIn: true });
+    };
+
     try {
       /* The API first. Only an API without the call falls through to the table, and a network failure does not: silently
          deciding by the table would skip the member's notification. */
@@ -118,6 +128,7 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
             ? res.status(409).json({ error: 'That request has already been decided.', code: 'not_pending' })
             : res.status(404).json({ error: 'No such request.', code: 'not_found' });
         }
+        if (approve && r.signIn) return await applyMobile(r);
         if (approve) {
           if (r.blocked) return res.status(409).json({ error: r.blocked, code: 'change_by_hand' });
           if (!r.known) return res.status(409).json({ error: `The console does not know which detail "${r.fieldId}" is, so it cannot apply this. Turn it down, or change the member's detail by hand.`, code: 'unknown_field' });
@@ -132,6 +143,10 @@ export default function mountChanges(app, { requireSession, requirePerm }) {
       }
 
       /* The table: the same checks, and the member is not told. */
+      if (approve) {
+        const mine = (await loadChangeRequests({ status: 'pending' })).find((x) => x.id === String(req.params.id));
+        if (mine?.signIn) return await applyMobile(mine);
+      }
       const r = await decideChangeRequest({
         id: req.params.id, approve, note,
         byMemberRowId: req.session.memberRowId,

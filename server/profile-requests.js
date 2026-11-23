@@ -6,6 +6,7 @@
 
 import { listProfileRequests } from './noah-api.js';
 import { describeChangeField, normStatus } from './change-fields.js';
+import { checkMobile } from './member-fields.js';
 
 const asDate = (v) => {
   if (!v) return null;
@@ -26,9 +27,18 @@ export function shape(item) {
     known: field.known,
     contact: field.contact,
     blocked: field.blocked,
-    /* The API checks and converts the value itself, so the console offers no second opinion here. */
-    saves: null,
-    problem: null,
+    /* The mobile number they sign in with: approving writes it to members and users (approveMobileChange). */
+    signIn: !!field.signIn,
+    /* The API checks and converts the value itself, so the console offers no second opinion here, except for the sign-in
+       number, which the console applies itself: what it would be saved as, or why it cannot be. */
+    ...(() => {
+      if (!field.signIn || normStatus(item.status) !== 'pending') return { saves: null, problem: null };
+      const m = checkMobile(item.newValue);
+      return {
+        saves: m.value && m.value !== String(item.newValue ?? '').trim() ? [{ label: 'Mobile number', value: m.value }] : null,
+        problem: m.error || null,
+      };
+    })(),
     oldValue: item.oldValue ?? '',
     newValue: item.newValue ?? '',
     status: normStatus(item.status),
