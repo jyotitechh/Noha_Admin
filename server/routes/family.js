@@ -23,7 +23,7 @@ function fail(res, err) {
 }
 
 /** The child's number and Aadhaar of a "Make member" request: in full only for someone who may see contact details. */
-const maskMobile = (m = '') => String(m || '').replace(/(d{2})d+(d{2})$/, '$1••••••$2');
+const maskMobile = (m = '') => String(m || '').replace(/(\d{2})\d+(\d{2})$/, '$1••••••$2');
 const maskAadhaar = (a = '') => (a ? '•••• •••• ' + String(a).slice(-4) : '');
 const forRole = (role) => (r) => (can(role, 'members.pii') ? r : { ...r, childMobile: maskMobile(r.childMobile), aadhaarNo: maskAadhaar(r.aadhaarNo), masked: true });
 

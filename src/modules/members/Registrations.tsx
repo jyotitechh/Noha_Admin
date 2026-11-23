@@ -281,6 +281,7 @@ export default function Registrations() {
       returned: rows.filter((r) => r.state === 'videoReturned').length,
       rejected: rows.filter((r) => r.state === 'rejected').length,
       approved: rows.filter((r) => r.state === 'approved').length,
+      children: rows.filter((r) => r.state === 'pending' && r.child).length,
       oldest: rows.filter((r) => r.state === 'pending').map((r) => r.at).sort((a, b) => +a - +b)[0] ?? null,
     };
   }, [counts.data]);
@@ -415,8 +416,8 @@ export default function Registrations() {
           detail="re-recording in the app" />
         <Kpi label="Approved" value={tally.approved} icon="user-check"
           detail="now on the member register" />
-        <Kpi label="Target" value="24 h" icon="clock"
-          detail="how long a registration should wait" />
+        <Kpi label="Children's consent" value={tally.children} icon="user"
+          detail="waiting, made a member by their parents" />
       </Kpis>
 
       {q.loading && !q.data ? (

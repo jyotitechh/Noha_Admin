@@ -865,6 +865,19 @@ section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHIL
   check('...who now waits to send their consent', (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.kidId === MEERA_KID)?.state === 'login');
   const draft = (await call('GET', '/data/REGISTRATIONS?state=draft&limit=300', null, BT)).body?.rows?.find((r) => r.child?.kidId === MEERA_KID);
   check('...with a registration for the consent, marked Child of the parent', draft?.child?.parentName === 'Anand Rao', JSON.stringify(draft?.child));
+
+  /* A number that is already a member's: the Noah API refuses it, and the office reads why in plain words. */
+  const TAKEN_REQ = '100596000000071098';
+  await fetch(CONTROL + '/_fake/family-request', { method: 'POST', body: JSON.stringify({
+    id: TAKEN_REQ, kind: 'member', relation: 'son', kid: true, kidId: '27145000000998009', name: 'Joel Rao', gender: 'male', dob: '2010-02-01',
+    mobile: '+919811100055', aadhaarNo: '111122223333', aadhaarFileId: AADHAAR_FILE, requesterId: ANAND_ID, existingMemberId: null,
+  }) });
+  await call('POST', '/refresh', null, BT);
+  const taken = await call('POST', `/family-requests/${TAKEN_REQ}/decide`, { decision: 'Approved' }, BT);
+  check('approving with a number another member has is refused, saying why', taken.status === 409 && taken.body?.code === 'phone_in_use' && /belongs to another member/.test(taken.body?.error || ''), taken.text.slice(0, 200));
+  check('...and the request is still waiting', ((await call('GET', '/family-requests?state=Pending', null, BT)).body?.rows || []).some((r) => r.id === TAKEN_REQ));
+  const rejected = await call('POST', `/family-requests/${TAKEN_REQ}/decide`, { decision: 'Rejected', remark: "Please give the child's own number." }, BT);
+  check('...so it is rejected with a reason for both parents', rejected.status === 200 && rejected.body?.request?.state === 'Rejected', rejected.text.slice(0, 200));
 }
 
 /* ================================================================== */
@@ -1211,7 +1224,7 @@ if (NO_KEY) {
   const rej = await call('POST', `/family-requests/${FR.mother}/decide`, { decision: 'Rejected', remark: 'We could not find a member with that number.' }, BT);
   check('a request can be rejected with a reason', rej.status === 200 && rej.body?.request?.state === 'Rejected', rej.text.slice(0, 200));
   const rejList = await call('GET', '/family-requests?state=Rejected', null, BT);
-  check('...which the member can read back, and the list shows', rejList.body?.rows?.length === 1 && /could not find/.test(rejList.body.rows[0].remark), rejList.text.slice(0, 200));
+  check('...which the member can read back, and the list shows', /could not find/.test(rejList.body?.rows?.find((r) => r.id === FR.mother)?.remark || ''), rejList.text.slice(0, 200));
   check('...nothing was linked by a rejection', !(await famOf(OLD_ID)).some((r) => /Grace/.test(r.name || '')));
 
   check('deciding twice is refused (409, not_pending)', await (async () => { const r = await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Rejected', remark: 'x' }, BT); return r.status === 409 && r.body?.code === 'not_pending'; })());

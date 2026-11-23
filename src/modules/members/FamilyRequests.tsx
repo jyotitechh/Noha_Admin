@@ -55,6 +55,9 @@ const REASONS = [
   'Please ask the family member to join the app first, then send it again.',
 ];
 
+/** A "Make member" whose number already belongs to someone: the Noah API refuses it (phone_in_use), so it can only be rejected. */
+const numberTaken = (r: FamilyRequest) => r.kind === 'member' && !!r.existingMemberName;
+
 /** What approving will do, in words the office can check before pressing the button. */
 function effect(r: FamilyRequest): string {
   if (r.kind === 'member') {
@@ -202,7 +205,7 @@ export default function FamilyRequests() {
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={48} bad={96} /></> : 'nothing waiting'} />
         <Kpi label="Child to member" value={tally.members} icon="user-plus" detail="aged 15 or more, their own number" />
         <Kpi label="Grown-ups" value={tally.adults} icon="user" detail="linked to their own account" />
-        <Kpi label="Target" value="2 days" icon="clock" detail="members are waiting to see their family" />
+        <Kpi label="Children" value={tally.kids} icon="user" detail="under 18, added to a family" />
       </Kpis>
 
       {q.loading && !q.data ? (
@@ -260,7 +263,7 @@ export default function FamilyRequests() {
               <>
                 <span className="sp" style={{ flex: 1 }} />
                 <Btn variant="danger" icon="x" onClick={() => setRejecting(true)} disabled={busy}>Reject</Btn>
-                <Btn variant="ok" icon="check" onClick={() => decide(open, 'Approved')} disabled={busy}>
+                <Btn variant="ok" icon="check" onClick={() => decide(open, 'Approved')} disabled={busy || numberTaken(open)}>
                   {relPick ? `Approve and link ${relPick.name}` : 'Approve'}
                 </Btn>
               </>
@@ -297,7 +300,7 @@ export default function FamilyRequests() {
                 <div className="card pad stack" style={{ gap: 10 }}>
                   <div><span className="muted small">Mobile number</span><br /><b className="mono">{open.childMobile || 'Not given'}</b></div>
                   {open.existingMemberName && (
-                    <Note tone="bad" icon="alert">This number already belongs to {open.existingMemberName}. It cannot be approved with it.</Note>
+                    <Note tone="bad" icon="alert">This number already belongs to {open.existingMemberName}, so it cannot be approved. Reject it and ask the parents for the child's own number.</Note>
                   )}
                   <div><span className="muted small">Aadhaar number</span><br /><b className="mono">{open.aadhaarNo || 'Not given'}</b></div>
                   {open.aadhaarFileId
@@ -358,7 +361,7 @@ export default function FamilyRequests() {
               </div>
             )}
 
-            {open.state === 'Pending' && !rejecting && (
+            {open.state === 'Pending' && !rejecting && !numberTaken(open) && (
               <div className="mt16">
                 <Note tone="info" icon="info"><b>If you approve:</b> {effect(open)}</Note>
               </div>
@@ -367,8 +370,8 @@ export default function FamilyRequests() {
             {rejecting && (
               <div className="mt20">
                 <div>
-                  <Field label="Reason" hint={open.kind === 'member' ? 'Both parents see this.' : 'The member sees this.'}>
-                    <textarea className="ta" rows={3} value={remark} autoFocus placeholder={(open.kind === 'member' ? MEMBER_REASONS : REASONS)[0]}
+                  <Field label="Reason" hint={`${open.kind === 'member' ? 'Both parents see this.' : 'The member sees this.'} ${remark.length}/500`}>
+                    <textarea className="ta" rows={3} value={remark} autoFocus maxLength={500} placeholder={(open.kind === 'member' ? MEMBER_REASONS : REASONS)[0]}
                       onChange={(e) => setRemark(e.target.value)} />
                   </Field>
                 </div>
