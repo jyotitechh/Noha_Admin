@@ -59,10 +59,38 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
 
 /* ---------- queue bell ---------- */
 
+/* What to say when a queue grows while the console is open. */
+const ARRIVED: Record<string, (n: number) => string> = {
+  family: (n) => (n === 1 ? 'A new family request has come in from the app.' : `${n} new family requests have come in from the app.`),
+  registrations: (n) => (n === 1 ? 'A new registration has come in from the app.' : `${n} new registrations have come in from the app.`),
+};
+
 function QueueBell() {
   const { queues, total } = useQueues();
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  /* Tell whoever is at the console when something new arrives: compare each count with the last one seen. The first load
+     says nothing, so signing in does not announce what was already waiting. */
+  const last = useRef<Record<string, number> | null>(null);
+  useEffect(() => {
+    if (!queues.length) return;
+    const now = Object.fromEntries(queues.map((q) => [q.id, q.count]));
+    const before = last.current;
+    last.current = now;
+    if (!before) return;
+    for (const q of queues) {
+      const more = q.count - (before[q.id] ?? 0);
+      if (more > 0) toast(ARRIVED[q.id]?.(more) ?? `New in ${q.l.toLowerCase()}: ${q.count} waiting.`, 'info');
+    }
+  }, [queues, toast]);
+
+  /* The count in the browser tab too, so it shows while another tab is open. */
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\+?\) /, '');
+    document.title = total > 0 ? `(${total > 99 ? '99+' : total}) ${base}` : base;
+  }, [total]);
 
   useEffect(() => {
     if (!open) return;

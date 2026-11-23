@@ -27,6 +27,7 @@ import { AuthImage } from '@/components/AuthImage';
 import { ReferredBy, type Referrer } from '@/components/ReferredBy';
 import { fd, fdt } from '@/lib/format';
 import { Steps } from '@/modules/members/Registrations';
+import { ChildDetail } from '@/modules/members/ChildDetail';
 import { EditPerson, type EditSpec } from '@/components/EditPerson';
 import type { Registration } from '@/lib/types';
 
@@ -106,6 +107,8 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
   const [contact, setContact] = useState<{ mobile: string; email: string; address: string; referrerPhone?: string; guardians?: { rowId: string; mobile: string }[] } | null>(null);
   /* A relative opened from the Family list, on top of this page. */
   const [relative, setRelative] = useState<{ rowId: string; name: string } | null>(null);
+  /* A child who is not a member yet, opened from the Family list: the child's own record, not this one. */
+  const [kid, setKid] = useState<{ kidId: string; name: string } | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [telling, setTelling] = useState(false);
@@ -512,7 +515,9 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
                     )}
                   </span>
                   <span className="row gap6">
-                    {opens && <Btn sm icon="user" onClick={() => setRelative({ rowId: opens, name: f.name })}>Open</Btn>}
+                    {opens
+                      ? <Btn sm icon="user" onClick={() => setRelative({ rowId: opens, name: f.name })}>Open</Btn>
+                      : c && <Btn sm icon="user" onClick={() => setKid({ kidId: f.rowId, name: f.name })}>Open</Btn>}
                     {relationOptions && f.member && !f.kid && !f.parent && (
                       <Btn sm disabled={savingRel} onClick={() => removeRelative(f.rowId, f.name)}>Remove</Btn>
                     )}
@@ -603,6 +608,9 @@ export function PersonDetail({ memberRowId, onChanged, onGone }: { memberRowId: 
       </section>
 
       {/* A child or relative opened from the Family list: their own record, on top of this one. */}
+      <Drawer open={!!kid && !relative} onClose={() => setKid(null)} width="wide" title={kid?.name ?? ''}>
+        {kid && <ChildDetail kidId={kid.kidId} onOpenMember={(who) => { setKid(null); setRelative(who); }} />}
+      </Drawer>
       <Drawer open={!!relative} onClose={() => setRelative(null)} width="wide" title={relative?.name ?? ''}>
         {relative && <PersonDetail memberRowId={relative.rowId} onChanged={() => { q.reload(); onChanged?.(); }} onGone={() => setRelative(null)} />}
       </Drawer>

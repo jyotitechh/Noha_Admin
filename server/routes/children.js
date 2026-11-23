@@ -2,16 +2,18 @@
 
      GET  /api/children               every child: age, parents, registration, the notice at 15     members.view
      GET  /api/children?age=15        only those aged 15 or more
+     GET  /api/children/:kidId        one child's own record: details, parents, Make member, consent    members.view
      GET  /api/children/:kidId/photo  the photo the parents gave                                    members.view
+     GET  /api/children/:kidId/aadhaar  the Aadhaar picture the parents gave (audited)              members.pii
      POST /api/children/age-notices   tell the families who are due now (the Noah API tells each once)   members.edit
 
    Parents' numbers are masked here like everywhere else on a list. */
 
-import { roleById } from '../db.js';
+import { can, roleById } from '../db.js';
 import { writeAudit, live, isNoah } from '../store.js';
-import { loadChildren, kidPhotoFileId } from '../noah-schema.js';
+import { loadChildren, loadChild, kidPhotoFileId, kidAadhaarFileId } from '../noah-schema.js';
 import { noahConfigured, getFile } from '../noah-api.js';
-import { listRequests } from '../family-requests.js';
+import { listRequests, STATES } from '../family-requests.js';
 import { sendAgeNotices } from '../children.js';
 import { explainCatalyst } from '../catalyst.js';
 
@@ -47,6 +49,58 @@ export default function mountChildren(app, { requireSession, requirePerm }) {
       res.send(buffer);
     } catch (err) {
       res.status(502).json({ error: `The photo could not be read: ${err.message}` });
+    }
+  });
+
+  /* One child's own record: the child page opens this, not a parent's. The Aadhaar number is in full only for staff who may
+     see contact details, and so are the parents' numbers. */
+  app.get('/api/children/:kidId', requireSession, requirePerm('members.view'), async (req, res) => {
+    if (!(live() && isNoah())) return res.status(404).json({ error: 'No such child.' });
+    try {
+      const c = await loadChild(req.params.kidId);
+      if (!c) return res.status(404).json({ error: 'No such child. They may have been removed from the family.' });
+      const pii = can(req.session.role, 'members.pii');
+      /* Make member: what the parents asked, newest first (the office decides it under Family requests). */
+      let asked = [];
+      if (noahConfigured()) {
+        const all = await Promise.all(STATES.map((st) => listRequests(st).catch(() => [])));
+        asked = all.flat().filter((r) => r.kind === 'member' && r.kidId === c.kidId)
+          .sort((a, b) => (+b.at || 0) - (+a.at || 0))
+          .map((r) => ({ id: r.id, state: r.state, at: r.at, mobile: pii ? r.childMobile : maskMobile(r.childMobile), remark: r.remark, requesterName: r.requesterName }));
+      }
+      if (asked[0]?.state === 'Pending' && (c.state === 'none' || c.state === 'young')) c.state = 'requested';
+      res.json({
+        ...c,
+        aadhaarNo: pii ? c.aadhaarNo : (c.aadhaarNo ? '•••• •••• ' + c.aadhaarNo.slice(-4) : ''),
+        aadhaarPicture: c.aadhaarPicture && pii,
+        parents: c.parents.map((p) => ({ ...p, mobile: pii ? p.mobile : maskMobile(p.mobile) })),
+        makeMember: asked,
+        masked: !pii,
+      });
+    } catch (err) {
+      const explained = explainCatalyst(err);
+      res.status(explained?.status ?? 503).json({ error: explained?.message ?? `The child could not be read: ${err.message}` });
+    }
+  });
+
+  /* The Aadhaar picture the parents gave (kids.aadhaarFileId): only for staff who may see contact details, and written to the
+     audit log, like the one on a Make member request. */
+  app.get('/api/children/:kidId/aadhaar', requireSession, requirePerm('members.pii'), async (req, res) => {
+    if (!noahConfigured()) return res.status(409).json({ error: 'The Noah API is not connected, so the picture cannot be read.' });
+    try {
+      const fileId = await kidAadhaarFileId(req.params.kidId);
+      if (!fileId) return res.status(404).json({ error: 'There is no Aadhaar picture for this child.' });
+      await writeAudit({
+        actor: req.user.name, role: roleById(req.session.role).name,
+        action: "Viewed a child's Aadhaar", module: 'Membership', record: String(req.params.kidId),
+        before: null, after: null, remark: '', ip: req.ip || '',
+      }).catch(() => {});
+      const { buffer, contentType } = await getFile(fileId, { actor: req.user.name });
+      res.setHeader('content-type', !contentType || /octet-stream/i.test(contentType) ? 'image/jpeg' : contentType);
+      res.setHeader('cache-control', 'private, max-age=300');
+      res.send(buffer);
+    } catch (err) {
+      res.status(502).json({ error: `The picture could not be read: ${err.message}` });
     }
   });
 

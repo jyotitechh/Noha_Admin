@@ -1881,7 +1881,10 @@ export async function loadChildren() {
     const kidId = String(k.ROWID);
     const parents = links.filter((l) => String(l.kidId) === kidId || (k.id && String(l.kidId) === String(k.id)))
       .map((l) => byRow.get(String(l.memberId))).filter(Boolean)
-      .map((p) => ({ rowId: String(p.ROWID), name: memberFullName(p), mobile: phoneOf(p, userOf(p)) }));
+      .map((p) => ({
+        rowId: String(p.ROWID), name: memberFullName(p), mobile: phoneOf(p, userOf(p)),
+        rel: Number(p.gender) === 1 ? 'Father' : Number(p.gender) === 2 ? 'Mother' : 'Parent',
+      }));
     const reg = regOfKid.get(kidId);
     const child = reg ? byRow.get(String(reg.memberRowId)) : null;
     const dob = utc(k.dateOfBirth);
@@ -1904,6 +1907,38 @@ export async function loadChildren() {
       addedAt: ist(k.CREATEDTIME),
     };
   }).sort((a, b) => (b.age ?? -1) - (a.age ?? -1) || a.name.localeCompare(b.name));
+}
+
+/** One child's own record, for the office's child page: what the list has, and the rest of the child's row and consent. */
+export async function loadChild(kidId) {
+  const c = (await loadChildren()).find((x) => x.kidId === String(kidId));
+  if (!c) return null;
+  const [h, { regs }] = await Promise.all([householdRows(), snapshot()]);
+  const k = h.kids.find((x) => same(x.ROWID, kidId)) || {};
+  const reg = regs.filter((r) => same(r.kidRowId, kidId)).sort((a, b) => when(b) - when(a))[0] || null;
+  return {
+    ...c,
+    salutation: String(k.salutation ?? '').trim() || null,
+    bloodGroup: String(k.bloodGroup ?? '').trim() || null,
+    aadhaarNo: String(k.aadhaarNo ?? '').replace(/\s+/g, '') || '',
+    aadhaarPicture: /^\d{6,}$/.test(String(k.aadhaarFileId ?? '')),
+    consent: reg ? {
+      id: String(reg.ROWID),
+      status: stateOf(reg.status),
+      sentAt: utc(reg.submittedAt),
+      decidedAt: utc(reg.reviewedAt),
+      note: String(reg.reviewNote ?? '').trim(),
+      videoSeconds: Number(reg.videoSeconds) || null,
+    } : null,
+  };
+}
+
+/** The file id of the Aadhaar picture the parents gave for a child (kids.aadhaarFileId), or null. */
+export async function kidAadhaarFileId(kidId) {
+  const h = await householdRows();
+  const k = h.kids.find((x) => same(x.ROWID, kidId) || (x.id && same(x.id, kidId)));
+  const id = String(k?.aadhaarFileId ?? '').trim();
+  return /^\d{6,}$/.test(id) ? id : null;
 }
 
 /* ---------- adding and removing a relation ----------

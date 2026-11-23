@@ -15,6 +15,8 @@ interface QueuesValue {
   refresh: () => void;
 }
 
+const POLL_MS = 60_000;
+
 const Ctx = createContext<QueuesValue>({ queues: [], byId: {}, total: 0, refresh: () => {} });
 
 export function QueuesProvider({ children }: { children: ReactNode }) {
@@ -29,6 +31,23 @@ export function QueuesProvider({ children }: { children: ReactNode }) {
   /* Reload when the signed-in role changes: a different role sees a
      different set of queues. */
   useEffect(() => { refresh(); }, [refresh]);
+
+  /* Members send things from the app at any time (a family request, a registration, a post), so the counts are asked for
+     again every minute while the console is on screen, and at once when someone comes back to the tab. Without this a
+     request sent after the page loaded never showed in the bell until someone reloaded. */
+  useEffect(() => {
+    if (!user) return;
+    const seen = () => document.visibilityState === 'visible';
+    const timer = setInterval(() => { if (seen()) refresh(); }, POLL_MS);
+    const back = () => { if (seen()) refresh(); };
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('focus', back);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', back);
+      window.removeEventListener('focus', back);
+    };
+  }, [user, refresh]);
 
   const value = useMemo<QueuesValue>(() => {
     const byId: Record<string, Queue> = {};

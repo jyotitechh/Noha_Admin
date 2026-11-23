@@ -878,6 +878,14 @@ section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHIL
   check('...and the request is still waiting', ((await call('GET', '/family-requests?state=Pending', null, BT)).body?.rows || []).some((r) => r.id === TAKEN_REQ));
   const rejected = await call('POST', `/family-requests/${TAKEN_REQ}/decide`, { decision: 'Rejected', remark: "Please give the child's own number." }, BT);
   check('...so it is rejected with a reason for both parents', rejected.status === 200 && rejected.body?.request?.state === 'Rejected', rejected.text.slice(0, 200));
+
+  /* Opening a child shows the child's own record, not a parent's. */
+  const kid = await call('GET', `/children/${MEERA_KID}`, null, BT);
+  check("a child's own record opens: the child's name, date of birth and Aadhaar", kid.status === 200 && kid.body?.kidId === MEERA_KID && kid.body?.name === 'Meera Rao' && kid.body?.dob === '2010-01-05' && kid.body?.aadhaarNo === '432143214321', kid.text.slice(0, 300));
+  check('...with the parents beside it, as Father or Mother', kid.body?.parents?.some((p) => p.rowId === ANAND_ID && ['Father', 'Mother', 'Parent'].includes(p.rel)), JSON.stringify(kid.body?.parents));
+  check('...the Make member request and the consent', kid.body?.makeMember?.[0]?.state === 'Approved' && kid.body?.consent?.status === 'draft' && !!kid.body?.memberRowId, JSON.stringify({ m: kid.body?.makeMember, c: kid.body?.consent }));
+  check('...a child who is not there is a 404', (await call('GET', '/children/27145000000990000', null, BT)).status === 404);
+  check('...and the record needs permission to see members (the content editor gets 403)', (await call('GET', `/children/${MEERA_KID}`, null, ET)).status === 403);
 }
 
 /* ================================================================== */

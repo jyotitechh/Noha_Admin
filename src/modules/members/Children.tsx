@@ -4,7 +4,8 @@
    the Noah API tells both parents, once, to press Make member; the console asks it to every few hours, and Send notices
    now asks at once. The parents then give the child's own number and Aadhaar, the office approves that under Family
    requests, the child signs in and sends the consent and video, and the office approves that under App registrations.
-   Open a child who is a member for their own record, or any other child for the parent's. */
+   Opening a child shows the child's own record (ChildDetail); a parent's record, or the child's member record once they have
+   one, opens from there. */
 
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
@@ -16,6 +17,7 @@ import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Who } from '@/components/ui';
 import { fd } from '@/lib/format';
 import { AuthImage } from '@/components/AuthImage';
+import { ChildDetail, CHILD_STATE as STATE } from './ChildDetail';
 
 interface Child {
   kidId: string; name: string; gender: string | null; dob: string | null; age: number | null; kidPhoto?: boolean; aadhaar?: boolean;
@@ -23,15 +25,6 @@ interface Child {
   state: string; memberRowId: string | null; fifteen: boolean; noticeAt: Date | null; noticesRead: boolean;
 }
 
-const STATE: Record<string, { tone: 'ok' | 'bad' | 'warn' | 'mute' | 'brand'; label: string }> = {
-  young: { tone: 'mute', label: 'Under 15' },
-  none: { tone: 'brand', label: 'Not a member yet' },
-  requested: { tone: 'warn', label: 'Make member asked for' },
-  login: { tone: 'brand', label: 'Made a member · consent not sent yet' },
-  waiting: { tone: 'warn', label: 'Consent waiting for a decision' },
-  member: { tone: 'ok', label: 'Member' },
-  consentBack: { tone: 'bad', label: 'Consent sent back' },
-};
 
 const day = (d: string | null) => (d ? fd(new Date(d + 'T00:00:00')) : '');
 
@@ -41,6 +34,7 @@ export default function Children() {
   const [search, setSearch] = useState('');
   const [only15, setOnly15] = useState(false);
   const [sending, setSending] = useState(false);
+  const [child, setChild] = useState<Child | null>(null);
   const [open, setOpen] = useState<{ rowId: string; name: string } | null>(null);
   const q = useQuery(() => api.get<{ rows: Child[] }>('/children'), []);
 
@@ -124,10 +118,7 @@ export default function Children() {
           search={search}
           onSearch={setSearch}
           searchPlaceholder="Child's or parent's name"
-          onRowClick={(c) => {
-            const who = c.memberRowId ? { rowId: c.memberRowId, name: c.name } : c.parents[0] ? { rowId: c.parents[0].rowId, name: c.parents[0].name } : null;
-            if (who) setOpen(who);
-          }}
+          onRowClick={(c) => { setOpen(null); setChild(c); }}
           pageSize={25}
           toolbar={
             <>
@@ -145,8 +136,12 @@ export default function Children() {
         />
       )}
 
-      <Drawer open={!!open} onClose={() => setOpen(null)} width="wide" title={open?.name ?? ''}>
-        {open && <PersonDetail memberRowId={open.rowId} onChanged={q.reload} onGone={() => setOpen(null)} />}
+      <Drawer open={!!child} onClose={() => { setChild(null); setOpen(null); }} width="wide"
+        title={open ? open.name : child?.name ?? ''}
+        sub={open && child ? <button className="btn sm" onClick={() => setOpen(null)}>Back to {child.name.split(' ')[0]}</button> : undefined}>
+        {open
+          ? <PersonDetail memberRowId={open.rowId} onChanged={q.reload} onGone={() => setOpen(null)} />
+          : child && <ChildDetail kidId={child.kidId} onOpenMember={setOpen} />}
       </Drawer>
     </div>
   );
