@@ -55,6 +55,9 @@ Object.assign(process.env, {
   }),
   /* Place search for an event's location: this stand-in, not OpenStreetMap. */
   PLACES_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
+  /* Daily Manna translation: this stand-in (it prefixes the language), never Zoho. OFFLINE_NO_TRANSLATE shows it unset. */
+  ZOHO_TRANSLATE_URL: process.env.OFFLINE_NO_TRANSLATE ? '' : `http://127.0.0.1:${NOAH_PORT}/_fake/translate?auth_type=apikey&zapikey=offline`,
+  CONTENT_TRANSLATE_TO: 'kn',
 });
 delete process.env.ADMIN_PASSPHRASE;
 /* The deployed console signs in by email only; these suites sign in by number, so the harness
@@ -232,6 +235,18 @@ http.createServer(async (req, res) => {
     S.clearCache();
     return send(res, 200, { ok: true });
   }
+
+  /* The Deluge translate function, as Zoho CRM answers a REST function: { code, details: { output } }. A text holding
+     "FAIL-TRANSLATE" is refused, so a test can see a failed translation leave the original saved. */
+  if (req.method === 'POST' && path === '/_fake/translate') {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const args = JSON.parse(new URLSearchParams(Buffer.concat(chunks).toString()).get('arguments') || '{}');
+    (globalThis.translateCalls ||= []).push(args);
+    if (String(args.text).includes('FAIL-TRANSLATE')) return send(res, 400, { code: 'INVALID_DATA', message: 'The function failed.' });
+    return send(res, 200, { code: 'success', details: { output: `[${args.target}] ${args.text}`, output_type: 'string' }, message: 'function executed successfully' });
+  }
+  if (req.method === 'GET' && path === '/_fake/translate-calls') return send(res, 200, { calls: globalThis.translateCalls || [] });
 
   /* Put rows straight into a NOAH table (by name, e.g. 'events', 'passes'), for tests that need bookings. */
   if (req.method === 'POST' && path === '/_fake/insert') {

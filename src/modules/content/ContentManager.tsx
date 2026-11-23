@@ -53,6 +53,8 @@ interface TypeDef {
 }
 
 interface Row { id: string; live: boolean; [k: string]: unknown }
+/* What the server did to a Daily Manna entry's translations after a save (server/manna-translate.js). */
+interface Translation { ready: boolean; said?: string; results: { lang: string; name: string; ok: boolean; action?: string; error?: string }[] }
 
 interface List {
   rows: Row[]; total: number; source: 'catalyst' | 'sample';
@@ -357,20 +359,38 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
       /* A new entry without a stated choice is a draft, not whatever the server defaults to. */
       if (def.publish && !row && publishAs === undefined) body[def.publish] = false;
 
-      if (row) await api.patch(`/content/${def.id}/${row.id}`, body);
-      else await api.post(`/content/${def.id}`, body);
+      const res = row
+        ? await api.patch<{ translation?: Translation | null }>(`/content/${def.id}/${row.id}`, body)
+        : await api.post<{ translation?: Translation | null }>(`/content/${def.id}`, body);
 
       toast(
         publishAs === true ? `The ${def.singular} is live.`
           : publishAs === false && row ? `The ${def.singular} is taken down.`
             : `The ${def.singular} is saved.`,
       );
+      /* Daily Manna: what happened to its translations (a failure there does not undo the save). */
+      const t = res?.translation;
+      if (t?.said) toast(t.said, t.results.some((x) => !x.ok) ? 'warn' : 'ok');
       onDone();
     } catch (e) {
       const err = e as ApiError;
       setErrors(err.errors ?? {});
       setHint(err.hint ?? '');
       toast(err.message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function translateAgain() {
+    if (!row) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ translation: Translation }>(`/content/${def.id}/${row.id}/translate`);
+      toast(r.translation.said || 'Translated again.', r.translation.results.some((x) => !x.ok) ? 'warn' : 'ok');
+      onDone();
+    } catch (e) {
+      toast((e as Error).message, 'bad');
     } finally {
       setBusy(false);
     }
@@ -403,6 +423,10 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
           <>
             {row && canPublish && (
               <Btn variant="danger" icon="trash" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete</Btn>
+            )}
+            {/* Daily Manna: make its translations again from scratch (replaces corrections made to them by hand). */}
+            {row && def.id === 'manna' && !row.translatedFrom && (
+              <Btn icon="globe" disabled={busy} onClick={translateAgain}>Translate again</Btn>
             )}
             <span className="sp" style={{ flex: 1 }} />
             <Btn onClick={onClose}>Cancel</Btn>
@@ -502,6 +526,7 @@ function TypeScreen({ def, lookup }: { def: TypeDef; source?: string; lookup: (i
         <>
           <b>{String(r[def.title] || '(untitled)')}</b>
           {r.from ? <> <Chip tone="plain">From {String(r.fromLabel)}</Chip></> : null}
+          {r.translatedFrom ? <> <Chip tone="info" icon="globe">Translated</Chip></> : null}
         </>
       ),
       sortBy: (r) => String(r[def.title] ?? ''),

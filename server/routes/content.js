@@ -10,6 +10,7 @@
    front of members. Everything done here is written to the audit log. */
 
 import express from 'express';
+import { syncMannaTranslations, deleteMannaTranslations, newestMannaId, mannaRow, describeTranslation } from '../manna-translate.js';
 import { storePicture, PictureError, MAX_BYTES } from '../pictures.js';
 import { can, roleById } from '../db.js';
 import { writeAudit } from '../store.js';
@@ -97,6 +98,19 @@ export default function mountContent(app, { requireSession, requirePerm }) {
       }
     });
 
+  /* Bring a saved Daily Manna entry's translations in step. Returns what to tell the office; never throws. */
+  async function translateSaved(idOf, before) {
+    try {
+      const id = await idOf();
+      if (!id) return null;
+      const t = await syncMannaTranslations(id, { before });
+      return { ...t, said: describeTranslation(t) };
+    } catch (err) {
+      console.error(`[manna] translation after save: ${err.message}`);
+      return { ready: true, results: [], said: `The translation could not be made: ${err.message}` };
+    }
+  }
+
   app.get('/api/content/:type', ...edit, guarded(async (req, res) => {
     if (!typeById(req.params.type)) throw new ContentError(404, 'No such kind of content.');
     res.json(await listContent(req.params.type, { q: String(req.query.q || ''), state: String(req.query.state || '') }));
@@ -107,14 +121,18 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     if (!def) throw new ContentError(404, 'No such kind of content.');
     const r = await createContent(def.id, req.body, { canPublish: can(req.session.role, 'content.publish') });
     await audit(req, `Created ${def.singular}`, def, r.title || '');
+    /* Daily Manna: its translations (server/manna-translate.js). A failure there never undoes the save. */
+    if (def.id === 'manna') r.translation = await translateSaved(() => newestMannaId(r.title), null);
     res.status(201).json(r);
   }));
 
   app.patch('/api/content/:type/:id', ...edit, guarded(async (req, res) => {
     const def = typeById(req.params.type);
     if (!def) throw new ContentError(404, 'No such kind of content.');
+    const before = def.id === 'manna' ? await mannaRow(req.params.id).catch(() => null) : null;
     const r = await updateContent(def.id, req.params.id, req.body, { canPublish: can(req.session.role, 'content.publish') });
     await audit(req, `Changed ${def.singular}`, def, r.title || req.params.id);
+    if (def.id === 'manna') r.translation = await translateSaved(() => req.params.id, before);
     res.json(r);
   }));
 
@@ -122,8 +140,11 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     const def = typeById(req.params.type);
     if (!def) throw new ContentError(404, 'No such kind of content.');
     const on = req.body?.on !== false;
+    const before = def.id === 'manna' ? await mannaRow(req.params.id).catch(() => null) : null;
     const r = await publishContent(def.id, req.params.id, on, { canPublish: true });
     await audit(req, on ? `Published ${def.singular}` : `Took down ${def.singular}`, def, r.title || req.params.id);
+    /* The translations go live and come down with the original; no text changed, so nothing is translated. */
+    if (def.id === 'manna') r.translation = await translateSaved(() => req.params.id, before);
     res.json({ ...r, on });
   }));
 
@@ -132,6 +153,15 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     if (!def) throw new ContentError(404, 'No such kind of content.');
     const r = await deleteContent(def.id, req.params.id);
     await audit(req, `Deleted ${def.singular}`, def, r.title || req.params.id);
+    if (def.id === 'manna') r.translationsRemoved = await deleteMannaTranslations(req.params.id).catch(() => 0);
     res.json(r);
+  }));
+
+  /* Translate a Daily Manna entry again, every text afresh (it replaces corrections made to the translation by hand). */
+  app.post('/api/content/manna/:id/translate', ...edit, guarded(async (req, res) => {
+    const t = await syncMannaTranslations(req.params.id, { before: null });
+    if (!t.ready) throw new ContentError(409, 'Translation is not set up on this console yet.');
+    await audit(req, 'Translated devotional again', typeById('manna'), req.params.id);
+    res.json({ ok: true, translation: { ...t, said: describeTranslation(t) } });
   }));
 }

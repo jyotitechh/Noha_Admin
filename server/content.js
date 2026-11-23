@@ -55,6 +55,8 @@ function shape(def, row, id) {
   const out = { id };
   for (const f of def.fields) out[f.key] = readValue(f, row[columnFor(f.key)] ?? row[f.key]);
   out.live = def.publish ? !!out[def.publish] : true;
+  /* A machine translation of another entry (server/manna-translate.js): which one. */
+  if (String(row.translatingParentId ?? '').trim()) out.translatedFrom = String(row.translatingParentId);
   out.createdAt = row.CREATEDTIME ? stampIst(row.CREATEDTIME) : row.createdAt ?? null;
   out.updatedAt = row.MODIFIEDTIME ? stampIst(row.MODIFIEDTIME) : row.updatedAt ?? null;
   return out;
@@ -205,7 +207,7 @@ let tableIdsAt = 0;
 
 /** The id of a type's table, by name. Cached for ten minutes: a metadata call,
     not a Data Store fetch, but there is no reason to repeat it. */
-async function tableIdFor(def) {
+export async function tableIdFor(def) {
   if (!tableIds || Date.now() - tableIdsAt > 10 * 60_000) {
     tableIds = new Map((await io.listTables()).map((t) => [t.name, t.id]));
     tableIdsAt = Date.now();

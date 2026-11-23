@@ -436,19 +436,21 @@ await fakeReady('dailyMana');
 const made = await call('POST', '/content/manna', { ...MANNA, contentLanguage: '1', published: false }, ET);
 check('the devotional is saved', made.status === 201 && made.body?.ok === true, `${made.status} ${made.text.slice(0, 140)}`);
 
+/* The originals only: saving also makes the Kannada copy (see the Kannada section further down). */
+const originals = async () => ((await call('GET', '/content/manna', null, ET)).body?.rows || []).filter((r) => !r.translatedFrom);
 const mannaList = await call('GET', '/content/manna', null, ET);
-const entry = mannaList.body?.rows?.[0];
-check('...and listed, as a draft', mannaList.body?.rows?.length === 1 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
+const entry = mannaList.body?.rows?.find((r) => !r.translatedFrom);
+check('...and listed, as a draft', mannaList.body?.rows?.length === 2 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
 check('...with a string id', typeof entry?.id === 'string' && entry.id.length >= 15);
 check('...and the language and date came back as sent', entry?.contentLanguage === '1' && entry?.publishDate === '2026-10-20');
 
 const pub = await call('POST', `/content/manna/${entry.id}/publish`, { on: true }, ET);
 check('publishing it works', pub.status === 200 && pub.body?.on === true, pub.text.slice(0, 100));
-check('...and it is live', (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 1);
+check('...and it is live (with its Kannada copy)', (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 2);
 
 const patched = await call('PATCH', `/content/manna/${entry.id}`, { title: 'Walking by faith, revised' }, ET);
-check('a change is saved', patched.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows[0].title === 'Walking by faith, revised');
-check('...and the rest of it is kept', (await call('GET', '/content/manna', null, ET)).body.rows[0].prayer === 'A short prayer.');
+check('a change is saved', patched.status === 200 && (await originals())[0]?.title === 'Walking by faith, revised');
+check('...and the rest of it is kept', (await originals())[0]?.prayer === 'A short prayer.');
 check('a change that empties a required field is refused', (await call('PATCH', `/content/manna/${entry.id}`, { title: '' }, ET)).status === 400);
 
 const down = await call('POST', `/content/manna/${entry.id}/publish`, { on: false }, ET);
@@ -457,7 +459,7 @@ check('taking it down works', down.status === 200 && (await call('GET', '/conten
 check('a kind with no publish step says so (400)', (await call('POST', '/content/dictionaryCategories/1/publish', { on: true }, ET)).status === 400);
 
 const del = await call('DELETE', `/content/manna/${entry.id}`, null, ET);
-check('deleting works', del.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows.length === 0);
+check('deleting works, its Kannada copy too', del.status === 200 && (await call('GET', '/content/manna', null, ET)).body.rows.length === 0);
 check('finance cannot delete (403)', (await call('DELETE', `/content/manna/${entry.id}`, null, FT)).status === 403);
 
 /* ---------- it is all recorded ---------- */
@@ -802,6 +804,87 @@ section('A child\'s registration: filled in by the parent, decided like any othe
   check('...and changing it needs the permission to see contact details (finance gets 403)', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '+91 98111 22335' } }, FT)).status === 403);
   /* Back as it was, for the sections that sign in with it. */
   check('...and it can be put back', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: was } }, BT)).status === 200);
+}
+
+/* ================================================================== */
+section('Children: the list, the notice at 15 (FOR-CONSOLE-CHILD-AGE-15.md), and a child on the parent\'s number');
+
+{
+  const fakeInsert = (table, rows) =>
+    fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table, rows }) }).then((r) => r.json());
+  /* A second child of Anand's, 17, registered and approved. */
+  const TEEN = '27145000000997001', TEEN_REG = '27145000000997002', TEEN_KID = '27145000000997003';
+  await fakeInsert('kids', [{ ROWID: TEEN_KID, firstName: 'Kiran', lastName: 'Rao', gender: 1, dateOfBirth: '2009-02-10 00:00:00', archived: false }]);
+  await fakeInsert('kidsConnect', [{ ROWID: '27145000000997004', memberId: ANAND_ID, kidId: TEEN_KID, relationship: 2, isArchived: false }]);
+  await fakeInsert('members', [{ ROWID: TEEN, firstName: 'Kiran', lastName: 'Rao', isKid: true, userId: '', gender: 1, dateOfBirth: '2009-02-10', countryCode: '+91', mobileNumber1: '9000000779' }]);
+  await fakeInsert('appRegistrations', [{ ROWID: TEEN_REG, memberRowId: TEEN, status: 'approved', submittedAt: '2026-11-10 05:00:00', parentMemberId: ANAND_ID, kidRowId: TEEN_KID }]);
+  await call('POST', '/refresh', null, BT);
+
+  const list = await call('GET', '/children', null, BT);
+  const kiran = list.body?.rows?.find((c) => c.kidId === TEEN_KID);
+  check('the Children list has every child, with age, parents and registration', list.status === 200 && kiran?.age === 17 && kiran?.fifteen === true && kiran?.state === 'approved' && kiran?.parents?.[0]?.rowId === ANAND_ID, JSON.stringify(kiran));
+  check('...parents\' numbers masked', /•/.test(kiran?.parents?.[0]?.mobile || ''));
+  check('...a younger child is under 15', list.body.rows.some((c) => c.fifteen === false));
+  check('...and not told yet', kiran?.noticeAt === null && kiran?.noticesRead === true);
+  check('only 15 or more, when asked', (await call('GET', '/children?age=15', null, BT)).body?.rows?.every((c) => c.fifteen));
+  check('the list needs permission to see members (401 without a sign-in)', (await call('GET', '/children')).status === 401);
+
+  const sent = await call('POST', '/children/age-notices', null, BT);
+  check('Send notices now asks the Noah API, which tells the families who are due', sent.status === 200 && sent.body?.sent >= 1 && sent.body?.checked >= 1, sent.text.slice(0, 120));
+  const again = await call('POST', '/children/age-notices', null, BT);
+  check('...asking again tells nobody twice', again.status === 200 && again.body?.sent === 0);
+  const after = (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.kidId === TEEN_KID);
+  check('...and the list shows when the family was told', !!after?.noticeAt, JSON.stringify(after));
+  check('sending needs permission to edit members (finance gets 403)', (await call('POST', '/children/age-notices', null, FT)).status === 403);
+
+  /* Under 15 the child's row carries the parent's number (here Kiran's is the parent's too). */
+  const before = (await call('GET', `/people/${ANAND_ID}/contact`, null, BT)).body?.values?.mobile;
+  const moved = await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: '+91 98222 33445' } }, BT);
+  check('a parent\'s number can change although their child carries it too', moved.status === 200, `${moved.status} ${moved.text.slice(0, 160)}`);
+  check('...and the child moves to the new number with them', (await call('GET', `/people/${TEEN}/contact`, null, BT)).body?.mobile === '+919822233445');
+  check('...the number still finds the parent, not the child', (await call('GET', '/people/' + ANAND_ID, null, BT)).status === 200);
+  check('...and it can be put back', (await call('PATCH', `/people/${ANAND_ID}`, { changes: { mobile: before } }, BT)).status === 200);
+}
+
+/* ================================================================== */
+section('Daily Manna in Kannada: translated by Zoho on save, kept in step, deleted with the original');
+
+{
+  const DAY = { title: 'Grace upon grace', publishDate: '2026-11-25', contentLanguage: '1', published: false,
+    content: '<p>Hello <strong>world</strong></p><ul><li><p>One thing</p></li></ul>', prayer: '<p>Amen.</p>' };
+  const made = await call('POST', '/content/manna', DAY, BT);
+  check('saving a devotional makes its Kannada copy', made.status === 201 && made.body?.translation?.results?.[0]?.ok === true && made.body.translation.results[0].action === 'created' && /Kannada translation added/.test(made.body.translation.said || ''), `${made.status} ${made.text.slice(0, 200)}`);
+  const rows = (await call('GET', '/content/manna', null, BT)).body?.rows || [];
+  const en = rows.find((r) => r.title === 'Grace upon grace');
+  const kn = rows.find((r) => r.translatedFrom === en?.id);
+  check('...as its own entry for the same day, in Kannada (7), pointing at the original', !!kn && kn.contentLanguage === '7' && kn.publishDate === '2026-11-25' && kn.title === '[kn] Grace upon grace', JSON.stringify(kn).slice(0, 200));
+  check('...the message translated block by block, the blocks kept', kn?.content === '<p>[kn] Hello world</p><ul><li><p>[kn] One thing</p></li></ul>' && kn?.prayer === '<p>[kn] Amen.</p>', kn?.content);
+  check('...and it is a draft, like the original', kn?.published === false && kn?.live === false);
+
+  await call('PATCH', `/content/manna/${kn.id}`, { title: 'ಕೃಪೆಯ ಮೇಲೆ ಕೃಪೆ' }, BT);
+  const edited = await call('PATCH', `/content/manna/${en.id}`, { prayer: '<p>Thank you, Lord.</p>' }, BT);
+  const kn2 = (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id);
+  check('changing the English prayer translates only the prayer again', edited.status === 200 && edited.body?.translation?.results?.[0]?.translated?.join() === 'prayer' && kn2?.prayer === '<p>[kn] Thank you, Lord.</p>', JSON.stringify(edited.body?.translation));
+  check('...so a correction made to the Kannada title by hand is kept', kn2?.title === 'ಕೃಪೆಯ ಮೇಲೆ ಕೃಪೆ', kn2?.title);
+  check('editing the Kannada copy itself translates nothing', (await call('PATCH', `/content/manna/${kn.id}`, { prayer: '<p>ಆಮೆನ್</p>' }, BT)).body?.translation?.results?.length === 0);
+
+  const live = await call('POST', `/content/manna/${en.id}/publish`, { on: true }, BT);
+  check('publishing the original publishes its translation too', live.status === 200 && (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id)?.live === true);
+
+  const failed = await call('PATCH', `/content/manna/${en.id}`, { content: '<p>FAIL-TRANSLATE this</p>' }, BT);
+  check('a translation that fails does not stop the original being saved', failed.status === 200 && failed.body?.translation?.results?.[0]?.ok === false && /Kannada translation failed/.test(failed.body.translation.said || ''), JSON.stringify(failed.body?.translation));
+  check('...and the original has the new text', (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === en.id)?.content === '<p>FAIL-TRANSLATE this</p>');
+
+  await call('PATCH', `/content/manna/${en.id}`, { content: '<p>Hello again</p>' }, BT);
+  const fresh = await call('POST', `/content/manna/${en.id}/translate`, null, BT);
+  const kn3 = (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id);
+  check('Translate again translates every text afresh', fresh.status === 200 && kn3?.title === '[kn] Grace upon grace' && kn3?.content === '<p>[kn] Hello again</p>', JSON.stringify(kn3).slice(0, 200));
+  check('...and needs permission to edit content (finance gets 403)', (await call('POST', `/content/manna/${en.id}/translate`, null, FT)).status === 403);
+
+  const gone = await call('DELETE', `/content/manna/${en.id}`, null, BT);
+  check('deleting the original deletes its translation', gone.status === 200 && gone.body?.translationsRemoved === 1 && !(await call('GET', '/content/manna', null, BT)).body.rows.some((r) => r.id === kn.id), gone.text.slice(0, 120));
+  const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
+  check('every call asked for Kannada from English', calls.length > 0 && calls.every((c) => c.target === 'kn' && c.source === 'en'));
 }
 
 /* ================================================================== */
