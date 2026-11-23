@@ -44,26 +44,38 @@ Noah app ──▶ Noah API (Catalyst functions) ──▶ the row in the member
 4. Paste this as the body and **Save**:
 
 ```deluge
+string standalone.translate_text(string text, string target, string source)
+{
 // Zoho Translate (Zia) for the Karuna Sadan console.
-//   in : text, target (two-letter code, e.g. kn, hi, ta), source (two-letter code; blank = en)
-//   out: { "translated": "..." }   or, on a problem, { "error": "..." }
+// in : text, target (two-letter code, e.g. kn, hi, ta), source (two-letter code; blank = en)
+// out: {"translated":"..."} or, on a problem, {"error":"..."}
+out = Map();
 srcLang = "en";
-if(source != null && source.trim() != "")
+if(!isEmpty(source))
 {
 	srcLang = source.trim();
 }
-if(text == null || text.trim() == "" || target == null || target.trim() == "")
+if(isEmpty(text) || isEmpty(target))
 {
-	return {"error":"text and target are required"};
+	out.put("error","text and target are required");
+	return out.toString();
 }
-response = zoho.ai.translate(text, target.trim(), srcLang);
+response = zoho.ai.translate(text,target.trim(),srcLang);
 translated = response.get("translation").get(0).get("translate");
-if(translated == null || translated == "")
+if(isEmpty(translated))
 {
-	return {"error":"Zoho Translate returned nothing","detail":response.toString()};
+	out.put("error","Zoho Translate returned nothing");
+	out.put("detail",response.toString());
+	return out.toString();
 }
-return {"translated":translated};
+out.put("translated",translated);
+return out.toString();
+}
 ```
+
+Notes on this version (it is the one running in the office's CRM):
+- A standalone CRM function returns a **string**, so the map is returned with `.toString()`. The console reads it back.
+- Deluge in CRM refused a long `a == null || a.trim() == ""` condition, so it uses `isEmpty()` instead.
 
 5. Check it with **Save & Execute** using text `Peace, be still.`, target `kn` and source `en`. The answer should hold
    Kannada script.
@@ -100,7 +112,7 @@ If you host the function somewhere other than Zoho CRM:
 
 | Setting | When |
 |---|---|
-| `ZOHO_TRANSLATE_FORMAT=json` | The function takes the JSON `{text, target, source}` as its body, as Zoho Creator, Zoho Flow or another gateway do. The default, `crm`, sends it the way Zoho CRM wants: one form field named `arguments`. |
+| `ZOHO_TRANSLATE_FORMAT=json` | The function takes the JSON `{text, target, source}` as its body, as Zoho Creator, Zoho Flow or another gateway do. The default, `crm`, sends it the way Zoho CRM wants: one value named `arguments` **in the address**. Zoho CRM ignores arguments sent in the body; the function then "returned null". |
 | `ZOHO_TRANSLATE_HEADERS={"Authorization":"..."}` | The function wants a token in a header instead of a key in the URL. This is a secret: put it in `.env.local` only. |
 
 ## 4. Choose the languages
@@ -132,8 +144,9 @@ Until someone first saves a choice there, the console translates into the langua
 - **Switching a language off** stops new translations into it. The ones already made stay until their original is deleted.
 - **Formatting:** each paragraph, heading or list item is translated as a whole, so a sentence is never cut in two. Bold
   and italic inside a paragraph are not carried over.
-- **Long text:** a paragraph of more than 3,000 characters goes to Zoho in pieces, cut at the ends of sentences. Zoho does
-  not publish its own limit.
+- **Long text:** a paragraph of more than 1,500 characters (3,000 with `ZOHO_TRANSLATE_FORMAT=json`) goes to Zoho in
+  pieces, cut at the ends of sentences. Zoho CRM takes the text in the address, which must stay a safe length, and Zoho
+  does not publish its own limit.
 - **Speed:** three languages are translated at once.
 - **Cost:** every call counts against the hosting Zoho app's function and external-call limits. A paragraph is one call per
   language.

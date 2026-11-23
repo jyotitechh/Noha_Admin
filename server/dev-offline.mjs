@@ -242,7 +242,8 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/_fake/translate') {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    const args = JSON.parse(new URLSearchParams(Buffer.concat(chunks).toString()).get('arguments') || '{}');
+    /* Zoho CRM reads `arguments` from the address only: a body is ignored there, so the stand-in ignores it too. */
+    const args = JSON.parse(new URL(req.url, 'http://x').searchParams.get('arguments') || '{}');
     (globalThis.translateCalls ||= []).push(args);
     const output = String(args.text).includes('FAIL-TRANSLATE')
       ? { error: 'Zoho Translate returned nothing' }

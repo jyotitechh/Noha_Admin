@@ -72,30 +72,34 @@ function readAnswer(body) {
   throw new TranslateError('Zoho answered, but with no translated text in it.');
 }
 
-/* How the function is called. Zoho CRM's REST functions take their arguments as one JSON value named `arguments` (the
-   default, "crm"); a function in Zoho Creator or Flow, or behind another gateway, takes the JSON itself ("json").
-     ZOHO_TRANSLATE_FORMAT    crm | json. Default crm.
-     ZOHO_TRANSLATE_HEADERS   extra headers as JSON, e.g. {"Authorization":"Zoho-oauthtoken ..."} when the function wants a
-                              token rather than the zapikey in its address. A secret: .env.local only. */
+/* How the function is called.
+     crm (the default): Zoho CRM's REST functions read their arguments from the address, as one JSON value named
+       `arguments`. Sent in the body they never arrive (checked against the office's CRM, 23 Nov 2026: the function then
+       "returned null"), so they go in the address and the body is empty.
+     json: a function in Zoho Creator or Flow, or behind another gateway, that takes { text, target, source } as its body.
+   ZOHO_TRANSLATE_FORMAT    crm | json. Default crm.
+   ZOHO_TRANSLATE_HEADERS   extra headers as JSON, e.g. {"Authorization":"Zoho-oauthtoken ..."} when the function wants a
+                            token rather than the zapikey in its address. A secret: .env.local only. */
+const jsonFormat = () => String(process.env.ZOHO_TRANSLATE_FORMAT || 'crm').toLowerCase() === 'json';
 function requestFor(payload) {
   let extra = {};
   try { extra = JSON.parse(process.env.ZOHO_TRANSLATE_HEADERS || '{}') || {}; } catch { extra = {}; }
-  if (String(process.env.ZOHO_TRANSLATE_FORMAT || 'crm').toLowerCase() === 'json') {
-    return { headers: { 'content-type': 'application/json', ...extra }, body: JSON.stringify(payload) };
+  if (jsonFormat()) {
+    return { url: URL_(), headers: { 'content-type': 'application/json', ...extra }, body: JSON.stringify(payload) };
   }
-  return {
-    headers: { 'content-type': 'application/x-www-form-urlencoded', ...extra },
-    body: new URLSearchParams({ arguments: JSON.stringify(payload) }).toString(),
-  };
+  const url = URL_() + (URL_().includes('?') ? '&' : '?') + 'arguments=' + encodeURIComponent(JSON.stringify(payload));
+  return { url, headers: extra };
 }
 
 /* Zoho does not say how long a text its translate task takes, so no call sends more than this; a longer paragraph is cut at
-   the ends of sentences (or, for one endless sentence, at a space) and the pieces put back together. */
-export const MAX_CHARS = 3000;
-const SENTENCE = /[^.!?।॥؟]+[.!?।॥؟]*["')]’”]*s*/g;
+   the ends of sentences (or, for one endless sentence, at a space) and the pieces put back together. In the address
+   (Zoho CRM) the text is encoded, so the pieces are kept shorter there: the address stays well under the 8,000 characters
+   web servers accept. */
+export const maxChars = () => (jsonFormat() ? 3000 : 1500);
+const SENTENCE = /[^.!?।॥؟]+[.!?।॥؟]*["')\]’”]*\s*/g;
 
 /** One paragraph in pieces of at most `limit` characters, cut at sentence ends where possible. */
-export function splitForLimit(text, limit = MAX_CHARS) {
+export function splitForLimit(text, limit = maxChars()) {
   if (text.length <= limit) return [text];
   const chunks = [];
   let cur = '';
@@ -120,7 +124,8 @@ async function callZoho(text, target, source) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30_000);
   try {
-    const res = await fetch(URL_(), { method: 'POST', ...requestFor({ text, target, source }), signal: ctrl.signal });
+    const { url, ...req } = requestFor({ text, target, source });
+    const res = await fetch(url, { method: 'POST', ...req, signal: ctrl.signal });
     const raw = await res.text();
     if (!res.ok) {
       let msg = raw.slice(0, 200);
