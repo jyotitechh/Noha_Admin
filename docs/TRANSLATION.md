@@ -1,8 +1,9 @@
 # Translating the app's content with Zoho Translate
 
 The office writes content once, in English. The console translates it with **Zoho Translate** (Zia, the Deluge task
-`zoho.ai.translate`) into every language switched on in **Content > Languages**. It stores each translation in the
-app's own Catalyst table, so the Noah app shows every member the content in the language they use.
+`zoho.ai.translate`) into every language the Noah app offers: **Hindi, Marathi, Telugu, Malayalam, Tamil and Kannada**.
+Nothing is chosen: every entry saved is translated into all six, in the background, a minute or two after Save. Each
+translation is stored in the app's own Catalyst table, so the Noah app shows every member the content in their language.
 
 | What | Translated |
 |---|---|
@@ -105,8 +106,7 @@ Then deploy the API as usual:
 npm run deploy:api -- --email-codes
 ```
 
-The deploy carries the setting to AppSail. Until the URL is set, content saves exactly as before and
-**Content > Languages** says translation is not connected.
+The deploy carries the setting to AppSail. Until the URL is set, content saves exactly as before, untranslated.
 
 If you host the function somewhere other than Zoho CRM:
 
@@ -115,23 +115,21 @@ If you host the function somewhere other than Zoho CRM:
 | `ZOHO_TRANSLATE_FORMAT=json` | The function takes the JSON `{text, target, source}` as its body, as Zoho Creator, Zoho Flow or another gateway do. The default, `crm`, sends it the way Zoho CRM wants: one value named `arguments` **in the address**. Zoho CRM ignores arguments sent in the body; the function then "returned null". |
 | `ZOHO_TRANSLATE_HEADERS={"Authorization":"..."}` | The function wants a token in a header instead of a key in the URL. This is a secret: put it in `.env.local` only. |
 
-## 4. Choose the languages
+## 4. Older content
 
-In **Content > Languages**:
+Nobody has to press anything. A few minutes after the console starts, and every 6 hours after, it translates every entry
+that is not yet in all six languages (content written before translation existed, or whose translation failed). Entries
+already translated are skipped, so a run with nothing to do costs no Zoho calls.
 
-1. Switch on each language you want: Hindi, Marathi, Telugu, Malayalam, Tamil or Kannada.
-2. Press **Translate everything** to translate what was written before. It runs in the background, and the screen shows
-   how far it has got.
-
-From then on, every save translates into every language that is on.
-
-Until someone first saves a choice there, the console translates into the languages in `CONTENT_TRANSLATE_TO`
-(default `kn`). The choice is kept in Catalyst, in the app's `globalSettings` table, as the row with keyCol
-`console.translateTo` and value `kn,hi`. It therefore survives deploys.
+| Setting | What it does |
+|---|---|
+| `CONTENT_TRANSLATE_BACKFILL=off` | Stops the filling in (it is on in production, off elsewhere). |
+| `CONTENT_TRANSLATE_BACKFILL_HOURS=12` | How often it looks, 1 to 24 hours. Default 6. |
 
 ## How it behaves
 
-- **Saving a new entry** makes one translation per language. Each is a draft or live, like the original.
+- **Saving a new entry** answers at once ("Translating into Hindi, Marathi, …"). The six translations are made in the
+  background; the list shows **Translating…** on the entry until they are done. Each is a draft or live, like the original.
 - **Editing the original** translates again only the texts that changed. A correction the office made to a translation by
   hand therefore survives an edit to another text.
 - **Publishing or taking down the original** does the same to its translations.
@@ -139,15 +137,16 @@ Until someone first saves a choice there, the console translates into the langua
 - **Deleting the original** deletes its translations too.
 - **Correcting a translation:** open it in the list (it carries the **Translated** label), edit it and save. Editing a
   translation never sends it back to Zoho.
-- **A failure never stops the original being saved.** The message says what went wrong, and the app shows that member the
-  original.
-- **Switching a language off** stops new translations into it. The ones already made stay until their original is deleted.
+- **A failure never stops the original being saved.** The list shows **Not translated: Tamil** (for example) on the entry;
+  **Translate again** retries, and the next filling in (section 4) does it by itself. Until then the app shows that member
+  the original.
 - **Formatting:** each paragraph, heading or list item is translated as a whole, so a sentence is never cut in two. Bold
   and italic inside a paragraph are not carried over.
 - **Long text:** a paragraph of more than 1,500 characters (3,000 with `ZOHO_TRANSLATE_FORMAT=json`) goes to Zoho in
   pieces, cut at the ends of sentences. Zoho CRM takes the text in the address, which must stay a safe length, and Zoho
   does not publish its own limit.
-- **Speed:** three languages are translated at once.
+- **Speed:** the six languages are translated at once; a Zoho call takes a few seconds, so a long Daily Manna takes a
+  minute or two. An edit, publish or delete made meanwhile waits its turn, so it is never overtaken.
 - **Cost:** every call counts against the hosting Zoho app's function and external-call limits. A paragraph is one call per
   language.
 
@@ -166,6 +165,6 @@ read each language before it goes live, and correct the translation in the conso
      [Zoho's list](https://www.zoho.com/deluge/help/ai-tasks/translate.html);
    - its name.
 2. Give the app the same number (see FOR-FLUTTER-TRANSLATIONS.md).
-3. Deploy, then switch the language on in **Content > Languages**.
+3. Deploy. New content is translated into it from then on, and older content is filled in by itself (section 4).
 
 Urdu or Arabic would also need the app to show them right to left.

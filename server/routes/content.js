@@ -11,7 +11,7 @@
 
 import express from 'express';
 import {
-  syncTranslations, deleteTranslations, newestEntryId, entryRow, describeTranslation, isTranslated,
+  translateLater, deleteTranslationsLater, newestEntryId, entryRow, isTranslated, isTranslating, translationFailures,
 } from '../content-translate.js';
 import { storePicture, PictureError, MAX_BYTES } from '../pictures.js';
 import { can, roleById } from '../db.js';
@@ -100,22 +100,31 @@ export default function mountContent(app, { requireSession, requirePerm }) {
       }
     });
 
-  /* Bring a saved entry's translations in step (server/content-translate.js). Returns what to tell the office; never throws. */
-  async function translateSaved(typeId, idOf, before) {
+  /* Queue a saved entry's translations (server/content-translate.js): they are made in the background, so the save does not
+     wait a minute for Zoho. Returns what to tell the office; never throws. */
+  async function translateSaved(typeId, idOf, before, { quiet = false } = {}) {
     try {
       const id = await idOf();
       if (!id) return null;
-      const t = await syncTranslations(typeId, id, { before });
-      return { ...t, said: describeTranslation(t) };
+      return await translateLater(typeId, id, { before, quiet });
     } catch (err) {
       console.error(`[translation] after save: ${err.message}`);
-      return { ready: true, results: [], said: `The translation could not be made: ${err.message}` };
+      return { ready: true, results: [], said: `The translation could not be started: ${err.message}` };
     }
   }
 
   app.get('/api/content/:type', ...edit, guarded(async (req, res) => {
     if (!typeById(req.params.type)) throw new ContentError(404, 'No such kind of content.');
-    res.json(await listContent(req.params.type, { q: String(req.query.q || ''), state: String(req.query.state || '') }));
+    const out = await listContent(req.params.type, { q: String(req.query.q || ''), state: String(req.query.state || '') });
+    /* Where each original's translations stand: being made now, or which languages failed last time. */
+    if (isTranslated(req.params.type) && Array.isArray(out?.rows)) {
+      out.rows = out.rows.map((r) => (r.translatedFrom ? r : {
+        ...r,
+        ...(isTranslating(req.params.type, r.id) ? { translating: true } : {}),
+        ...(translationFailures(req.params.type, r.id).length ? { translationFailed: translationFailures(req.params.type, r.id) } : {}),
+      }));
+    }
+    res.json(out);
   }));
 
   app.post('/api/content/:type', ...edit, guarded(async (req, res) => {
@@ -146,7 +155,7 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     const r = await publishContent(def.id, req.params.id, on, { canPublish: true });
     await audit(req, on ? `Published ${def.singular}` : `Took down ${def.singular}`, def, r.title || req.params.id);
     /* The translations go live and come down with the original; no text changed, so nothing is translated. */
-    if (isTranslated(def.id)) r.translation = await translateSaved(def.id, () => req.params.id, before);
+    if (isTranslated(def.id)) r.translation = await translateSaved(def.id, () => req.params.id, before, { quiet: true });
     res.json({ ...r, on });
   }));
 
@@ -155,7 +164,7 @@ export default function mountContent(app, { requireSession, requirePerm }) {
     if (!def) throw new ContentError(404, 'No such kind of content.');
     const r = await deleteContent(def.id, req.params.id);
     await audit(req, `Deleted ${def.singular}`, def, r.title || req.params.id);
-    if (isTranslated(def.id)) r.translationsRemoved = await deleteTranslations(def.id, req.params.id).catch(() => 0);
+    if (isTranslated(def.id)) deleteTranslationsLater(def.id, req.params.id);
     res.json(r);
   }));
 
@@ -163,9 +172,9 @@ export default function mountContent(app, { requireSession, requirePerm }) {
   app.post('/api/content/:type/:id/translate', ...edit, guarded(async (req, res) => {
     const def = typeById(req.params.type);
     if (!def || !isTranslated(def.id)) throw new ContentError(404, 'This kind of content is not translated.');
-    const t = await syncTranslations(def.id, req.params.id, { before: null });
-    if (!t.ready) throw new ContentError(409, 'Translation is not set up on this console yet.');
+    const t = await translateLater(def.id, req.params.id, { before: null });
+    if (!t) throw new ContentError(409, 'Translation is not set up on this console yet.');
     await audit(req, `Translated ${def.singular} again`, def, req.params.id);
-    res.json({ ok: true, translation: { ...t, said: describeTranslation(t) } });
+    res.json({ ok: true, translation: t });
   }));
 }

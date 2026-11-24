@@ -2,8 +2,8 @@
 
 From the console team, 23 November 2026.
 
-The office writes content once, in English. The console translates it with **Zoho Translate** into the languages the
-office switches on (Content > Languages) and stores every translation in the **same Catalyst table** as the original.
+The office writes content once, in English. The console translates it with **Zoho Translate** into every language the app
+offers (Hindi, Marathi, Telugu, Malayalam, Tamil and Kannada) and stores every translation in the **same Catalyst table** as the original.
 The app does not translate anything. It asks for the member's language and shows what comes back.
 
 Translated today:
@@ -125,9 +125,10 @@ GET /content/languages   ->  { "source": { "code": "en", "number": 1, "name": "E
 
 ## 6. How to check it
 
-1. In the console, open **Content > Languages**, switch on **Kannada** and press **Translate everything**.
-2. In **Content > Daily Manna**, add an entry for today in English, published. After saving, the message says the
-   Kannada translation was added. The list shows it with the label **Translated**.
+1. In the console, in **Content > Daily Manna**, add an entry for today in English, published. After saving, the message
+   says it is being translated into the six languages; a minute or two later the list shows the six translations with
+   the label **Translated**.
+2. Older content is translated by the console by itself, a few minutes after it starts.
 3. Set a test phone to Kannada, or pick Kannada in the app's settings, and open the Daily Manna. Today's message must show
    in Kannada.
 4. Switch the phone to Tamil while Tamil is off. The same entry must show in English, with `fallback: true`.

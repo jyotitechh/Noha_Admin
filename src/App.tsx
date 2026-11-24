@@ -41,7 +41,6 @@ const SCREENS: Record<string, ComponentType> = {
   'content/confessions': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Confessions }))),
   'content/dictionary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Dictionary }))),
   'content/commentary': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Commentary }))),
-  'content/languages': lazy(() => import('@/modules/content/Languages')),
   'content/announce': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Announce }))),
   'media/noahgram-posts': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.Noahgram }))),
   'media/noahtube': lazy(() => import('@/modules/content/screens').then((m) => ({ default: m.NoahTube }))),

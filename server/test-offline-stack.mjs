@@ -436,17 +436,23 @@ await fakeReady('dailyMana');
 const made = await call('POST', '/content/manna', { ...MANNA, contentLanguage: '1', published: false }, ET);
 check('the devotional is saved', made.status === 201 && made.body?.ok === true, `${made.status} ${made.text.slice(0, 140)}`);
 
-/* The originals only: saving also makes the Kannada copy (see the Kannada section further down). */
+/* The originals only: saving also makes a copy in each language, in the background (see the section further down). */
 const originals = async () => ((await call('GET', '/content/manna', null, ET)).body?.rows || []).filter((r) => !r.translatedFrom);
 const mannaList = await call('GET', '/content/manna', null, ET);
 const entry = mannaList.body?.rows?.find((r) => !r.translatedFrom);
-check('...and listed, as a draft', mannaList.body?.rows?.length === 2 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
+check('...and listed, as a draft', mannaList.body?.rows?.filter((r) => !r.translatedFrom).length === 1 && entry.title === 'Walking by faith' && entry.live === false, mannaList.text.slice(0, 200));
 check('...with a string id', typeof entry?.id === 'string' && entry.id.length >= 15);
 check('...and the language and date came back as sent', entry?.contentLanguage === '1' && entry?.publishDate === '2026-10-20');
 
 const pub = await call('POST', `/content/manna/${entry.id}/publish`, { on: true }, ET);
 check('publishing it works', pub.status === 200 && pub.body?.on === true, pub.text.slice(0, 100));
-check('...and it is live (with its Kannada copy)', (await call('GET', '/content/manna?state=live', null, ET)).body.rows.length === 2);
+let liveRows = [];
+for (let i = 0; i < 80; i += 1) {
+  liveRows = (await call('GET', '/content/manna?state=live', null, ET)).body?.rows || [];
+  if (liveRows.length === 7 && !liveRows.some((r) => r.translating)) break;
+  await new Promise((r) => setTimeout(r, 100));
+}
+check('...and it is live (with its six translations)', liveRows.length === 7, `${liveRows.length} live`);
 
 const patched = await call('PATCH', `/content/manna/${entry.id}`, { title: 'Walking by faith, revised' }, ET);
 check('a change is saved', patched.status === 200 && (await originals())[0]?.title === 'Walking by faith, revised');
@@ -908,44 +914,73 @@ section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHIL
 }
 
 /* ================================================================== */
-section('Daily Manna in Kannada: translated by Zoho on save, kept in step, deleted with the original');
+section('Daily Manna in every language: translated in the background on save, kept in step, deleted with the original');
+
+/* Translations are made after the save answers: wait until the list says none is being made. */
+const settled = async (type) => {
+  let rows = [];
+  for (let i = 0; i < 80; i += 1) {
+    rows = (await call('GET', `/content/${type}`, null, BT)).body?.rows || [];
+    if (!rows.some((r) => r.translating)) return rows;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return rows;
+};
+const SIX = { hi: '2', mr: '3', te: '4', ml: '5', ta: '6', kn: '7' };
 
 {
   const DAY = { title: 'Grace upon grace', publishDate: '2026-11-25', contentLanguage: '1', published: false,
     content: '<p>Hello <strong>world</strong></p><ul><li><p>One thing</p></li></ul>', prayer: '<p>Amen.</p>' };
   const made = await call('POST', '/content/manna', DAY, BT);
-  check('saving a devotional makes its Kannada copy', made.status === 201 && made.body?.translation?.results?.[0]?.ok === true && made.body.translation.results[0].action === 'created' && /Kannada translation added/.test(made.body.translation.said || ''), `${made.status} ${made.text.slice(0, 200)}`);
-  const rows = (await call('GET', '/content/manna', null, BT)).body?.rows || [];
+  check('saving a devotional answers at once, saying it is being translated into the six languages', made.status === 201 && made.body?.translation?.queued === true
+    && /Translating into Hindi, Marathi, Telugu, Malayalam, Tamil and Kannada/.test(made.body.translation.said || ''), `${made.status} ${made.text.slice(0, 200)}`);
+  const rows = await settled('manna');
   const en = rows.find((r) => r.title === 'Grace upon grace');
-  const kn = rows.find((r) => r.translatedFrom === en?.id);
-  check('...as its own entry for the same day, in Kannada (7), pointing at the original', !!kn && kn.contentLanguage === '7' && kn.publishDate === '2026-11-25' && kn.title === '[kn] Grace upon grace', JSON.stringify(kn).slice(0, 200));
+  const copies = rows.filter((r) => r.translatedFrom === en?.id);
+  check('...then each language has its own entry, pointing at the original', copies.length === 6
+    && Object.entries(SIX).every(([iso, code]) => copies.some((c) => c.contentLanguage === code && c.title === `[${iso}] Grace upon grace` && c.publishDate === '2026-11-25')), JSON.stringify(copies.map((c) => [c.contentLanguage, c.title])));
+  const kn = copies.find((r) => r.contentLanguage === '7');
   check('...the message translated block by block, the blocks kept', kn?.content === '<p>[kn] Hello world</p><ul><li><p>[kn] One thing</p></li></ul>' && kn?.prayer === '<p>[kn] Amen.</p>', kn?.content);
-  check('...and it is a draft, like the original', kn?.published === false && kn?.live === false);
+  check('...and they are drafts, like the original', copies.every((c) => c.published === false && c.live === false));
+  check('...and the original is no longer marked as translating', en && !en.translating && !en.translationFailed);
 
   await call('PATCH', `/content/manna/${kn.id}`, { title: 'ಕೃಪೆಯ ಮೇಲೆ ಕೃಪೆ' }, BT);
+  await settled('manna');
   const edited = await call('PATCH', `/content/manna/${en.id}`, { prayer: '<p>Thank you, Lord.</p>' }, BT);
-  const kn2 = (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id);
-  check('changing the English prayer translates only the prayer again', edited.status === 200 && edited.body?.translation?.results?.[0]?.translated?.join() === 'prayer' && kn2?.prayer === '<p>[kn] Thank you, Lord.</p>', JSON.stringify(edited.body?.translation));
+  const kn2 = (await settled('manna')).find((r) => r.id === kn.id);
+  check('changing the English prayer translates the prayer again', edited.status === 200 && kn2?.prayer === '<p>[kn] Thank you, Lord.</p>', JSON.stringify(kn2).slice(0, 200));
   check('...so a correction made to the Kannada title by hand is kept', kn2?.title === 'ಕೃಪೆಯ ಮೇಲೆ ಕೃಪೆ', kn2?.title);
-  check('editing the Kannada copy itself translates nothing', (await call('PATCH', `/content/manna/${kn.id}`, { prayer: '<p>ಆಮೆನ್</p>' }, BT)).body?.translation?.results?.length === 0);
+  await call('PATCH', `/content/manna/${kn.id}`, { prayer: '<p>ಆಮೆನ್</p>' }, BT);
+  check('editing the Kannada copy itself translates nothing', (await settled('manna')).find((r) => r.id === kn.id)?.prayer === '<p>ಆಮೆನ್</p>');
 
   const live = await call('POST', `/content/manna/${en.id}/publish`, { on: true }, BT);
-  check('publishing the original publishes its translation too', live.status === 200 && (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id)?.live === true);
+  check('publishing the original publishes every translation too', live.status === 200 && (await settled('manna')).filter((r) => r.translatedFrom === en.id).every((r) => r.live === true));
 
   const failed = await call('PATCH', `/content/manna/${en.id}`, { content: '<p>FAIL-TRANSLATE this</p>' }, BT);
-  check('a translation that fails does not stop the original being saved', failed.status === 200 && failed.body?.translation?.results?.[0]?.ok === false && /Kannada translation failed/.test(failed.body.translation.said || ''), JSON.stringify(failed.body?.translation));
-  check('...and the original has the new text', (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === en.id)?.content === '<p>FAIL-TRANSLATE this</p>');
+  const afterFail = await settled('manna');
+  check('a translation that fails does not stop the original being saved', failed.status === 200 && afterFail.find((r) => r.id === en.id)?.content === '<p>FAIL-TRANSLATE this</p>');
+  check('...and the list says which languages were not translated', afterFail.find((r) => r.id === en.id)?.translationFailed?.includes('Kannada'), JSON.stringify(afterFail.find((r) => r.id === en.id)?.translationFailed));
 
   await call('PATCH', `/content/manna/${en.id}`, { content: '<p>Hello again</p>' }, BT);
+  await settled('manna');
   const fresh = await call('POST', `/content/manna/${en.id}/translate`, null, BT);
-  const kn3 = (await call('GET', '/content/manna', null, BT)).body.rows.find((r) => r.id === kn.id);
+  const after = await settled('manna');
+  const kn3 = after.find((r) => r.id === kn.id);
   check('Translate again translates every text afresh', fresh.status === 200 && kn3?.title === '[kn] Grace upon grace' && kn3?.content === '<p>[kn] Hello again</p>', JSON.stringify(kn3).slice(0, 200));
+  check('...and the failure mark is gone', !after.find((r) => r.id === en.id)?.translationFailed);
   check('...and needs permission to edit content (finance gets 403)', (await call('POST', `/content/manna/${en.id}/translate`, null, FT)).status === 403);
 
   const gone = await call('DELETE', `/content/manna/${en.id}`, null, BT);
-  check('deleting the original deletes its translation', gone.status === 200 && gone.body?.translationsRemoved === 1 && !(await call('GET', '/content/manna', null, BT)).body.rows.some((r) => r.id === kn.id), gone.text.slice(0, 120));
+  let left = [];
+  for (let i = 0; i < 40; i += 1) {
+    left = ((await call('GET', '/content/manna', null, BT)).body?.rows || []).filter((r) => r.translatedFrom === en.id);
+    if (!left.length) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  check('deleting the original deletes its translations', gone.status === 200 && left.length === 0, `${gone.status} ${left.length} left`);
   const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
-  check('every call asked for Kannada from English', calls.length > 0 && calls.every((c) => c.target === 'kn' && c.source === 'en'));
+  check('every call asked for one of the six languages, from English', calls.length > 0 && calls.every((c) => c.source === 'en' && c.target in SIX)
+    && Object.keys(SIX).every((iso) => calls.some((c) => c.target === iso)));
 }
 
 /* ================================================================== */
@@ -1630,65 +1665,60 @@ section('Which sites may call the API from a browser');
 }
 
 /* ================================================================== */
-section('Languages: the office chooses them, every kind of content is translated, and older content is filled in');
+section('Languages: every kind of content is translated into the six languages, and older content is filled in');
 
 {
   /* The tables the fake keeps refusing until a test says they exist. */
   for (const table of ['dailyConfessions', 'dreamDictionary', 'bibleCommentary', 'dailyPrayers']) await fetch(CONTROL + '/_fake/ready', { method: 'POST', body: JSON.stringify({ table }) });
 
   const first = await call('GET', '/translation', null, BT);
-  check('the Languages screen lists the six languages, Kannada on until the office chooses', first.status === 200 && first.body?.ready === true
-    && first.body.languages.length === 6 && first.body.on.join() === 'kn' && first.body.chosen === false
-    && first.body.languages.find((l) => l.iso === 'kn')?.on === true && first.body.languages.find((l) => l.iso === 'kn')?.native === 'ಕನ್ನಡ', JSON.stringify(first.body).slice(0, 200));
+  check('every language the app offers is on, with nothing to choose', first.status === 200 && first.body?.ready === true
+    && first.body.on.join() === 'hi,mr,te,ml,ta,kn' && first.body.languages.every((l) => l.on), JSON.stringify(first.body).slice(0, 200));
   check('...with what can be translated, kind by kind', first.body?.coverage?.map((c) => c.id).join() === 'manna,prayers,confessions,dictionary,bibleCommentary', first.body?.coverage?.map((c) => c.id).join());
   check('...and finance may not see it (403)', (await call('GET', '/translation', null, FT)).status === 403);
   check('the content types say which kinds are translated', (await call('GET', '/content/types', null, BT)).body?.types?.filter((t) => t.translated).map((t) => t.id).join() === 'manna,prayers,confessions,dictionary,bibleCommentary');
-
-  check('a language the app does not know is refused', (await call('PUT', '/translation/languages', { languages: ['kn', 'xx'] }, BT)).status === 400);
-  check('...and finance may not change them (403)', (await call('PUT', '/translation/languages', { languages: ['kn'] }, FT)).status === 403);
-  const set = await call('PUT', '/translation/languages', { languages: ['kn', 'ta'] }, BT);
-  check('switching Tamil on keeps Kannada, in the list order', set.status === 200 && set.body?.on?.join() === 'ta,kn' && set.body.added.join() === 'ta', set.text.slice(0, 160));
-  const after = (await call('GET', '/translation', null, BT)).body;
-  check('...and the choice is kept (the office chose it)', after?.chosen === true && after.on.join() === 'ta,kn');
+  check('the languages can no longer be switched (the office does not choose)', (await call('PUT', '/translation/languages', { languages: ['kn'] }, BT)).status === 404);
 
   const prayer = await call('POST', '/content/prayers', { title: 'Morning light', publishedDate: '2026-11-26', contentLanguage: '1', published: true, content: '<p>Lord, lead me today.</p>' }, BT);
-  check('a new prayer is translated into both languages', prayer.status === 201 && prayer.body?.translation?.results?.length === 2
-    && prayer.body.translation.results.every((r) => r.ok && r.action === 'created') && /Tamil and Kannada translations added/.test(prayer.body.translation.said || ''), `${prayer.status} ${prayer.text.slice(0, 200)}`);
-  const prows = (await call('GET', '/content/prayers', null, BT)).body?.rows || [];
+  check('a new prayer is queued for translation', prayer.status === 201 && prayer.body?.translation?.queued === true, `${prayer.status} ${prayer.text.slice(0, 200)}`);
+  const prows = await settled('prayers');
   const pen = prows.find((r) => r.title === 'Morning light');
   const pta = prows.find((r) => r.translatedFrom === pen?.id && r.contentLanguage === '6');
   check('...the Tamil one is its own entry (6), live like the original, with the prayer translated', pta?.title === '[ta] Morning light' && pta.content === '<p>[ta] Lord, lead me today.</p>' && pta.live === true, String(JSON.stringify(pta)).slice(0, 200));
+  check('...and so is every other language', prows.filter((r) => r.translatedFrom === pen?.id).length === 6);
 
   const dict = await call('POST', '/content/dictionary', { title: 'River', contentLanguage: '1', published: false, content: '<p>Life and the Spirit.</p>' }, BT);
-  check('a dream dictionary entry is translated too', dict.status === 201 && dict.body?.translation?.results?.every((r) => r.ok), `${dict.status} ${dict.text.slice(0, 200)}`);
+  const drows = await settled('dictionary');
+  check('a dream dictionary entry is translated too', dict.status === 201 && drows.filter((r) => r.translatedFrom === drows.find((x) => x.title === 'River')?.id).length === 6, `${dict.status} ${dict.text.slice(0, 200)}`);
   const comm = await call('POST', '/content/bibleCommentary', { title: 'Psalm 23', bibleBookId: '19', startChapter: '23', contentLanguage: '1', isPublished: false, content: '<p>The Lord is my shepherd.</p>' }, BT);
-  check('...and a Bible commentary', comm.status === 201 && comm.body?.translation?.results?.length === 2 && comm.body.translation.results.every((r) => r.ok), `${comm.status} ${JSON.stringify(comm.body?.translation || comm.body).slice(0, 200)}`);
+  const crows = await settled('bibleCommentary');
+  check('...and a Bible commentary', comm.status === 201 && crows.filter((r) => r.translatedFrom === crows.find((x) => x.title === 'Psalm 23')?.id).length === 6, `${comm.status} ${comm.text.slice(0, 200)}`);
 
+  /* Something written before translation existed: put straight into the table, so the console never translated it. */
+  await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'dailyPrayers', rows: [
+    { ROWID: '27145000000994001', title: 'Written long ago', content: '<p>Old words.</p>', contentLanguage: 1, published: false, isArchived: false },
+  ] }) });
+  await call('POST', '/refresh', null, BT);
   const before = (await call('GET', '/translation', null, BT)).body;
-  const behind = before.coverage.reduce((n, c) => n + (c.originals - (c.done.ta ?? 0)), 0);
-  check('older content is counted as not yet in Tamil', behind > 0, JSON.stringify(before.coverage));
-  check('only someone who may publish can translate everything (finance 403)', (await call('POST', '/translation/run', {}, FT)).status === 403);
+  const behind = before.coverage.reduce((n, c) => n + (c.originals - (c.done.hi ?? 0)), 0);
+  check('older content is counted as not yet in every language', behind > 0, JSON.stringify(before.coverage));
+  check('only someone who may publish can fill it in (finance 403)', (await call('POST', '/translation/run', {}, FT)).status === 403);
   const run = await call('POST', '/translation/run', {}, BT);
-  check('Translate everything starts in the background with the entries still to do', run.status === 202 && run.body?.job?.running === true && run.body.job.total > 0, run.text.slice(0, 200));
-  check('...and a second press while it runs is refused', (await call('POST', '/translation/run', {}, BT)).status === 409);
+  check('filling in starts in the background with the entries still to do', run.status === 202 && run.body?.job?.running === true && run.body.job.total > 0, run.text.slice(0, 200));
+  check('...and a second start while it runs is refused', (await call('POST', '/translation/run', {}, BT)).status === 409);
   let job;
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < 200; i += 1) {
     job = (await call('GET', '/translation', null, BT)).body;
     if (!job?.job?.running) break;
     await new Promise((r) => setTimeout(r, 100));
   }
   check('...it finishes with every entry done and none failed', job?.job?.running === false && job.job.done === job.job.total && job.job.failed === 0 && job.job.made > 0, JSON.stringify(job?.job).slice(0, 300));
-  check('...and now everything is in both languages', job?.coverage?.every((c) => c.error || (c.done.ta === c.originals && c.done.kn === c.originals)), JSON.stringify(job?.coverage));
+  check('...and now everything is in all six languages', job?.coverage?.every((c) => c.error || ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => c.done[l] === c.originals)), JSON.stringify(job?.coverage));
   const again = await call('POST', '/translation/run', {}, BT);
   check('...so running it again has nothing to do', again.status === 202 && again.body?.job?.total === 0, again.text.slice(0, 120));
 
-  const off = await call('PUT', '/translation/languages', { languages: ['kn'] }, BT);
-  const conf = await call('POST', '/content/confessions', { title: 'I am held', publishDate: '2026-11-27', contentLanguage: '1', published: false, content: '<p>I am held by God.</p>' }, BT);
-  check('switching Tamil off: a new confession is translated into Kannada only', off.status === 200 && conf.body?.translation?.results?.map((r) => r.lang).join() === 'kn', `${conf.status} ${conf.text.slice(0, 200)}`);
-  check('...and the Tamil translations already made stay', ((await call('GET', '/content/prayers', null, BT)).body?.rows || []).some((r) => r.id === pta?.id));
-
   const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
-  check('Zoho was asked for Tamil and Kannada, never English', calls.some((c) => c.target === 'ta') && calls.every((c) => c.target !== 'en'));
+  check('Zoho was asked for the six languages, never English', ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => calls.some((c) => c.target === l)) && calls.every((c) => c.target !== 'en'));
 }
 
 /* ================================================================== */

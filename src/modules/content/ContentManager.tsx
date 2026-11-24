@@ -48,13 +48,13 @@ interface TypeDef {
   dateKey: string | null; publish: string | null; intro: string; fields: FieldDef[];
   /** Whether the Noah app can read this kind today; absent when it has not been checked. */
   inApp?: boolean;
-  /** Saved entries are translated into the languages switched on in Content > Languages. */
+  /** Saved entries are translated into every language the app offers, in the background. */
   translated?: boolean;
   /** Fields shown as extra columns in the list. */
   columns?: string[];
 }
 
-interface Row { id: string; live: boolean; [k: string]: unknown }
+interface Row { id: string; live: boolean; translating?: boolean; translationFailed?: string[]; [k: string]: unknown }
 /* What the server did to an entry's translations after a save (server/content-translate.js). */
 interface Translation { ready: boolean; said?: string; results: { lang: string; name: string; ok: boolean; action?: string; error?: string }[] }
 
@@ -389,7 +389,7 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
     setBusy(true);
     try {
       const r = await api.post<{ translation: Translation }>(`/content/${def.id}/${row.id}/translate`);
-      toast(r.translation.said || 'Translated again.', r.translation.results.some((x) => !x.ok) ? 'warn' : 'ok');
+      toast(r.translation.said || 'Translating again.', 'ok');
       onDone();
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -508,6 +508,14 @@ function TypeScreen({ def, lookup }: { def: TypeDef; source?: string; lookup: (i
   const q = useQuery(() => api.get<List>(`/content/${def.id}`), [def.id, bump]);
   const all = q.data?.rows ?? [];
 
+  /* While translations are being made in the background, look again every few seconds so the list shows when they are done. */
+  const translating = all.some((r) => r.translating);
+  useEffect(() => {
+    if (!translating) return;
+    const t = setInterval(() => q.reload(), 5000);
+    return () => clearInterval(t);
+  }, [translating, q.reload]);
+
   const rows = useMemo(() => {
     const n = search.toLowerCase().trim();
     return all.filter((r) => {
@@ -529,6 +537,8 @@ function TypeScreen({ def, lookup }: { def: TypeDef; source?: string; lookup: (i
           <b>{String(r[def.title] || '(untitled)')}</b>
           {r.from ? <> <Chip tone="plain">From {String(r.fromLabel)}</Chip></> : null}
           {r.translatedFrom ? <> <Chip tone="info" icon="globe">Translated</Chip></> : null}
+          {r.translating ? <> <Chip tone="warn" icon="globe">Translating…</Chip></> : null}
+          {!r.translating && r.translationFailed?.length ? <> <Chip tone="bad" icon="alert">Not translated: {r.translationFailed.join(', ')}</Chip></> : null}
         </>
       ),
       sortBy: (r) => String(r[def.title] ?? ''),

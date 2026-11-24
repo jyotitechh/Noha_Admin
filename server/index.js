@@ -41,6 +41,7 @@ import mountRegister from './routes/register.js';
 import mountChildren from './routes/children.js';
 import mountTranslation from './routes/translation.js';
 import { startChildNoticeSweep } from './children.js';
+import { startTranslationBackfill } from './content-translate.js';
 import { registerLinks, applyRegisterFilters, filtersFrom, forgetRegisterLinks } from './member-register.js';
 import { forgetChosenLanguages } from './translation-settings.js';
 import { startEventSweep } from './event-announce.js';
@@ -595,4 +596,5 @@ app.listen(PORT, () => {
 `);
   startEventSweep();
   startChildNoticeSweep();
+  startTranslationBackfill();
 });

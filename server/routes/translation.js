@@ -1,16 +1,15 @@
-/* Content > Languages: which languages the app's content is translated into, how far along each is, and filling in the rest.
+/* How far the app's content is translated, and filling in the rest.
 
-     GET  /api/translation               content.edit     the languages, which are on, how much is translated, the run in progress
-     PUT  /api/translation/languages     content.publish  { languages: ['kn', 'hi'] }: switch languages on or off
-     POST /api/translation/run           content.publish  { languages?: [...] }: translate everything not yet translated
+     GET  /api/translation               content.edit     the languages, how much is translated, the run in progress
+     POST /api/translation/run           content.publish  translate everything not yet translated
 
-   Switching a language on makes every entry saved from then on translated into it; "Translate everything" does the ones
-   written before. Switching one off stops new translations; the ones made stay in the app until their original is deleted. */
+   Every entry is translated into every language the app offers when it is saved (server/content-translate.js), and the
+   console fills in older content by itself; these calls are for checking on it. */
 
 import { roleById } from '../db.js';
 import { writeAudit } from '../store.js';
 import { TRANSLATION_LANGUAGES, translationReady, parseLanguages, TranslateError } from '../translate.js';
-import { chosenLanguages, saveChosenLanguages } from '../translation-settings.js';
+import { chosenLanguages } from '../translation-settings.js';
 import { translationCoverage, translationJob, startTranslateAll, TRANSLATED } from '../content-translate.js';
 import { typeById } from '../content-types.js';
 import { onCatalyst } from '../content.js';
@@ -37,22 +36,6 @@ export default function mountTranslation(app, { requireSession, requirePerm }) {
       coverage: await translationCoverage(TRANSLATION_LANGUAGES.filter((l) => l.iso !== 'en').map((l) => l.iso)),
       job: translationJob(),
     });
-  });
-
-  app.put('/api/translation/languages', ...manage, async (req, res) => {
-    const asked = Array.isArray(req.body?.languages) ? req.body.languages : null;
-    if (!asked) return res.status(400).json({ error: 'Send the languages to translate into, as a list.' });
-    const unknown = asked.filter((x) => !parseLanguages([x]).length);
-    if (unknown.length) return res.status(400).json({ error: `Not a language content can be translated into: ${unknown.join(', ')}.` });
-    const was = (await chosenLanguages()).languages;
-    let saved;
-    try {
-      saved = await saveChosenLanguages(asked);
-    } catch (err) {
-      return res.status(502).json({ error: `Catalyst refused the change: ${err.message}` });
-    }
-    await audit(req, 'Changed the languages content is translated into', { from: was, to: saved });
-    res.json({ ok: true, on: saved, added: saved.filter((l) => !was.includes(l)) });
   });
 
   app.post('/api/translation/run', ...manage, async (req, res) => {

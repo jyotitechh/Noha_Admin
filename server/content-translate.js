@@ -1,7 +1,7 @@
 /* The app's written content in other languages, translated by Zoho (server/translate.js).
 
    Which content: the Daily Manna, Daily Prayers, Confessions, the dream dictionary and the Bible commentary (TRANSLATED below:
-   the tables that have `translatingParentId`). Into which languages: the ones the office switched on in Content > Languages
+   the tables that have `translatingParentId`). Into which languages: every one the Noah app offers besides English
    (server/translation-settings.js).
 
    A translation is its own row in the same table: the same day, category, picture, partners-only and published state as the
@@ -12,8 +12,8 @@
    When the office saves an entry, each language gets its row: made the first time, brought in step after that. Only the texts
    that changed in the original are translated again, so a correction the office made to a translation by hand survives an edit
    to another text. "Translate again" translates everything afresh. Publishing or taking down the original does the same to its
-   translations; deleting it deletes them. Switching a language on later, "Translate everything" fills in what was written
-   before. A translation that fails never stops the original from being saved. */
+   translations; deleting it deletes them. The work runs in the background (translateLater), and older content is filled in by
+   itself (startTranslationBackfill). A translation that fails never stops the original from being saved. */
 
 import { io } from './noah-schema.js';
 import { onCatalyst, tableIdFor } from './content.js';
@@ -101,8 +101,8 @@ export async function syncTranslations(typeId, id, { before = null, languages = 
   const meta = {};
   for (const [k, v] of Object.entries(parent)) if (!NOT_COPIED.has(k) && !textKeys.has(k) && v !== null && v !== undefined) meta[k] = v;
 
-  /* Three languages at a time: each is its own row, and Zoho answers each call in a second or two. */
-  const results = await inTurns(targets.filter((l) => l !== source), 3, async (lang) => {
+  /* Every language at once: each is its own row, and a Zoho call takes a few seconds, so one after another would be slow. */
+  const results = await inTurns(targets.filter((l) => l !== source), 6, async (lang) => {
     const name = LANGUAGE_NAMES[lang];
     const mine = all.find((r) => same(r.translatingParentId, parent.ROWID) && Number(r.contentLanguage) === LANGUAGE_CODES[lang]);
     /* What to translate: everything for a new translation or a fresh start, else only what changed in the original. */
@@ -130,6 +130,67 @@ export async function syncTranslations(typeId, id, { before = null, languages = 
     }
   });
   return { ready: true, results };
+}
+
+/* ---------- in the background, one entry at a time ----------
+
+   Translating a Daily Manna into six languages is dozens of Zoho calls, a minute or more, so a save does not wait for it: the
+   work is queued and the office is told it is under way. Each entry has its own queue, so an edit, a publish or a delete made
+   while its translation is still running waits its turn and is never overtaken (a delete therefore also removes the
+   translations a running job was still making). The list shows "Translating" until the queue is empty. */
+
+const chains = new Map();
+const lastResult = new Map();
+const keyOf = (typeId, id) => `${typeId}:${id}`;
+
+/** Run `work` after whatever is already queued for this entry. Resolves with what `work` returns. */
+function enqueue(key, work) {
+  const next = (chains.get(key) || Promise.resolve()).catch(() => {}).then(work);
+  chains.set(key, next);
+  next.catch(() => {}).finally(() => { if (chains.get(key) === next) chains.delete(key); });
+  return next;
+}
+
+/** Whether an entry's translations are being made or brought in step just now. */
+export const isTranslating = (typeId, id) => chains.has(keyOf(typeId, id));
+
+/** The languages the last run for this entry could not translate, or []. */
+export const translationFailures = (typeId, id) => lastResult.get(keyOf(typeId, id))?.failed ?? [];
+
+/** Wait for everything queued for this entry (tests, and anything that must see the finished translations). */
+export const translationSettled = (typeId, id) => (chains.get(keyOf(typeId, id)) || Promise.resolve()).catch(() => {});
+
+/**
+ * Queue an entry's translations (see syncTranslations for `before`). Returns at once with what to tell the office.
+ * `quiet` for a publish or take-down, where no text changed and there is nothing worth saying.
+ */
+export async function translateLater(typeId, id, { before = null, quiet = false } = {}) {
+  if (!id || !onCatalyst() || !isTranslated(typeId)) return null;
+  const { languages } = await chosenLanguages();
+  if (!translationReady() || !languages.length) return null;
+  const key = keyOf(typeId, id);
+  enqueue(key, async () => {
+    try {
+      const t = await syncTranslations(typeId, id, { before });
+      if (t.results.length) lastResult.set(key, { at: new Date().toISOString(), failed: t.results.filter((r) => !r.ok).map((r) => r.name) });
+      const said = describeTranslation(t);
+      if (said) console.log(`[translation] ${typeById(typeId).singular} ${id}: ${said}`);
+    } catch (err) {
+      lastResult.set(key, { at: new Date().toISOString(), failed: languages.map((l) => LANGUAGE_NAMES[l]) });
+      console.error(`[translation] ${typeById(typeId).singular} ${id} could not be translated: ${err.message}`);
+    }
+  });
+  const names = languages.map((l) => LANGUAGE_NAMES[l]);
+  const and = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+  return { ready: true, queued: true, results: [], said: quiet ? '' : `Translating into ${and}. It takes a minute or two.` };
+}
+
+/** Queue removing an entry's translations, after anything still running for it. */
+export function deleteTranslationsLater(typeId, id) {
+  if (!onCatalyst() || !isTranslated(typeId)) return;
+  const key = keyOf(typeId, id);
+  lastResult.delete(key);
+  enqueue(key, () => deleteTranslations(typeId, id).catch((err) => console.error(`[translation] removing the translations of ${id} failed: ${err.message}`)));
 }
 
 /** Remove an entry's translations, when the entry itself is deleted. Returns how many went. */
@@ -222,7 +283,8 @@ export async function startTranslateAll(languages, { actor = '' } = {}) {
       if (job !== mine) return;
       mine.current = `${typeById(w.typeId).label}: ${w.title}`;
       try {
-        const t = await syncTranslations(w.typeId, w.id, { languages: w.missing });
+        /* In the entry's own queue, so a save made meanwhile never runs alongside it. */
+        const t = await enqueue(keyOf(w.typeId, w.id), () => syncTranslations(w.typeId, w.id, { languages: w.missing }));
         mine.made += t.results.filter((r) => r.ok && r.action === 'created').length;
         for (const r of t.results.filter((x) => !x.ok)) {
           mine.failed += 1;
@@ -245,4 +307,41 @@ export async function startTranslateAll(languages, { actor = '' } = {}) {
     console.log(`[translation] translate everything finished: ${mine.made} made, ${mine.failed} failed, of ${mine.total} entries`);
   })();
   return translationJob();
+}
+
+/* ---------- filling in older content by itself ----------
+
+   Content written before a language was translated into (or whose translation failed) is filled in without anyone pressing a
+   button: a few minutes after the server starts, and every few hours after, everything not yet in every language is
+   translated, one entry at a time. Entries already translated are skipped, so a run with nothing to do costs only the table
+   reads.
+
+     CONTENT_TRANSLATE_BACKFILL         on | off. On by default in production, off otherwise.
+     CONTENT_TRANSLATE_BACKFILL_HOURS   how often, 1 to 24. Default 6. */
+
+const backfillWanted = () => {
+  const v = String(process.env.CONTENT_TRANSLATE_BACKFILL || '').toLowerCase();
+  if (v === 'off') return false;
+  return v === 'on' || process.env.NODE_ENV === 'production';
+};
+
+async function backfill() {
+  if (!onCatalyst() || !translationReady() || job?.running) return;
+  try {
+    const started = await startTranslateAll((await chosenLanguages()).languages, { actor: 'Console (by itself)' });
+    if (started.total) console.log(`[translation] filling in ${started.total} entries not yet in every language`);
+  } catch (err) {
+    if (!(err instanceof TranslateError && err.code === 'busy')) console.error(`[translation] filling in could not start: ${err.message}`);
+  }
+}
+
+/** Start the timer. Safe to call once at start-up. Returns the timer, or null when it is not wanted. */
+export function startTranslationBackfill() {
+  if (!backfillWanted() || !translationReady()) return null;
+  const hours = Math.min(24, Math.max(1, Number(process.env.CONTENT_TRANSLATE_BACKFILL_HOURS) || 6));
+  const timer = setInterval(backfill, hours * 3_600_000);
+  timer.unref?.();
+  setTimeout(backfill, 120_000).unref?.();
+  console.log(`  Content not yet in every language is translated every ${hours} hours.`);
+  return timer;
 }

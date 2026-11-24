@@ -57,7 +57,7 @@ Object.assign(process.env, {
   PLACES_BASE_URL: `http://127.0.0.1:${STRATUS_PORT}`,
   /* Daily Manna translation: this stand-in (it prefixes the language), never Zoho. OFFLINE_NO_TRANSLATE shows it unset. */
   ZOHO_TRANSLATE_URL: process.env.OFFLINE_NO_TRANSLATE ? '' : `http://127.0.0.1:${NOAH_PORT}/_fake/translate?auth_type=apikey&zapikey=offline`,
-  CONTENT_TRANSLATE_TO: 'kn',
+  CONTENT_TRANSLATE_BACKFILL: 'off',
 });
 delete process.env.ADMIN_PASSPHRASE;
 /* The deployed console signs in by email only; these suites sign in by number, so the harness
@@ -75,6 +75,7 @@ globalThis.fetch = (url, init) => {
 };
 
 const { S, T, tables, reset, seed, makeReady, setOutage, removeTable, restoreTable, contentTableId } = await import('./fake-catalyst.mjs');
+const CONTENT_TABLES = new Set((await import('./content-types.js')).TYPES.map((t) => t.table));
 const { forgetTables } = await import('./content.js');
 const { forgetEventRows } = await import('./events.js');
 reset(seed());
@@ -265,7 +266,9 @@ http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const { table, rows } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
-    const list = (tables[`tbl:${table}`] ||= []);
+    /* A content table (dailyPrayers, dailyMana...) is kept under its id; the rest under their name. */
+    const cid = CONTENT_TABLES.has(table) ? contentTableId(table) : null;
+    const list = cid ? (tables[cid] ||= []) : (tables[`tbl:${table}`] ||= []);
     for (const r of rows || []) list.push({ CREATEDTIME: '2026-11-10 10:00:00', ...r, ROWID: String(r.ROWID) });
     S.clearCache();
     forgetEventRows();
