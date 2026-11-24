@@ -103,6 +103,10 @@ export function validate(def, body, { partial = false } = {}) {
     const present = Object.prototype.hasOwnProperty.call(body, f.key);
     if (partial && !present) continue;
     let v = body[f.key];
+    if (f.hidden && (v === undefined || v === null || v === '')) {
+      if (partial) continue;
+      v = f.default;
+    }
 
     /* A field that applies only in some cases (the donation amounts, when a donation is asked for)
        is not checked, and is cleared, when the case does not hold. */

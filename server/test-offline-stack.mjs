@@ -978,6 +978,22 @@ const SIX = { hi: '2', mr: '3', te: '4', ml: '5', ta: '6', kn: '7' };
     await new Promise((r) => setTimeout(r, 100));
   }
   check('deleting the original deletes its translations', gone.status === 200 && left.length === 0, `${gone.status} ${left.length} left`);
+  /* The form no longer asks the language of content that is translated: it is English, and the copies keep their own. */
+  const types = (await call('GET', '/content/types', null, BT)).body?.types || [];
+  check('the translated kinds do not ask for a language', ['manna', 'prayers', 'confessions', 'dictionary', 'bibleCommentary']
+    .every((id) => types.find((t) => t.id === id)?.fields?.find((f) => f.key === 'contentLanguage')?.hidden === true)
+    && types.find((t) => t.id === 'tubeVideos')?.fields?.some((f) => f.key === 'contentLanguage' && !f.hidden), 'hidden flags');
+  const { contentLanguage: _skip, ...noLang } = DAY;
+  const plain = await call('POST', '/content/manna', { ...noLang, title: 'Still waters' }, BT);
+  const plainRows = await settled('manna');
+  const still = plainRows.find((r) => r.title === 'Still waters' && !r.translatedFrom);
+  check('...an entry saved without one is stored as English, and translated', plain.status === 201 && still?.contentLanguage === '1'
+    && plainRows.filter((r) => r.translatedFrom === still?.id).length === 6, `${plain.status} ${JSON.stringify(still).slice(0, 120)}`);
+  const hiCopy = plainRows.find((r) => r.translatedFrom === still?.id && r.contentLanguage === '2');
+  await call('PATCH', `/content/manna/${hiCopy.id}`, { title: 'शांत जल' }, BT);
+  check('...and editing a translation keeps its language', (await settled('manna')).find((r) => r.id === hiCopy.id)?.contentLanguage === '2');
+  await call('DELETE', `/content/manna/${still.id}`, null, BT);
+
   const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
   check('every call asked for one of the six languages, from English', calls.length > 0 && calls.every((c) => c.source === 'en' && c.target in SIX)
     && Object.keys(SIX).every((iso) => calls.some((c) => c.target === iso)));

@@ -42,6 +42,10 @@ export const SECTIONS = {
 
 const lang = (key = 'contentLanguage', label = 'Language') =>
   ({ key, label, kind: 'select', options: LANGUAGES, store: 'int', hint: 'The language this is written in.' });
+/* Content the console translates (server/content-translate.js) is always written in English and translated into the app's
+   other languages by itself, so the form does not ask: the field is hidden and a new entry is stored as English (1). A
+   translation keeps its own language when it is edited. */
+const english = () => ({ ...lang(), hidden: true, default: '1' });
 /* A picture: drop one from the computer, or paste a link. Stored as a web link either way (kind url);
    `picture` is what makes the form draw the drop box (server/pictures.js stores the upload). */
 const image = (key = 'image', label = 'Picture', hint = 'Drop a picture here from your computer, or paste a link to one.') =>
@@ -102,7 +106,7 @@ export const TYPES = [
       { key: 'publishDate', label: 'Published date', kind: 'date', required: true, hint: 'The day it appears in the app.' },
       writer,
       { key: 'categoryIds', label: 'Category', kind: 'ref', ref: 'mannaCategories', catalyst: 'text' },
-      lang(),
+      english(),
       membersOnly,
       { key: 'showOnObituary', label: 'Show on obituary notices', kind: 'toggle', store: 'int' },
       rich('content', 'Message', { required: true }),
@@ -135,7 +139,7 @@ export const TYPES = [
     fields: [
       { key: 'title', label: 'Title', kind: 'text', required: true },
       when('publishedDate', 'Publish on'),
-      lang(),
+      english(),
       membersOnly,
       rich('content', 'Prayer', { required: true }),
       ...embeds(),
@@ -151,7 +155,7 @@ export const TYPES = [
       { key: 'title', label: 'Title', kind: 'text', required: true },
       { key: 'publishDate', label: 'Published date', kind: 'date' },
       writer,
-      lang(),
+      english(),
       membersOnly,
       rich('content', 'Confession', { required: true }),
       ...embeds(),
@@ -166,7 +170,7 @@ export const TYPES = [
     fields: [
       { key: 'title', label: 'Word or symbol', kind: 'text', required: true },
       { key: 'categoryId', label: 'Category', kind: 'ref', ref: 'dictionaryCategories' },
-      lang(),
+      english(),
       membersOnly,
       { key: 'isFeatured', label: 'Feature it', kind: 'toggle', hint: 'Shown at the top of the dictionary.' },
       when('publishedDate', 'Publish on'),
@@ -371,7 +375,7 @@ export const TYPES = [
       { key: 'startChapter', label: 'Chapter', kind: 'chapter', bookKey: 'bibleBookId', store: 'int', required: true, hint: 'Only the chapters of the book above are offered.' },
       rich('content', 'Commentary', { required: true }),
       { key: 'memberId', label: 'Writer', kind: 'member', hint: 'The member credited as the author.' },
-      lang(),
+      english(),
       { key: 'onlyForPartners', label: 'Only for partners', kind: 'toggle', hint: 'On means only covenant partners see it.' },
       { key: 'youtubeId', label: 'Video (YouTube)', kind: 'text', hint: 'The YouTube video id or link, if there is a video.' },
       image('photo', 'Picture'),

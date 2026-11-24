@@ -1751,7 +1751,10 @@ check('...and not negative', !!C.validate(CT.typeById('courses'), { title: 'X', 
 check('a very long title is refused', !!C.validate(manna, { ...good, title: 'x'.repeat(256) }).errors.title);
 check('long text has Catalyst\'s own limit', !!C.validate(manna, { ...good, content: 'x'.repeat(10001) }).errors.content);
 check('empty optional fields become null, not empty strings',
-  C.validate(manna, good).value.categoryIds === null && C.validate(manna, good).value.contentLanguage === null);
+  C.validate(manna, good).value.categoryIds === null && C.validate(CT.typeById('tubeVideos'), { title: 'X' }).value.contentLanguage === null);
+check('content the console translates is English when the language is not given (the form does not ask)',
+  C.validate(manna, good).value.contentLanguage === '1' && C.validate(manna, { ...good, contentLanguage: '' }).value.contentLanguage === '1');
+check('...and an edit that does not send it leaves it as it is', !('contentLanguage' in C.validate(manna, { title: 'X' }, { partial: true }).value));
 check('a toggle left out is false', C.validate(manna, good).value.published === false);
 check('...unless the field starts on (an active category)', C.validate(CT.typeById('mannaCategories'), { title: 'X' }).value.status === true
   && C.validate(CT.typeById('mannaCategories'), { title: 'X', status: false }).value.status === false);

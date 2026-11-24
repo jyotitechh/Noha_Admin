@@ -32,6 +32,8 @@ interface FieldDef {
   /** For a chapter: the key of the field that holds its book. */
   bookKey?: string;
   default?: string | boolean;
+  /** Not shown on the form: the server fills it in (the language of content that is translated by itself). */
+  hidden?: boolean;
   /** A picture: draws the drop box as well as the link box. */
   picture?: boolean;
   /** Shown only while another field holds one of these values. */
@@ -335,7 +337,7 @@ function Editor({ def, row, onClose, onDone }: { def: TypeDef; row: Row | null; 
   const canPublish = can('content.publish');
 
   /* The publish flag has buttons of its own, so it is not a field in the form. */
-  const fields = def.fields.filter((f) => f.key !== def.publish);
+  const fields = def.fields.filter((f) => f.key !== def.publish && !f.hidden);
 
   const [values, setValues] = useState<Values>(() => {
     const v: Values = {};
