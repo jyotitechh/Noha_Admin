@@ -278,6 +278,7 @@ export async function startTranslateAll(languages, { actor = '' } = {}) {
     total: work.length, done: 0, made: 0, failed: 0, failures: [], current: '',
   };
   const mine = job;
+  let badInARow = 0;
   (async () => {
     for (const w of work) {
       if (job !== mine) return;
@@ -290,8 +291,11 @@ export async function startTranslateAll(languages, { actor = '' } = {}) {
           mine.failed += 1;
           mine.failures.push({ what: mine.current, lang: r.name, error: r.error });
         }
-        /* Zoho not set up or refusing every call: stop rather than fail the same way hundreds of times. */
-        if (t.results.length && t.results.every((r) => !r.ok) && mine.failed >= 5 && mine.made === 0) {
+        /* One entry Zoho cannot translate must not stop the rest. Zoho not set up, or refusing every call, shows as entry after
+           entry failing in every language: stop only then, rather than fail the same way hundreds of times. */
+        if (t.results.length && t.results.every((r) => !r.ok)) badInARow += 1;
+        else if (t.results.some((r) => r.ok)) badInARow = 0;
+        if (badInARow >= 5 && mine.made === 0) {
           mine.stopped = 'Zoho refused every translation, so the rest were not tried. Check the translate function, then start again.';
           break;
         }

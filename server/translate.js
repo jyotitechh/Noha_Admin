@@ -141,13 +141,38 @@ async function callZoho(text, target, source) {
   }
 }
 
-/** One text, translated. Empty text is not sent; a long one goes in pieces. */
+/* Zoho answers a text with nothing to translate (only numbers or signs, such as "1234567890") with nothing at all. */
+const NOTHING = /no translated text|returned nothing/i;
+const hasWords = (s) => /\p{L}/u.test(s);
+
+/**
+ * One text, translated. Empty text is not sent; a long one goes in pieces.
+ *
+ * A piece with no letters in it (a number, a reference, a row of signs) has nothing to translate and is kept as it is, without
+ * asking Zoho. When Zoho answers a piece with nothing, that piece is kept as it is too, so one odd paragraph does not stop the
+ * rest of the entry being translated; but if no piece of the text came back translated, the text has failed.
+ */
 export async function translateText(text, target, source = 'en') {
   const s = String(text ?? '');
   if (!s.trim()) return s;
   if (!translationReady()) throw new TranslateError('Translation is not set up: ZOHO_TRANSLATE_URL is empty.', 'not_set_up');
   const out = [];
-  for (const piece of splitForLimit(s.trim())) out.push(await callZoho(piece, target, source));
+  let words = 0;
+  let done = 0;
+  let nothing = null;
+  for (const piece of splitForLimit(s.trim())) {
+    if (!hasWords(piece)) { out.push(piece); continue; }
+    words += 1;
+    try {
+      out.push(await callZoho(piece, target, source));
+      done += 1;
+    } catch (err) {
+      if (!(err instanceof TranslateError && NOTHING.test(err.message))) throw err;
+      nothing = err;
+      out.push(piece);
+    }
+  }
+  if (words > 0 && done === 0) throw nothing;
   return out.join(' ');
 }
 

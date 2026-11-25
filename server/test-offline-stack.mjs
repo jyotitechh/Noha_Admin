@@ -978,6 +978,20 @@ const SIX = { hi: '2', mr: '3', te: '4', ml: '5', ta: '6', kn: '7' };
     await new Promise((r) => setTimeout(r, 100));
   }
   check('deleting the original deletes its translations', gone.status === 200 && left.length === 0, `${gone.status} ${left.length} left`);
+  /* Text with no letters (a number, a row of signs) has nothing to translate: it is kept as it is, not sent to Zoho, so it can
+     never make an entry fail (a message that was only "1234567890" once failed in every language). */
+  const callsBefore = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls.length;
+  const digits = await call('POST', '/content/manna', { title: 'Numbers', publishDate: '2026-12-01', published: false, content: '<p><strong><s>1234567890</s></strong></p>', prayer: '<p>Amen.</p>' }, BT);
+  const digitRows = await settled('manna');
+  const numbers = digitRows.find((r) => r.title === 'Numbers' && !r.translatedFrom);
+  const numberCopies = digitRows.filter((r) => r.translatedFrom === numbers?.id);
+  check('a message of only numbers is translated into all six, the numbers kept', digits.status === 201 && numberCopies.length === 6
+    && numberCopies.every((c) => /1234567890/.test(c.content) && /^<p>\[..\] Amen\.<\/p>$/.test(c.prayer)), JSON.stringify(numberCopies[0]).slice(0, 200));
+  const newCalls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls.slice(callsBefore);
+  check('...and the numbers were never sent to Zoho', !newCalls.some((c) => /^\d+$/.test(String(c.text || '').trim())), JSON.stringify(newCalls.slice(0, 3)));
+  await call('DELETE', `/content/manna/${numbers.id}`, null, BT);
+  await settled('manna');
+
   /* The form no longer asks the language of content that is translated: it is English, and the copies keep their own. */
   const types = (await call('GET', '/content/types', null, BT)).body?.types || [];
   check('the translated kinds do not ask for a language', ['manna', 'prayers', 'confessions', 'dictionary', 'bibleCommentary']
@@ -1736,6 +1750,27 @@ section('Languages: every kind of content is translated into the six languages, 
   check('...and now everything is in all six languages', job?.coverage?.every((c) => c.error || ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => c.done[l] === c.originals)), JSON.stringify(job?.coverage));
   const again = await call('POST', '/translation/run', {}, BT);
   check('...so running it again has nothing to do', again.status === 202 && again.body?.job?.total === 0, again.text.slice(0, 120));
+
+  /* An entry Zoho cannot translate must not stop the ones after it (it once did: the same bad entry came first on every run, failed
+     in all six languages, and the job then gave up on everything behind it). */
+  await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'dailyPrayers', rows: [
+    { ROWID: '27145000000994002', title: 'Cannot be translated', content: '<p>FAIL-TRANSLATE this one.</p>', contentLanguage: 1, published: false, isArchived: false },
+    { ROWID: '27145000000994003', title: 'Comes after it', content: '<p>Fine words.</p>', contentLanguage: 1, published: false, isArchived: false },
+  ] }) });
+  await call('POST', '/refresh', null, BT);
+  await call('POST', '/translation/run', {}, BT);
+  let bad;
+  for (let i = 0; i < 200; i += 1) {
+    bad = (await call('GET', '/translation', null, BT)).body;
+    if (!bad?.job?.running) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const after = (await call('GET', '/content/prayers', null, BT)).body?.rows || [];
+  check('one entry that fails does not stop the run: the entry after it is translated in all six languages',
+    after.filter((r) => r.translatedFrom === '27145000000994003').length === 6, `${after.filter((r) => r.translatedFrom === '27145000000994003').length} copies`);
+  check('...the run finished all its entries, and says which one failed', bad?.job?.running === false && bad.job.done === bad.job.total && !bad.job.stopped
+    && bad.job.failures?.length === 6 && bad.job.failures.every((f) => /Cannot be translated/.test(f.what)), JSON.stringify(bad?.job).slice(0, 300));
+  check('...and the entry that failed has no half-made copies', after.filter((r) => r.translatedFrom === '27145000000994002').length === 0);
 
   const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
   check('Zoho was asked for the six languages, never English', ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => calls.some((c) => c.target === l)) && calls.every((c) => c.target !== 'en'));
