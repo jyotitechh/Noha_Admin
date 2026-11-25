@@ -47,7 +47,7 @@ The devotional the app opens on each day: the message and a prayer or confession
 | Category | `categoryIds` | text | the id of a row in `dailyMannaCategories` |
 | Language | `contentLanguage` | int | stored as its code number |
 | Partners only | `visibleTo` | boolean |  |
-| Show on obituary | `showOnObituary` | int | stored as 1 or 0 |
+| Show on obituary notices | `showOnObituary` | int | stored as 1 or 0 |
 | Message | `content` | text | required |
 | Embed 01 | `embed01` | text |  |
 | Embed 02 | `embed02` | text |  |
