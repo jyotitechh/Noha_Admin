@@ -1293,7 +1293,8 @@ if (NO_KEY) {
   check('a member can only be picked when approving (400)', (await call('POST', `/family-requests/${FR.mother}/decide`, { decision: 'Rejected', remark: 'No', memberId: OLD_ID }, BT)).status === 400);
   check('none of those refusals decided anything', (await call('GET', '/family-requests', null, BT)).body?.rows?.length === 4);
 
-  check('the work queue counts them', await queueCount('family') === 4, String(await queueCount('family')));
+  /* Only the child request: grown-up relatives are added by the office itself now, so they are not counted as work. */
+  check('the work queue counts the child request only', await queueCount('family') === 1, String(await queueCount('family')));
 
   /* A child under 18: the child is added and linked to the member. */
   const okKid = await call('POST', `/family-requests/${FR.kid}/decide`, { decision: 'Approved' }, BT);

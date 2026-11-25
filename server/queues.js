@@ -59,7 +59,7 @@ export function queues() {
       ...q('REGISTRATIONS', (r) => r.state === 'pending'),
     },
     {
-      id: 'family', l: 'Family requests to approve', area: 'Membership', icon: 'users', to: '/members/family',
+      id: 'family', l: 'New child requests to approve', area: 'Membership', icon: 'users', to: '/members/children',
       perm: 'members.edit', owner: 'Membership officer', sla: 48,
       count: () => 0, oldest: () => null,   /* counted from the Noah API below; the sample data has none */
     },
@@ -135,7 +135,8 @@ export async function queuesFor(roleId, canFn) {
     }
     if (rows.some((x) => x.id === 'family')) {
       /* Only the Noah API has them. Without its key there is nothing to count, and saying 0 is the truth. */
-      try { real.family = noahConfigured() ? tally(await pendingFamilyRequests()) : { count: 0, oldest: null }; }
+      /* Only the requests about a child: grown-up relatives are added by the office itself, from a member's record. */
+      try { real.family = noahConfigured() ? tally((await pendingFamilyRequests()).filter((r) => r.kid)) : { count: 0, oldest: null }; }
       catch { real.family = { count: 0, oldest: null }; }
     }
     if (rows.some((x) => x.id === 'mod')) {

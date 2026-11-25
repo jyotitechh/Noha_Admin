@@ -131,7 +131,7 @@ export function ChildDetail({ kidId, onOpenMember }: {
             <Btn icon="user" onClick={() => onOpenMember({ rowId: c.memberRowId!, name: c.name })}>Open {c.name.split(' ')[0]}'s member record</Btn>
           </div>
         ) : c.state === 'requested' ? (
-          <div className="mt12"><Note tone="warn" icon="clock">The parents asked to make {c.name.split(' ')[0]} a member. Decide it under Family requests.</Note></div>
+          <div className="mt12"><Note tone="warn" icon="clock">The parents asked to make {c.name.split(' ')[0]} a member. Decide it in New Child Requests, at the top of the Children screen.</Note></div>
         ) : null}
       </section>
     </div>

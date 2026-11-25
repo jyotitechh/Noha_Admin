@@ -2,8 +2,9 @@
 
    A parent adds a child (photo, name, date of birth, Aadhaar if they have it) and the child is in the family at once. At 15
    the Noah API tells both parents, once, to press Make member; the console asks it to every few hours, and Send notices
-   now asks at once. The parents then give the child's own number and Aadhaar, the office approves that under Family
-   requests, the child signs in and sends the consent and video, and the office approves that under App registrations.
+   now asks at once. The parents then give the child's own number and Aadhaar, the office approves that in New Child
+   Requests at the top of this screen, the child signs in and sends the consent and video, and the office approves that
+   under App registrations. A new child a parent adds waits in New Child Requests too.
    Opening a child shows the child's own record (ChildDetail); a parent's record, or the child's member record once they have
    one, opens from there. */
 
@@ -18,6 +19,7 @@ import { Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Who } from '@/components/
 import { fd } from '@/lib/format';
 import { AuthImage } from '@/components/AuthImage';
 import { ChildDetail, CHILD_STATE as STATE } from './ChildDetail';
+import FamilyRequests from './FamilyRequests';
 
 interface Child {
   kidId: string; name: string; gender: string | null; dob: string | null; age: number | null; kidPhoto?: boolean; aadhaar?: boolean;
@@ -101,6 +103,16 @@ export default function Children() {
 
   return (
     <div className="stack">
+      {/* What parents ask from the app about a child: a new child to add, and Make member at 15. Decided here; the office adds
+          grown-up relatives itself, from a member's record. */}
+      {can('members.edit') && (
+        <section className="stack">
+          <div className="sect-title">New Child Requests</div>
+          <FamilyRequests only="children" onDecided={q.reload} />
+        </section>
+      )}
+
+      <div className="sect-title">All Children</div>
       <Kpis>
         <Kpi label="Children" value={tally.all} icon="heart" detail="added by their parents" />
         <Kpi label="Members" value={tally.members} icon="user-check" detail="made members, consent approved" />

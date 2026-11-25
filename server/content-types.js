@@ -118,7 +118,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'mannaCategories', section: 'content', label: 'Manna categories', singular: 'category', table: 'dailyMannaCategories',
+    id: 'mannaCategories', section: 'content', label: 'Manna Categories', singular: 'category', table: 'dailyMannaCategories',
     title: 'title', dateKey: null, publish: 'status', stamps: STAMPS_ON,
     intro: 'The themes the Daily Manna is grouped under.',
     fields: [
@@ -164,7 +164,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'dictionary', section: 'content', label: 'Dream dictionary', singular: 'entry', table: 'dreamDictionary',
+    id: 'dictionary', section: 'content', label: 'Dream Dictionary', singular: 'entry', table: 'dreamDictionary',
     title: 'title', dateKey: 'publishedDate', publish: 'published', stamps: STAMPS,
     intro: 'What a dream may mean, entry by entry.',
     fields: [
@@ -181,7 +181,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'dictionaryCategories', section: 'content', label: 'Dictionary categories', singular: 'category', table: 'dreamDictionaryCategory',
+    id: 'dictionaryCategories', section: 'content', label: 'Dictionary Categories', singular: 'category', table: 'dreamDictionaryCategory',
     title: 'name', dateKey: null, publish: null, stamps: STAMPS_ON,
     intro: 'How the dream dictionary is grouped.',
     fields: [
@@ -224,7 +224,7 @@ export const TYPES = [
 
   /* ================= media ================= */
   {
-    id: 'noahgramPosts', section: 'media', label: 'Noahgram posts', singular: 'post', table: 'noahGram',
+    id: 'noahgramPosts', section: 'media', label: 'Noahgram Posts', singular: 'post', table: 'noahGram',
     title: 'caption', dateKey: 'scheduleDate', publish: 'isApproved', stamps: STAMPS_ON,
     intro: 'Posts on the Noahgram feed. A post is live once it is approved.',
     fields: [
@@ -238,7 +238,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'noahgramCategories', section: 'media', label: 'Noahgram categories', singular: 'category', table: 'noahGramCategory',
+    id: 'noahgramCategories', section: 'media', label: 'Noahgram Categories', singular: 'category', table: 'noahGramCategory',
     title: 'name', dateKey: null, publish: 'isPublished', stamps: STAMPS_ON,
     intro: 'The topics a Noahgram post is filed under.',
     fields: [
@@ -251,7 +251,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'tubeVideos', section: 'media', label: 'Noah Tube videos', singular: 'video', table: 'videos',
+    id: 'tubeVideos', section: 'media', label: 'Noah Tube Videos', singular: 'video', table: 'videos',
     title: 'title', dateKey: null, publish: null, stamps: STAMPS_ON,
     intro: 'The video library. Add a link to the video; uploading a file from here is not available yet.',
     fields: [
@@ -272,7 +272,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'tubeCategories', section: 'media', label: 'Noah Tube categories', singular: 'category', table: 'videoCategories',
+    id: 'tubeCategories', section: 'media', label: 'Noah Tube Categories', singular: 'category', table: 'videoCategories',
     title: 'title', dateKey: null, publish: 'status', stamps: STAMPS_ON,
     intro: 'The shelves the videos sit on. A category can sit inside another.',
     fields: [
@@ -289,7 +289,7 @@ export const TYPES = [
 
   /* ================= school ================= */
   {
-    id: 'bibleSchools', section: 'school', label: 'Bible schools', singular: 'school', table: 'bibleSchool',
+    id: 'bibleSchools', section: 'school', label: 'Bible Schools', singular: 'school', table: 'bibleSchool',
     title: 'name', dateKey: 'publishDate', publish: 'status', stamps: STAMPS_ON,
     intro: 'The Bible school levels members can enrol in.',
     fields: [
@@ -324,7 +324,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'courseCategories', section: 'school', label: 'Course categories', singular: 'category', table: 'rowilCourseCategoryManagement',
+    id: 'courseCategories', section: 'school', label: 'Course Categories', singular: 'category', table: 'rowilCourseCategoryManagement',
     title: 'name', dateKey: null, publish: null, stamps: STAMPS_ON,
     intro: 'How the courses are grouped.',
     fields: [
@@ -334,7 +334,7 @@ export const TYPES = [
     ],
   },
   {
-    id: 'courseSections', section: 'school', label: 'Course sections', singular: 'section', table: 'rowilCourseLessonGroupManagement',
+    id: 'courseSections', section: 'school', label: 'Course Sections', singular: 'section', table: 'rowilCourseLessonGroupManagement',
     title: 'name', dateKey: null, publish: null, stamps: STAMPS_ON,
     intro: 'A course is split into sections, and each section holds its lessons.',
     fields: [
@@ -363,7 +363,7 @@ export const TYPES = [
 
   /* ================= Bible commentary ================= */
   {
-    id: 'bibleCommentary', section: 'content', label: 'Bible commentary', singular: 'commentary', table: 'bibleCommentary',
+    id: 'bibleCommentary', section: 'content', label: 'Bible Commentary', singular: 'commentary', table: 'bibleCommentary',
     title: 'title', dateKey: null, publish: 'isPublished', stamps: STAMPS_ON, constants: { isArchived: false },
     /* The table keeps a first and a last chapter; a commentary here is one chapter, so the last is the first. */
     derive: { endChapter: 'startChapter' },

@@ -13,7 +13,10 @@
        parents are asked to make the child a member.
      - "Make member" ('member', FOR-CONSOLE-CHILDREN.md): at 15 the parents give the child's own mobile number and the
        Aadhaar. Approving makes the child a member with that number; the child then signs in and sends the consent and
-       video, which come to App registrations. The office checks the Aadhaar picture against the number, name and age. */
+       video, which come to App registrations. The office checks the Aadhaar picture against the number, name and age.
+
+   The office adds grown-up relatives itself, from a member's record, so the screen the office uses is the "New Child
+   Requests" section of Membership > Children: this component with only="children", which shows the two child kinds only. */
 
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
@@ -80,9 +83,16 @@ function effect(r: FamilyRequest): string {
   return `${r.name || 'They'} have not joined the app yet. This is still approved, and the two are linked automatically the moment they join.`;
 }
 
-export default function FamilyRequests() {
+export default function FamilyRequests({ only, onDecided }: {
+  /** 'children': only the requests about a child (a new child, and Make member), shown inside the Children screen. */
+  only?: 'children';
+  /** Called after a decision, so the screen around it can read its own list again. */
+  onDecided?: () => void;
+} = {}) {
+  const childrenOnly = only === 'children';
+  const mine = (r: FamilyRequest) => !childrenOnly || r.kid;
   const [state, setState] = useState<State>('Pending');
-  const [kindShown, setKindShown] = useState<'' | 'member' | 'other'>('');
+  const [kindShown, setKindShown] = useState<'' | 'member' | 'child' | 'other'>('');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<FamilyRequest | null>(null);
   const [rejecting, setRejecting] = useState(false);
@@ -105,7 +115,7 @@ export default function FamilyRequests() {
   const waiting = useQuery(() => api.get<{ rows: FamilyRequest[] }>('/family-requests?state=Pending'), []);
 
   const tally = useMemo(() => {
-    const rows = waiting.data?.rows ?? [];
+    const rows = (waiting.data?.rows ?? []).filter(mine);
     return {
       pending: rows.length,
       members: rows.filter((r) => r.kind === 'member').length,
@@ -113,15 +123,17 @@ export default function FamilyRequests() {
       adults: rows.filter((r) => !r.kid).length,
       oldest: rows.map((r) => r.at).filter(Boolean).sort((a, b) => +a! - +b!)[0] ?? null,
     };
-  }, [waiting.data]);
+  }, [waiting.data, childrenOnly]);
 
   const rows = useMemo(() => {
-    const all = (q.data?.rows ?? []).filter((r) => !kindShown || (kindShown === 'member') === (r.kind === 'member'));
+    const ofKind = (r: FamilyRequest) => !kindShown
+      || (kindShown === 'member' ? r.kind === 'member' : kindShown === 'child' ? r.kid && r.kind !== 'member' : r.kind !== 'member');
+    const all = (q.data?.rows ?? []).filter(mine).filter(ofKind);
     const s = search.trim().toLowerCase();
     return s
       ? all.filter((r) => [r.name, r.requesterName, r.relationLabel, r.existingMemberName ?? ''].some((v) => v.toLowerCase().includes(s)))
       : all;
-  }, [q.data, search, kindShown]);
+  }, [q.data, search, kindShown, childrenOnly]);
 
   const reset = () => {
     setOpen(null); setRejecting(false); setRemark('');
@@ -148,6 +160,7 @@ export default function FamilyRequests() {
       });
       reset();
       q.reload(); waiting.reload(); queues.refresh();
+      onDecided?.();
       toast(
         decision === 'Approved'
           ? r.kind === 'member' ? `Approved. ${r.name} is now a member and can sign in with their own number to send the consent and video.`
@@ -208,16 +221,16 @@ export default function FamilyRequests() {
 
   return (
     <div className="stack">
-      <Kpis>
+      {!childrenOnly && <Kpis>
         <Kpi label="Waiting" value={tally.pending} icon="users" tone={tally.pending > 4 ? 'warn' : undefined}
           detail={tally.oldest ? <>oldest <Age at={tally.oldest} warn={48} bad={96} /></> : 'nothing waiting'} />
         <Kpi label="Child to member" value={tally.members} icon="user-plus" detail="aged 15 or more, their own number" />
         <Kpi label="Grown-ups" value={tally.adults} icon="user" detail="linked to their own account" />
         <Kpi label="New children" value={tally.kids} icon="user" detail="added by parents, to approve" />
-      </Kpis>
+      </Kpis>}
 
       {q.loading && !q.data ? (
-        <div className="card"><Loading what="family requests" /></div>
+        <div className="card"><Loading what={childrenOnly ? 'child requests' : 'family requests'} /></div>
       ) : (
         <Table
           rows={rows}
@@ -225,7 +238,7 @@ export default function FamilyRequests() {
           rowKey={(r) => r.id}
           search={search}
           onSearch={setSearch}
-          searchPlaceholder="A name, a relation or who asked"
+          searchPlaceholder={childrenOnly ? "The child's name or who asked" : 'A name, a relation or who asked'}
           onRowClick={setOpen}
           pageSize={20}
           toolbar={
@@ -238,15 +251,18 @@ export default function FamilyRequests() {
               </select>
               <select className="sel" value={kindShown} onChange={(e) => setKindShown(e.target.value as typeof kindShown)} aria-label="Filter by kind">
                 <option value="">Every kind</option>
+                {childrenOnly && <option value="child">New child ({tally.kids})</option>}
                 <option value="member">Child to member ({tally.members})</option>
-                <option value="other">Relatives and children</option>
+                {!childrenOnly && <option value="other">Relatives and children</option>}
               </select>
               <span className="sp" style={{ flex: 1 }} />
               <span className="small muted">Oldest first</span>
             </>
           }
           empty={<Empty icon="check" title={state === 'Pending' ? 'Nothing waiting' : 'None here'}>
-            {state === 'Pending' ? 'Every family request from the app has been decided.' : 'No requests with this status.'}
+            {state === 'Pending'
+              ? childrenOnly ? 'Every child request from the app has been decided.' : 'Every family request from the app has been decided.'
+              : 'No requests with this status.'}
           </Empty>}
           footNote="From Me > Family in the Noah app"
         />
@@ -255,7 +271,7 @@ export default function FamilyRequests() {
       <Drawer
         open={!!open}
         onClose={reset}
-        title="Family request"
+        title={childrenOnly ? 'Child request' : 'Family request'}
         sub={open ? <><span className="mono">{open.id}</span> · {fdt(open.at)}</> : ''}
         footer={
           open && open.state === 'Pending' ? (
