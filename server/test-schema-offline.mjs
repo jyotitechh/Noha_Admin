@@ -2205,6 +2205,69 @@ section('Events, event groups and language groups');
   check('...but can be once that event is deleted too', !(await EV.storedRows('groups')).some((r) => r.name === 'Lone group'));
 }
 
+/* ---------- Zoho translate: a few calls at once, a slow call tried again, nothing to translate kept ---------- */
+
+{
+  const TR = await import('./translate.js');
+  const realFetch = globalThis.fetch;
+  const wasUrl = process.env.ZOHO_TRANSLATE_URL;
+  process.env.ZOHO_TRANSLATE_URL = 'http://127.0.0.1:9/fn?auth_type=apikey&zapikey=x';
+  const answer = (text) => ({ ok: true, status: 200, text: async () => JSON.stringify({ code: 'success', details: { output: JSON.stringify({ translated: text }) } }) });
+  const wanted = (u) => JSON.parse(new URL(u).searchParams.get('arguments'));
+  try {
+    /* Twenty texts asked for at once: never more than three outstanding. */
+    let now = 0; let most = 0;
+    globalThis.fetch = async (u) => {
+      now += 1; most = Math.max(most, now);
+      await new Promise((r) => setTimeout(r, 5));
+      now -= 1;
+      return answer('[hi] ' + wanted(u).text);
+    };
+    const many = await Promise.all(Array.from({ length: 20 }, (_, i) => TR.translateText('Word ' + i, 'hi')));
+    check('only three calls to Zoho are outstanding at once, however many are asked for', most === 3 && many.length === 20 && many.every((t, i) => t === '[hi] Word ' + i), `most ${most}`);
+
+    /* A call that times out is tried once more. */
+    let tries = 0;
+    globalThis.fetch = async (u) => {
+      tries += 1;
+      if (tries === 1) { const e = new Error('aborted'); e.name = 'AbortError'; throw e; }
+      return answer('[hi] ' + wanted(u).text);
+    };
+    check('a call that took too long is tried once more, and then works', (await TR.translateText('Peace', 'hi')) === '[hi] Peace' && tries === 2, `tries ${tries}`);
+
+    /* ...but only once: a second failure is reported. */
+    tries = 0;
+    globalThis.fetch = async () => { tries += 1; const e = new Error('aborted'); e.name = 'AbortError'; throw e; };
+    const slow = await TR.translateText('Peace', 'hi').then(() => null, (e) => e);
+    check('...twice and no more, then it says Zoho took too long', slow?.message === 'Zoho took too long to translate.' && tries === 2, `${tries} ${slow?.message}`);
+
+    /* A refusal that is not worth repeating is not repeated. */
+    tries = 0;
+    globalThis.fetch = async () => { tries += 1; return { ok: false, status: 400, text: async () => JSON.stringify({ error: 'bad' }) }; };
+    await TR.translateText('Peace', 'hi').catch(() => {});
+    check('a refusal (400) is not tried again', tries === 1, `tries ${tries}`);
+
+    /* Nothing to translate: kept, and never sent. */
+    tries = 0;
+    globalThis.fetch = async (u) => { tries += 1; return answer('[hi] ' + wanted(u).text); };
+    check('text with no letters is kept and not sent to Zoho', (await TR.translateText('1234567890', 'hi')) === '1234567890' && (await TR.translateText('8:38-39 ***', 'hi')) === '8:38-39 ***' && tries === 0, `tries ${tries}`);
+
+    /* A piece Zoho answers with nothing is kept, the rest of the text is translated; if every piece fails the text fails. */
+    globalThis.fetch = async (u) => {
+      const t = wanted(u).text;
+      return /Odd/.test(t) ? { ok: true, status: 200, text: async () => JSON.stringify({ error: 'Zoho Translate returned nothing' }) } : answer('[hi] ' + t);
+    };
+    const para = 'First sentence is fine. '.repeat(70) + 'Odd words here. ' + 'Last sentence is fine too. '.repeat(70);
+    const out = await TR.translateText(para, 'hi');
+    check('a piece Zoho cannot translate is kept and the rest of the text is translated', /\[hi\] First/.test(out) && /Odd words here/.test(out) && !/\[hi\] Odd/.test(out) && /\[hi\] Last/.test(out), out.slice(0, 80));
+    const none = await TR.translateText('Odd words only', 'hi').then(() => null, (e) => e);
+    check('...but a text of which nothing could be translated fails', !!none && /returned nothing/.test(none.message), none?.message);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (wasUrl === undefined) delete process.env.ZOHO_TRANSLATE_URL; else process.env.ZOHO_TRANSLATE_URL = wasUrl;
+  }
+}
+
 /* ---------- result ---------- */
 
 console.log('\n' + '─'.repeat(64));

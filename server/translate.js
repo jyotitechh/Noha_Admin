@@ -119,10 +119,30 @@ export function splitForLimit(text, limit = maxChars()) {
   return chunks;
 }
 
-/** One call to the function. */
-async function callZoho(text, target, source) {
+/* Zoho's translate function answers calls one after another: with several at once the later ones wait in line, and a long wait
+   ran past the time allowed (a Daily Manna in six languages at once failed with "took too long"). So only a few calls are
+   outstanding at any moment, across everything the console is translating (a save and the filling in share them), and a call
+   that is only slow or briefly refused is tried once more.
+
+     ZOHO_TRANSLATE_CONCURRENCY   calls at once, 1 to 8. Default 3. */
+const concurrency = () => Math.min(8, Math.max(1, Number(process.env.ZOHO_TRANSLATE_CONCURRENCY) || 3));
+let inFlight = 0;
+const waiting = [];
+async function inSlot(fn) {
+  if (inFlight >= concurrency()) await new Promise((resolve) => waiting.push(resolve));   /* handed a slot already counted */
+  else inFlight += 1;
+  try {
+    return await fn();
+  } finally {
+    const next = waiting.shift();
+    if (next) next(); else inFlight -= 1;
+  }
+}
+
+/** One try at the function. A slow or briefly refused call is marked 'transient': worth another go. */
+async function tryZoho(text, target, source) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 30_000);
+  const timer = setTimeout(() => ctrl.abort(), 45_000);
   try {
     const { url, ...req } = requestFor({ text, target, source });
     const res = await fetch(url, { method: 'POST', ...req, signal: ctrl.signal });
@@ -130,14 +150,26 @@ async function callZoho(text, target, source) {
     if (!res.ok) {
       let msg = raw.slice(0, 200);
       try { const j = JSON.parse(raw); msg = j.error || j.message || j.code || msg; } catch { /* not JSON */ }
-      throw new TranslateError(`Zoho refused the translation (${res.status}): ${msg}`);
+      throw new TranslateError(`Zoho refused the translation (${res.status}): ${msg}`, res.status === 429 || res.status >= 500 ? 'transient' : 'translate_failed');
     }
     return String(readAnswer(raw)).trim();
   } catch (err) {
     if (err instanceof TranslateError) throw err;
-    throw new TranslateError(err.name === 'AbortError' ? 'Zoho took too long to translate.' : `Zoho could not be reached: ${err.message}`);
+    throw new TranslateError(err.name === 'AbortError' ? 'Zoho took too long to translate.' : `Zoho could not be reached: ${err.message}`, 'transient');
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** One call to the function: waits for its turn, and is tried twice when the first try was only slow or briefly refused. */
+async function callZoho(text, target, source) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await inSlot(() => tryZoho(text, target, source));
+    } catch (err) {
+      if (attempt >= 2 || !(err instanceof TranslateError) || err.code !== 'transient') throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
   }
 }
 
