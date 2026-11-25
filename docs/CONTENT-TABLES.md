@@ -46,7 +46,7 @@ The devotional the app opens on each day: the message and a prayer or confession
 | Writer | `writerId` | bigint |  |
 | Category | `categoryIds` | text | the id of a row in `dailyMannaCategories` |
 | Language | `contentLanguage` | int | stored as its code number |
-| Partners only | `visibleTo` | boolean |  |
+| Members only | `visibleTo` | boolean |  |
 | Show on obituary | `showOnObituary` | int | stored as 1 or 0 |
 | Message | `content` | text | required |
 | Embed 01 | `embed01` | text |  |
@@ -102,7 +102,7 @@ The prayer members are invited to pray with.
 | Title | `title` | varchar | required |
 | Publish on | `publishedDate` | datetime | a date, stored as a datetime |
 | Language | `contentLanguage` | int | stored as its code number |
-| Partners only | `visibleTo` | boolean |  |
+| Members only | `visibleTo` | boolean |  |
 | Prayer | `content` | text | required |
 | Embed 01 | `embed01` | text |  |
 | Embed 02 | `embed02` | text |  |
@@ -139,7 +139,7 @@ The daily confession of faith.
 | Published date | `publishDate` | date |  |
 | Writer | `writerId` | bigint |  |
 | Language | `contentLanguage` | int | stored as its code number |
-| Partners only | `visibleTo` | boolean |  |
+| Members only | `visibleTo` | boolean |  |
 | Confession | `content` | text | required |
 | Embed 01 | `embed01` | text |  |
 | Embed 02 | `embed02` | text |  |
@@ -175,7 +175,7 @@ What a dream may mean, entry by entry.
 | Word or symbol | `title` | varchar | required |
 | Category | `categoryId` | bigint | the id of a row in `dreamDictionaryCategory` |
 | Language | `contentLanguage` | int | stored as its code number |
-| Partners only | `visibleTo` | boolean |  |
+| Members only | `visibleTo` | boolean |  |
 | Feature it | `isFeatured` | boolean |  |
 | Publish on | `publishedDate` | datetime | a date, stored as a datetime |
 | Meaning | `content` | text | required |

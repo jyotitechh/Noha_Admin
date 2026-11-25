@@ -71,7 +71,7 @@ switch that is empty.
 Return the member's language and fall back to English (1) when there is nothing in theirs. Content arrives already translated by the
 office: the app does not translate it.
 
-**Partners only.** `visibleTo` (Manna, prayers, confessions, dictionary) and `onlyForPartners` (commentary): true means only covenant
+**Members only.** `visibleTo` (Manna, prayers, confessions, dictionary) and `onlyForPartners` (commentary): true means only covenant
 partners see it (`membersExtra.isPartner`), false or empty means everyone. The API must filter this for the signed-in member.
 
 **Show on obituary.** `showOnObituary` on the Daily Manna: 1 means it may also be shown on an obituary notice. 0 or empty: no.
@@ -143,7 +143,7 @@ Do this for each screen once its route exists.
 2. In the app, open the matching screen and pull to refresh. The entry must appear with its picture and its formatting.
 3. In the console, switch **Published** off and save. After a refresh it must be gone.
 4. Add one dated **tomorrow**. It must not appear until tomorrow.
-5. Switch **Partners only** on. A member who is not a partner must no longer see it; a partner still does.
+5. Switch **Members only** on. A member who is not a partner must no longer see it; a partner still does.
 6. Set the language to **Tamil (6)**. A member using the app in Tamil sees it; one in English does not (they get the English entry).
 
 If an entry saved in the console does not appear but an older one does, the usual cause is a filter on a column the console leaves
