@@ -108,7 +108,7 @@ export const TYPES = [
       { key: 'categoryIds', label: 'Category', kind: 'ref', ref: 'mannaCategories', catalyst: 'text' },
       english(),
       membersOnly,
-      { key: 'showOnObituary', label: 'Show on obituary notices', kind: 'toggle', store: 'int' },
+      { key: 'showOnObituary', label: 'Show on obituary', kind: 'toggle', store: 'int' },
       rich('content', 'Message', { required: true }),
       ...embeds(),
       { key: 'isConfession', label: 'The closing is a confession', kind: 'toggle', hint: 'Off means it is a prayer.' },

@@ -74,7 +74,7 @@ office: the app does not translate it.
 **Partners only.** `visibleTo` (Manna, prayers, confessions, dictionary) and `onlyForPartners` (commentary): true means only covenant
 partners see it (`membersExtra.isPartner`), false or empty means everyone. The API must filter this for the signed-in member.
 
-**Show on obituary notices.** `showOnObituary` on the Daily Manna: 1 means it may also be shown on an obituary notice. 0 or empty: no.
+**Show on obituary.** `showOnObituary` on the Daily Manna: 1 means it may also be shown on an obituary notice. 0 or empty: no.
 
 **Ids.** `ROWID` is 17 to 19 digits. Keep every id as a **String** (a JSON number loses digits).
 
