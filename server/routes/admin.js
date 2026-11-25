@@ -11,7 +11,7 @@ import { downloadFile, fileScopeMissing, explainCatalyst } from '../catalyst.js'
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
-import { decidePrayerRequest, editPrayerRequest, prayerRequestById, forgetPrayerRequests, TEXT_MAX } from '../prayer-requests.js';
+import { decidePrayerRequest, editPrayerRequest, createPrayerRequest, findPeople, prayerRequestById, forgetPrayerRequests, TEXT_MAX, CATEGORY_NAMES } from '../prayer-requests.js';
 import { decidePraise, featurePraise, praiseById, praisePhoto } from '../praise-reports.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
@@ -718,7 +718,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
             console.error(`[prayer] the Noah API could not decide ${p.id}, writing the table instead: ${err.message}`);
           }
         }
-        if (!memberTold) await decidePrayerRequest(p.id, decision, { byRowId: req.user.memberRowId });
+        if (!memberTold) await decidePrayerRequest(p.id, decision, { byRowId: req.session.memberRowId });
         log(req, decision === 'Approved' ? 'Approved prayer request' : 'Declined prayer request', 'Community', p.id, { state: p.state }, { state: decision, memberTold }, remark);
         return res.json({ ok: true, memberTold, request: { ...p, state: decision, remark } });
       } catch (err) {
@@ -745,6 +745,56 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     res.json({ ok: true, memberTold: false, request: p });
   });
 
+  /* The office writes a prayer request of its own: from the signed-in member, or on behalf of a member it picks. { text, category?,
+     everyone?, memberId?, publish? }. By default it is approved at once, so it is on its wall straight away. */
+  app.post('/api/prayer-inbox', ...guard('community.moderate'), async (req, res) => {
+    const b = req.body || {};
+    if (typeof b.text !== 'string') return res.status(400).json({ error: 'Write the prayer request first.', code: 'empty' });
+    if (b.everyone !== undefined && typeof b.everyone !== 'boolean') return res.status(400).json({ error: 'Say whether it is for everyone (true) or for prayer warriors only (false).' });
+    if (b.publish !== undefined && typeof b.publish !== 'boolean') return res.status(400).json({ error: 'Say whether to put it on the wall now (true) or leave it waiting (false).' });
+    if (live()) {
+      try {
+        const made = await createPrayerRequest(
+          { text: b.text, category: b.category ?? 'Other', everyone: b.everyone === true, publish: b.publish !== false, memberId: b.memberId },
+          { byRowId: req.session.memberRowId },
+        );
+        log(req, 'Added a prayer request', 'Community', made.id, null,
+          { text: made.text, category: made.category, everyone: made.everyone, state: made.state, from: made.memberName });
+        return res.status(201).json({ ok: true, request: made });
+      } catch (err) {
+        if (['empty', 'too_long', 'bad_category', 'no_member'].includes(err.code)) return res.status(400).json({ error: err.message, code: err.code });
+        const explained = explainCatalyst(err);
+        return res.status(503).json({ error: explained?.message ?? err.message });
+      }
+    }
+    const text = b.text.trim();
+    if (!text) return res.status(400).json({ error: 'Write the prayer request first.', code: 'empty' });
+    if (text.length > TEXT_MAX) return res.status(400).json({ error: `That is ${text.length} characters. The most a request can hold is ${TEXT_MAX}.`, code: 'too_long' });
+    const category = b.category ?? 'Other';
+    if (!CATEGORY_NAMES.includes(category)) return res.status(400).json({ error: 'Pick one of the categories: ' + CATEGORY_NAMES.join(', ') + '.', code: 'bad_category' });
+    const publish = b.publish !== false;
+    const p = {
+      id: 'PR-' + (db.PRAYER_INBOX.length + 1), category, text, everyone: b.everyone === true, anonymous: false,
+      memberName: req.user.name, mobile: '', mannaId: null, at: new Date(), state: publish ? 'Approved' : 'Pending',
+      decidedBy: publish ? req.user.name : '', remark: '', prayedBy: 0,
+    };
+    db.PRAYER_INBOX.push(p);
+    if (publish) db.PRAYERS.push({ id: p.id, name: p.memberName, text, cat: category, at: p.at, state: 'Approved', everyone: p.everyone, prayed: 0 });
+    log(req, 'Added a prayer request', 'Community', p.id, null, { text, category, everyone: p.everyone, state: p.state });
+    res.status(201).json({ ok: true, request: p });
+  });
+
+  /* Who a prayer request written by the office can be from: members matching what was typed. */
+  app.get('/api/prayer-inbox/members', ...guard('community.moderate'), async (req, res) => {
+    if (!live()) return res.json({ rows: [] });
+    try {
+      res.json({ rows: await findPeople(String(req.query.q || '')) });
+    } catch (err) {
+      const explained = explainCatalyst(err);
+      res.status(503).json({ error: explained?.message ?? err.message });
+    }
+  });
+
   /* The office may correct a request's wording and change who may see it, whether it is waiting or already approved. The app
      limits a request to 300 characters; here the limit is the size of the column (10,000). { text?, everyone? } */
   app.patch('/api/prayer-inbox/:id', ...guard('community.moderate'), async (req, res) => {
@@ -767,7 +817,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       try {
         const before = await prayerRequestById(req.params.id);
         if (!before) return notFound(res);
-        const after = await editPrayerRequest(req.params.id, asked, { byRowId: req.user.memberRowId });
+        const after = await editPrayerRequest(req.params.id, asked, { byRowId: req.session.memberRowId });
         const changed = what(before, after);
         if (changed.length) {
           log(req, `Edited prayer request (${changed.join(' and ')})`, 'Community', before.id,
@@ -828,7 +878,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
           if (ids.length === 1) return res.status(409).json({ error: `Already ${p.state.toLowerCase()}. Refresh the list.` });
           continue;
         }
-        await decidePraise(p.id, approve, { byRowId: req.user.memberRowId });
+        await decidePraise(p.id, approve, { byRowId: req.session.memberRowId });
         log(req, approve ? 'Published praise report' : 'Rejected praise report', 'Community', p.id, { state: p.state }, { state: approve ? 'Published' : 'Rejected' }, remark);
         done.push(p.id);
       }
@@ -846,7 +896,7 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       if (!p) return notFound(res);
       if (p.state !== 'Published') return res.status(409).json({ error: 'Only a published praise report can be featured.' });
       const on = req.body?.featured !== false;
-      await featurePraise(p.id, on, { byRowId: req.user.memberRowId });
+      await featurePraise(p.id, on, { byRowId: req.session.memberRowId });
       log(req, on ? 'Featured praise report' : 'Unfeatured praise report', 'Community', p.id, { featured: p.featured }, { featured: on }, '');
       res.json({ ok: true, featured: on });
     } catch (err) {

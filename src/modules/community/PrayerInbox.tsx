@@ -10,9 +10,12 @@
        is not a formality — the server filters the wall by it.
 
    The office may correct the wording and change who may see a request, before or after it is approved. The app limits a member to
-   300 characters; the office is not held to that (the database holds 10,000). Giving a reason for declining is optional. */
+   300 characters; the office is not held to that (the database holds 10,000). Giving a reason for declining is optional.
 
-import { useMemo, useState } from 'react';
+   The office can also write a prayer request of its own (New prayer request): from itself or on behalf of a member, in a
+   category, for everyone or for prayer warriors only, and either put on the wall at once or left waiting like a member's. */
+
+import { useEffect, useMemo, useState } from 'react';
 import { api, collection } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
 import { useQueues } from '@/state/queues';
@@ -25,6 +28,54 @@ import type { PrayerRequest } from '@/lib/types';
 const CATEGORY_ICON: Record<string, string> = {
   Healing: 'heart', Family: 'users', Guidance: 'star', Thanksgiving: 'sparkles', Other: 'flame',
 };
+
+const CATEGORIES = ['Healing', 'Family', 'Guidance', 'Thanksgiving', 'Other'];
+
+interface Person { id: string; name: string; mobile: string }
+
+/* The member a request is written on behalf of: search by name or mobile number. Left empty, it is from the office itself. */
+function FromPick({ value, onPick }: { value: Person | null; onPick: (p: Person | null) => void }) {
+  const [q, setQ] = useState('');
+  const [typed, setTyped] = useState('');
+  const [open, setOpen] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setTyped(q), 250); return () => clearTimeout(t); }, [q]);
+  const found = useQuery(
+    () => (open ? api.get<{ rows: Person[] }>(`/prayer-inbox/members?q=${encodeURIComponent(typed)}`) : Promise.resolve({ rows: [] as Person[] })),
+    [typed, open],
+  );
+  if (value && !open) {
+    return (
+      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1 }}><b>{value.name}</b>{value.mobile && <span className="muted"> · {value.mobile}</span>}</div>
+        <Btn sm onClick={() => { setQ(''); setOpen(true); }}>Change</Btn>
+        <Btn sm onClick={() => onPick(null)}>From the office instead</Btn>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <div className="row" style={{ alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1 }}><b>From the office</b> <span className="muted">(you)</span></div>
+        <Btn sm onClick={() => setOpen(true)}>On behalf of a member</Btn>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <input className="inp" value={q} autoFocus placeholder="Search a member by name or mobile number" onChange={(e) => setQ(e.target.value)} />
+      <div className="writer-list">
+        {found.loading && <div className="muted" style={{ padding: 10 }}>Searching…</div>}
+        {!found.loading && !(found.data?.rows.length) && <div className="muted" style={{ padding: 10 }}>No member found.</div>}
+        {(found.data?.rows ?? []).map((w) => (
+          <button type="button" key={w.id} onClick={() => { onPick(w); setOpen(false); }}>
+            <b>{w.name}</b><span className="muted">{w.mobile}</span>
+          </button>
+        ))}
+        <button type="button" onClick={() => setOpen(false)}><span className="muted">Cancel</span></button>
+      </div>
+    </div>
+  );
+}
 
 /** Who the member asked to see it. */
 function Audience({ everyone }: { everyone: boolean }) {
@@ -43,6 +94,14 @@ export default function PrayerInbox() {
   const [draft, setDraft] = useState('');
   const [draftEveryone, setDraftEveryone] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  /* A prayer request the office writes. */
+  const [adding, setAdding] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [newCategory, setNewCategory] = useState('Other');
+  const [newEveryone, setNewEveryone] = useState(false);
+  const [newPublish, setNewPublish] = useState(true);
+  const [newFrom, setNewFrom] = useState<Person | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const { toast } = useToast();
@@ -82,6 +141,29 @@ export default function PrayerInbox() {
             : 'Approved. Prayer warriors can see it; it stays off the open wall.'
           : out.memberTold ? (why ? 'Declined. The member is told, with your note.' : 'Declined. The member is told.') : 'Declined.',
         decision === 'Approved' ? 'ok' : 'warn',
+      );
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const startAdd = () => { setNewText(''); setNewCategory('Other'); setNewEveryone(false); setNewPublish(true); setNewFrom(null); setAdding(true); };
+
+  async function saveNew() {
+    setBusy(true);
+    try {
+      await api.post('/prayer-inbox', { text: newText, category: newCategory, everyone: newEveryone, publish: newPublish, memberId: newFrom?.id });
+      setAdding(false);
+      setState(newPublish ? 'Approved' : 'Pending');
+      q.reload();
+      all.reload();
+      queues.refresh();
+      toast(
+        !newPublish ? 'Added. It is waiting for approval, like a member\'s.'
+          : newEveryone ? 'Added. It is on the open prayer wall now.' : 'Added. Prayer warriors can see it.',
+        'ok',
       );
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -210,12 +292,52 @@ export default function PrayerInbox() {
               </select>
               <span className="sp" style={{ flex: 1 }} />
               <span className="small muted">Oldest first</span>
+              <Btn variant="pri" icon="plus" onClick={startAdd}>New prayer request</Btn>
             </>
           }
           empty={<Empty icon="check" title="Nothing waiting">Every request from the app has been decided.</Empty>}
           footNote="From the prayer pop-up in the Noah app"
         />
       )}
+
+      <Drawer
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="New prayer request"
+        footer={
+          <>
+            <span className="sp" style={{ flex: 1 }} />
+            <Btn onClick={() => setAdding(false)} disabled={busy}>Cancel</Btn>
+            <Btn variant="ok" icon="check" onClick={saveNew} disabled={busy || !newText.trim()}>
+              {newPublish ? 'Add and put on the wall' : 'Add and leave waiting'}
+            </Btn>
+          </>
+        }
+      >
+        <div className="stack" style={{ gap: 14 }}>
+          <Field label="The request" hint={`${newText.trim().length.toLocaleString('en-IN')} characters`}>
+            <textarea className="ta" rows={8} value={newText} autoFocus placeholder="What should members pray for?" onChange={(e) => setNewText(e.target.value)} />
+          </Field>
+          <Field label="Category">
+            <select className="sel" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Who may see it">
+            <select className="sel" value={newEveryone ? 'everyone' : 'warriors'} onChange={(e) => setNewEveryone(e.target.value === 'everyone')}>
+              <option value="warriors">Prayer warriors only</option>
+              <option value="everyone">Everyone (the open prayer wall)</option>
+            </select>
+          </Field>
+          <Field label="Who it is from" as="div">
+            <FromPick value={newFrom} onPick={setNewFrom} />
+          </Field>
+          <label className="row gap8" style={{ alignItems: 'center' }}>
+            <input type="checkbox" checked={newPublish} onChange={(e) => setNewPublish(e.target.checked)} />
+            <span>Put it on the prayer wall now <span className="muted small">(otherwise it waits here to be approved)</span></span>
+          </label>
+        </div>
+      </Drawer>
 
       <Drawer
         open={!!open}

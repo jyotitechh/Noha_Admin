@@ -1836,6 +1836,32 @@ section('Prayer requests: category and audience read right, the office can edit 
   check('deciding again is refused (409)', (await call('POST', `/prayer-inbox/${ids.toApprove}/decide`, { decision: 'Declined' }, BT)).status === 409);
   check('...and an unknown decision is a 400', (await call('POST', `/prayer-inbox/${ids.career}/decide`, { decision: 'Maybe' }, BT)).status === 400);
   check('deciding needs permission to moderate (finance gets 403)', (await call('POST', `/prayer-inbox/${ids.career}/decide`, { decision: 'Approved' }, FT)).status === 403);
+  /* The office writes a prayer request of its own. */
+  const newOne = await call('POST', '/prayer-inbox', { text: 'Pray for the church building fund.', category: 'Family', everyone: true, memberId: ANAND_ID }, BT);
+  check('the office can add a prayer request for a member, for everyone, in a category', newOne.status === 201 && newOne.body?.request?.everyone === true && newOne.body.request.category === 'Family'
+    && newOne.body.request.memberName === 'Anand Rao' && newOne.body.request.state === 'Approved', newOne.text.slice(0, 200));
+  const listed = (await list()).find((r) => r.id === newOne.body?.request?.id);
+  check('...it is on the wall at once (approved), read back as Family for everyone', listed?.state === 'Approved' && listed.everyone === true && listed.category === 'Family' && listed.text === 'Pray for the church building fund.', JSON.stringify(listed));
+  const forWarriors = await call('POST', '/prayer-inbox', { text: 'For the prayer warriors only.', category: 'Guidance', everyone: false, memberId: ANAND_ID }, BT);
+  check('...one for prayer warriors only is stored as that', forWarriors.status === 201 && (await list()).find((r) => r.id === forWarriors.body?.request?.id)?.everyone === false);
+  const waiting = await call('POST', '/prayer-inbox', { text: 'Leave this one waiting.', category: 'Healing', publish: false, memberId: ANAND_ID }, BT);
+  check('...it can be left waiting, like a member\'s', waiting.status === 201 && (await list()).find((r) => r.id === waiting.body?.request?.id)?.state === 'Pending');
+  const longOne = await call('POST', '/prayer-inbox', { text: 'Lord, hear us. '.repeat(400), memberId: ANAND_ID }, BT);
+  check('...with no 300-character limit', longOne.status === 201 && longOne.body?.request?.text.length > 5000, `${longOne.status}`);
+  const bySelf = await call('POST', '/prayer-inbox', { text: 'From the office itself.', everyone: true }, BT);
+  check('...without choosing a member it is from the signed-in office member', bySelf.status === 201 && !!bySelf.body?.request?.memberName, bySelf.text.slice(0, 200));
+  check('...an empty request is refused', (await call('POST', '/prayer-inbox', { text: '  ', memberId: ANAND_ID }, BT)).status === 400);
+  check('...so is one past the 10,000 the database holds', (await call('POST', '/prayer-inbox', { text: 'x'.repeat(10001), memberId: ANAND_ID }, BT)).body?.code === 'too_long');
+  check('...a category that does not exist', (await call('POST', '/prayer-inbox', { text: 'x', category: 'Weather', memberId: ANAND_ID }, BT)).body?.code === 'bad_category');
+  check('...and a member who is not on the register', (await call('POST', '/prayer-inbox', { text: 'x', memberId: '27145000000999999' }, BT)).body?.code === 'no_member');
+  check('...an audience that is not true or false', (await call('POST', '/prayer-inbox', { text: 'x', everyone: 'yes', memberId: ANAND_ID }, BT)).status === 400);
+  check('adding needs permission to moderate (finance gets 403)', (await call('POST', '/prayer-inbox', { text: 'x', memberId: ANAND_ID }, FT)).status === 403);
+  const people = await call('GET', '/prayer-inbox/members?q=anand', null, BT);
+  check('a member can be searched for by name, to write a request on their behalf', people.status === 200 && people.body?.rows?.some((x) => x.id === ANAND_ID && x.name === 'Anand Rao'), people.text.slice(0, 160));
+  check('...and the search needs permission to moderate (finance gets 403)', (await call('GET', '/prayer-inbox/members?q=anand', null, FT)).status === 403);
+  const added = (await call('GET', '/data/AUD?limit=80', null, BT)).body?.rows || [];
+  check('adding is in the audit log', added.some((x) => x.action === 'Added a prayer request'));
+
   const declinedRow = await get(ids.toDecline);
   check('a declined request (the Noah API marks it isApproved = 2) is listed as Declined, not as waiting', declinedRow?.state === 'Declined' && !(await list()).some((r) => r.id === ids.toDecline && r.state === 'Pending'));
 }

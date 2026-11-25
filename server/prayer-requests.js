@@ -27,6 +27,8 @@ export const TEXT_MAX = 10000;
 
 /** The category numbers (the tens digit of `type`), with the words the app uses. */
 const CATEGORIES = { 1: 'Healing', 2: 'Family', 3: 'Guidance', 4: 'Thanksgiving', 5: 'Other' };
+export const CATEGORY_NAMES = Object.values(CATEGORIES);
+const categoryNumber = (name) => Number(Object.keys(CATEGORIES).find((k) => CATEGORIES[k] === name));
 const audienceOf = (type) => Number(type) % 10;
 /** Everyone (the open wall) is audience 1. Anything else is prayer warriors only, so a number not known narrows the audience. */
 export const isEveryone = (type) => audienceOf(type) === 1;
@@ -168,6 +170,49 @@ export async function editPrayerRequest(id, { text, everyone } = {}, { byRowId }
 }
 
 const shapeNow = async (row) => shape(row, await peopleByKey());
+
+/**
+ * A prayer request written by the office, for the member it is from (the office's own member record, or whoever it is
+ * written on behalf of). `category` is one of CATEGORY_NAMES, `everyone` the open prayer wall or prayer warriors only, and
+ * `publish` approves it at once, so it is on its wall straight away; otherwise it waits in the inbox like a member's.
+ * Returns the shaped row; throws { code } for text that is empty or too long, a category that is not known, or no member.
+ */
+export async function createPrayerRequest({ text, category = 'Other', everyone = false, publish = true, memberId } = {}, { byRowId } = {}) {
+  const t = String(text ?? '').trim();
+  if (!t) throw Object.assign(new Error('Write the prayer request first.'), { code: 'empty' });
+  if (t.length > TEXT_MAX) throw Object.assign(new Error(`That is ${t.length.toLocaleString('en-IN')} characters. The most a request can hold is ${TEXT_MAX.toLocaleString('en-IN')}.`), { code: 'too_long' });
+  const cat = categoryNumber(category);
+  if (!cat) throw Object.assign(new Error('Pick one of the categories: ' + CATEGORY_NAMES.join(', ') + '.'), { code: 'bad_category' });
+  const from = String(memberId || byRowId || '').trim();
+  if (!from) throw Object.assign(new Error('Pick the member this prayer request is from.'), { code: 'no_member' });
+  const people = await peopleByKey();
+  if (!people.has(from)) throw Object.assign(new Error('That member is not on the register.'), { code: 'no_member' });
+
+  const now = stampNow();
+  const row = {
+    memberId: from, type: cat * 10 + (everyone ? 1 : 0), content: t, contentLanguage: 1,
+    isApproved: publish ? 1 : 0, closed: false, isArchived: false,
+    prayerCount: 0, urgentCount: 0, reportedCount: 0, createdOn: now,
+    ...(publish ? { approvedOn: now } : {}),
+    ...(byRowId ? { createdBy: String(byRowId), ...(publish ? { approvedBy: String(byRowId) } : {}) } : {}),
+  };
+  await io.insert(TABLE, row);
+  forgetPrayerRequests();
+  /* Catalyst's answer to an insert is not trusted for the id (see noah-schema.js): find the row just made. */
+  const made = (await raw())
+    .filter((r) => String(r.memberId) === from && String(r.content ?? '').trim() === t && Number(r.type) === row.type)
+    .sort((a, b) => String(b.CREATEDTIME).localeCompare(String(a.CREATEDTIME)))[0];
+  return shape(made || { ...row, ROWID: '' }, people);
+}
+
+/** Members matching what was typed (name, or part of a mobile number), for choosing who a request is from. */
+export async function findPeople(q = '') {
+  const s = String(q).trim().toLowerCase();
+  const digits = s.replace(/\D/g, '');
+  const all = (await listMembers({})).filter((m) => m.name && m.name !== '(not registered yet)');
+  const hit = s ? all.filter((m) => m.name.toLowerCase().includes(s) || (digits.length >= 3 && String(m.mobile || '').replace(/\D/g, '').includes(digits))) : all;
+  return hit.slice(0, 20).map((m) => ({ id: String(m.rowId), name: m.name, mobile: m.mobile || '' }));
+}
 
 export async function prayerRequestById(id) {
   const [rows, people] = await Promise.all([raw(), peopleByKey()]);
