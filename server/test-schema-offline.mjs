@@ -2286,6 +2286,17 @@ section('Events, event groups and language groups');
   }
 }
 
+/* ---------- duplicate emails: the same mailbox however it is written ---------- */
+
+{
+  const DE = await import('./duplicate-emails.js');
+  check('capitals and spaces do not make a different address', DE.mailbox(' Anand.Rao@Example.COM ') === 'anand.rao@example.com');
+  check('Gmail: dots and a +tag reach the same mailbox', DE.mailbox('john.smith+church@gmail.com') === 'johnsmith@gmail.com' && DE.mailbox('JohnSmith@googlemail.com') === 'johnsmith@gmail.com');
+  check('common typos of the big providers are read as the provider', DE.mailbox('priya@gmial.com') === 'priya@gmail.com' && DE.mailbox('a@yaho.com') === 'a@yahoo.com' && DE.mailbox('a@hotmial.com') === 'a@hotmail.com');
+  check('...but dots matter elsewhere (Yahoo, own domains)', DE.mailbox('a.b@yahoo.com') !== DE.mailbox('ab@yahoo.com') && DE.mailbox('a.b@church.org') !== DE.mailbox('ab@church.org'));
+  check('an address is partly hidden for staff who may not see contact details', DE.maskEmail('anand.rao@gmail.com') === 'an••••@gmail.com');
+}
+
 /* ---------- result ---------- */
 
 console.log('\n' + '─'.repeat(64));

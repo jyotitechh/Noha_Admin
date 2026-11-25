@@ -1868,6 +1868,59 @@ section('Prayer requests: category and audience read right, the office can edit 
 }
 
 /* ================================================================== */
+section('Duplicate emails: addresses more than one member uses, when each came, checked or corrected');
+
+{
+  const person = (n, first, email, day) => ({ ROWID: `2714500000099700${n}`, firstName: first, lastName: 'Dup', emailId1: email,
+    countryCode: '+91', mobileNumber1: `90000970${n}0`, CREATEDTIME: `2026-11-${day} 10:00:00:000`, archived: false });
+  await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'members', rows: [
+    person(1, 'Asha', 'same.person@example.com', '01'),
+    person(2, 'Bina', ' Same.Person@Example.COM ', '10'),          /* the same address, other capitals and spaces */
+    person(3, 'Chris', 'john.smith@gmail.com', '02'),
+    person(4, 'Dev', 'johnsmith+church@gmail.com', '12'),         /* Gmail ignores the dot and the +tag */
+    person(5, 'Esha', 'priya@gmial.com', '03'),                   /* a typo of gmail.com */
+    person(6, 'Farah', 'priya@gmail.com', '13'),
+    person(7, 'Gita', 'nobody.else@example.com', '04'),
+  ] }) });
+  const read = async () => (await call('GET', '/duplicate-emails', null, BT)).body?.rows || [];
+  const byKey = async (k) => (await read()).find((g) => g.key === k);
+
+  const same = await byKey('same.person@example.com');
+  check('two members with the same email (whatever the capitals) are a Duplicate', same?.kind === 'duplicate' && same.people === 2, JSON.stringify(same).slice(0, 200));
+  check('...listed oldest first, with when each came, so the office sees which came first', same?.entries?.[0]?.name === 'Asha Dup' && same.entries[0].first === true
+    && same.entries[1].name === 'Bina Dup' && same.entries[1].first === false && same.entries[0].came < same.entries[1].came, JSON.stringify(same?.entries?.map((e) => [e.name, e.came, e.first])));
+  check('...with their mobile number to call them', same?.entries?.[0]?.mobile?.includes('9000097010'), same?.entries?.[0]?.mobile);
+  const gmail = await byKey('johnsmith@gmail.com');
+  check('the same Gmail with a dot or a +tag is a Potential duplicate', gmail?.kind === 'potential' && gmail.people === 2, JSON.stringify(gmail).slice(0, 160));
+  check('...so is a typo of gmail.com', (await byKey('priya@gmail.com'))?.kind === 'potential');
+  check('an address only one member uses is not listed', !(await read()).some((g) => g.entries.some((e) => e.email === 'nobody.else@example.com')));
+  check('the list needs permission to edit members (finance gets 403)', (await call('GET', '/duplicate-emails', null, FT)).status === 403);
+
+  const queue = async () => ((await call('GET', '/queues', null, BT)).body || []).find?.((x) => x.id === 'dupes')?.count ?? -1;
+  const before = await queue();
+  check('the shared emails to check are counted for the bell', before >= 3, String(before));
+
+  const marked = await call('POST', '/duplicate-emails/check', { key: 'same.person@example.com', note: 'Called both: sisters who share it.' }, BT);
+  check('an address can be marked as checked, with a note', marked.status === 200 && (await byKey('same.person@example.com'))?.checked === true
+    && (await byKey('same.person@example.com'))?.check?.note === 'Called both: sisters who share it.', marked.text.slice(0, 160));
+  check('...and is no longer counted as work', await queue() === before - 1, `${before} -> ${await queue()}`);
+  check('...which is in the audit log', ((await call('GET', '/data/AUD?limit=40', null, BT)).body?.rows || []).some((a) => a.action === 'Marked a shared email as checked'));
+  await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'members', rows: [person(8, 'Hema', 'same.person@example.com', '20')] }) });
+  const third = await byKey('same.person@example.com');
+  check('when someone new joins with a checked address, it is open again', third?.checked === false && third.people === 3, JSON.stringify(third).slice(0, 160));
+  await call('POST', '/duplicate-emails/check', { key: 'same.person@example.com' }, BT);
+  const reopened = await call('POST', '/duplicate-emails/reopen', { key: 'same.person@example.com' }, BT);
+  check('...and a checked address can be opened again by hand', reopened.status === 200 && (await byKey('same.person@example.com'))?.checked === false);
+  check('...marking needs an address that is shared (404) and permission (finance 403)', (await call('POST', '/duplicate-emails/check', { key: 'not.shared@example.com' }, BT)).status === 404
+    && (await call('POST', '/duplicate-emails/check', { key: 'same.person@example.com' }, FT)).status === 403);
+
+  /* Correcting the address on the right member, after calling them. */
+  const fixed = await call('PATCH', '/people/27145000000997005', { changes: { email: 'esha.dup@gmail.com' } }, BT);
+  check('the office corrects the email on a member, and that address is no longer shared', fixed.status === 200 && !(await byKey('priya@gmail.com')), fixed.text.slice(0, 160));
+  check('...a correction that is not an email is refused', (await call('PATCH', '/people/27145000000997004', { changes: { email: 'not an email' } }, BT)).status === 400);
+}
+
+/* ================================================================== */
 section('Help bot questions: the FAQ to-do list (FOR-CONSOLE-HELP-BOT.md)');
 
 {

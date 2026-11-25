@@ -14,6 +14,7 @@ import { accessRequests } from './noah-schema.js';
 import { pendingRequests as pendingFamilyRequests } from './family-requests.js';
 import { noahConfigured } from './noah-api.js';
 import { cachedPending, cachedReported } from './noahgram.js';
+import { openDuplicateEmails } from './duplicate-emails.js';
 
 const minDate = (a) => (a.length ? new Date(Math.min(...a.map((d) => +d))) : null);
 const open = (coll, fn) => (db[coll] || []).filter(fn);
@@ -33,7 +34,7 @@ const STAGE_LABEL = {
    The rest would be counting sample data, which is worse than showing
    nothing: a badge saying 26 posts await moderation, when no such table
    exists, sends someone looking for work that is not there. */
-const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod', 'flags', 'praise']);
+const CATALYST_BACKED = new Set(['registrations', 'prayer-inbox', 'access', 'family', 'mod', 'flags', 'praise', 'dupes']);
 
 export function queues() {
   const jodieStages = Object.entries(STAGE_LABEL).map(([k, label]) => ({
@@ -102,7 +103,8 @@ export function queues() {
       count: () => db.JBLOCKS.filter((b) => b.review === 'Open').length + db.JREPORTS.filter((r) => r.state === 'Open').length,
       oldest: () => minDate(db.JBLOCKS.filter((b) => b.review === 'Open').map((b) => b.at).concat(db.JREPORTS.filter((r) => r.state === 'Open').map((r) => r.at))),
     },
-    { id: 'dupes', l: 'Possible duplicate members', area: 'Membership', icon: 'merge', to: '/members/quality', perm: 'members.edit', owner: 'Membership officer', sla: 168, ...q('DUPES', (x) => x.state === 'Open', 'found') },
+    /* Emails two or more members use, not yet checked (server/duplicate-emails.js). Counted from Catalyst below. */
+    { id: 'dupes', l: 'Shared emails to check', area: 'Membership', icon: 'merge', to: '/members/quality', perm: 'members.edit', owner: 'Membership officer', sla: 168, ...q('DUPES', (x) => x.state === 'Open', 'found') },
     { id: 'absent', l: 'Absentees to follow up', area: 'Events', icon: 'user-x', to: '/events/attendance', perm: 'events.view', owner: 'Events coordinator, pastors', sla: 168, ...q('ABSENTEES', (x) => x.state === 'Open', 'last') },
     { id: 'playback', l: 'Playback problem reports', area: 'Content', icon: 'play', to: '/school/courses', perm: 'content.edit', owner: 'Content editor', sla: 72, ...q('PLAYBACK', (x) => x.state === 'Open') },
     { id: 'orders', l: 'Store orders to dispatch', area: 'Operations', icon: 'truck', to: '/ops/store', perm: 'ops.manage', owner: 'Operations', sla: 48, ...q('ORDERS', (x) => x.status === 'Awaiting dispatch') },
@@ -151,6 +153,11 @@ export async function queuesFor(roleId, canFn) {
     if (rows.some((x) => x.id === 'praise')) {
       try { real.praise = tally(await listPraise({ state: 'Pending' })); }
       catch { real.praise = { count: 0, oldest: null }; }
+    }
+    if (rows.some((x) => x.id === 'dupes')) {
+      /* "Oldest" is when the latest person joined with that address: the group became work then. */
+      try { real.dupes = tally((await openDuplicateEmails()).map((g) => ({ at: g.latest }))); }
+      catch { real.dupes = { count: 0, oldest: null }; }
     }
     try { real['prayer-inbox'] = tally(await pendingPrayerRequests()); }
     catch { real['prayer-inbox'] = { count: 0, oldest: null }; /* never the sample count beside real data */ }

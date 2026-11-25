@@ -605,6 +605,36 @@ export async function loadMembers() {
 }
 
 /** Every member's own columns as stored, by member row id, for the register's CSV export. Keys are MEMBER_FIELDS keys. */
+/**
+ * Every member's email addresses, with who they are, how to reach them and when they came, for finding the emails two members
+ * share (server/duplicate-emails.js). `came` is when their registration was sent, or when the member row was made.
+ */
+export async function memberEmailRows() {
+  const { regs, members, users } = await snapshot();
+  const latest = latestRegByMember(regs);
+  const userById = new Map(users.map((u) => [String(u.ROWID), u]));
+  return members.map((m) => {
+    const reg = latest.get(String(m.ROWID));
+    const approval = reg ? stateOf(reg.status) : (isFalse(m.isUnVerified) ? 'approved' : 'none');
+    const archived = asBool(m.archived);
+    return {
+      rowId: String(m.ROWID),
+      name: [m.firstName, m.middleName, m.lastName].filter(Boolean).join(' ') || '(name not given yet)',
+      mobile: phoneOf(m, userById.get(String(m.userId))),
+      email1: String(m.emailId1 ?? '').trim(),
+      email2: String(m.emailId2 ?? '').trim(),
+      came: (reg && utc(reg.submittedAt)) || ist(m.CREATEDTIME) || null,
+      status: archived ? 'Archived' : ({
+        approved: 'Active', pending: 'Pending', videoReturned: 'Video returned',
+        rejected: 'Rejected', draft: 'Not approved', none: 'Not approved',
+      }[approval] || 'Not approved'),
+      archived,
+      /* A child made a member by a parent: the Noah API copies the parent's email to the child (FOR-CONSOLE-CHILDREN.md). */
+      parentMemberId: reg?.parentMemberId ? String(reg.parentMemberId) : null,
+    };
+  });
+}
+
 export async function memberExportRows() {
   const { members } = await snapshot();
   const day = (v) => (v ? String(v).slice(0, 10) : '');

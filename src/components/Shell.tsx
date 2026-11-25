@@ -62,6 +62,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
 /* What to say when a queue grows while the console is open. */
 const ARRIVED: Record<string, (n: number) => string> = {
   family: (n) => (n === 1 ? 'A new child request has come in from the app.' : `${n} new child requests have come in from the app.`),
+  dupes: (n) => (n === 1 ? 'An email is now used by more than one member. Check it in Duplicate Emails.' : `${n} more emails are now shared by members. Check them in Duplicate Emails.`),
   registrations: (n) => (n === 1 ? 'A new registration has come in from the app.' : `${n} new registrations have come in from the app.`),
 };
 

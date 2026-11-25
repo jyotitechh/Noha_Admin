@@ -86,8 +86,8 @@ export const MODULES: ModuleDef[] = [
         desc: 'New child requests from parents in the app, to approve, and every child under 18. From 15 the parents ask to make them a member (approved here too), then the child sends their consent (App registrations).' },
       { id: 'register', label: 'Member Register', status: 'built',
         desc: 'Everyone on the roll. Open a person for their full record: registration and video, pastor, partnership, family and groups.' },
-      { id: 'quality', label: 'Duplicates And Data', perm: 'members.edit', status: 'planned', from: 'Membership → Duplicates and data',
-        desc: 'Possible duplicate members, merge decisions and data quality.' },
+      { id: 'quality', label: 'Duplicate Emails', perm: 'members.edit', status: 'built',
+        desc: 'Emails that more than one member uses, oldest first in each, with when each came. Call them, correct the email on the right member, or mark it checked.' },
     ],
   },
   {

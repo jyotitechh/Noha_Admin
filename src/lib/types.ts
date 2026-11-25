@@ -6,6 +6,8 @@
 
 export interface Registration {
   id: string;
+  /* The member this registration is for (the members row). */
+  memberRowId?: string;
   salutation: string;
   firstName: string; middleName: string; lastName: string; fullName: string;
   mobile: string; email: string; gender: string; dob: Date | null;

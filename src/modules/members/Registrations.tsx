@@ -18,6 +18,8 @@ import { Table, type Column } from '@/components/Table';
 import { Btn, Chip, Field, Icon, Kpi, Kpis, Note, Who, Age, Failed, Loading, Empty, Kv } from '@/components/ui';
 import { fd, fdt, REG_STATE, since } from '@/lib/format';
 import type { Registration } from '@/lib/types';
+import { useAuth } from '@/state/auth';
+import type { SharedEmail } from './DuplicateEmails';
 import { Upload } from '@/components/Upload';
 import { ReferredBy } from '@/components/ReferredBy';
 
@@ -268,6 +270,23 @@ export default function Registrations() {
   );
   const counts = useQuery(() => collection<Registration>('REGISTRATIONS', { limit: 500 }), []);
 
+  /* Whose email another member already uses (Membership > Duplicate Emails), so it is checked before approving. */
+  const { can } = useAuth();
+  const shared = useQuery(
+    () => (can('members.edit') ? api.get<{ rows: SharedEmail[] }>('/duplicate-emails') : Promise.resolve({ rows: [] as SharedEmail[] })),
+    [],
+  );
+  const sharedFor = useMemo(() => {
+    const by = new Map<string, { kind: SharedEmail['kind']; others: string[]; checked: boolean }>();
+    for (const g of shared.data?.rows ?? []) {
+      for (const e of g.entries) {
+        const others = g.entries.filter((x) => x.memberRowId !== e.memberRowId).map((x) => x.name);
+        if (others.length) by.set(e.memberRowId, { kind: g.kind, others, checked: g.checked });
+      }
+    }
+    return by;
+  }, [shared.data]);
+
   /* Whether this is the real Catalyst data or the sample set. On Catalyst the
      office does not choose a congregation here — the Noah API approves, and it
      has nowhere to put one — so the picker would promise something false. */
@@ -372,6 +391,11 @@ export default function Registrations() {
           <Who name={r.fullName} sub={r.child ? <>Child of {r.child.parentName || 'a member'}</> : <span className="mono">{r.mobile}</span>} />
           {r.child && <Chip tone="info" icon="user">Child's consent</Chip>}
           {r.resent && <Chip tone="brand" icon="refresh">Sent again</Chip>}
+          {r.memberRowId && sharedFor.get(r.memberRowId) && !sharedFor.get(r.memberRowId)!.checked && (
+            sharedFor.get(r.memberRowId)!.kind === 'duplicate'
+              ? <Chip tone="bad" icon="copy">Duplicate email</Chip>
+              : <Chip tone="warn" icon="alert">Potential duplicate email</Chip>
+          )}
         </div>
       ),
     },
@@ -509,6 +533,14 @@ export default function Registrations() {
       >
         {open && (
           <>
+            {open.memberRowId && sharedFor.get(open.memberRowId) && !sharedFor.get(open.memberRowId)!.checked && (
+              <div className="mb12">
+                <Note tone={sharedFor.get(open.memberRowId)!.kind === 'duplicate' ? 'bad' : 'warn'} icon="alert">
+                  <b>{sharedFor.get(open.memberRowId)!.kind === 'duplicate' ? 'This email is already used' : 'This email looks like one already used'}</b>
+                  {' '}by {sharedFor.get(open.memberRowId)!.others.join(', ')}. Call them to confirm it, and correct it in Membership &gt; Duplicate Emails.
+                </Note>
+              </div>
+            )}
             {open.state === 'rejected' && (
               <div className="mb12">
                 <Note tone="bad" icon="x">
