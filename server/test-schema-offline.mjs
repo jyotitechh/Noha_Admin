@@ -2262,6 +2262,24 @@ section('Events, event groups and language groups');
     check('a piece Zoho cannot translate is kept and the rest of the text is translated', /\[hi\] First/.test(out) && /Odd words here/.test(out) && !/\[hi\] Odd/.test(out) && /\[hi\] Last/.test(out), out.slice(0, 80));
     const none = await TR.translateText('Odd words only', 'hi').then(() => null, (e) => e);
     check('...but a text of which nothing could be translated fails', !!none && /returned nothing/.test(none.message), none?.message);
+
+    /* An empty answer to a text with words in it is tried once more (Zoho is sometimes only busy). */
+    let asked = 0;
+    globalThis.fetch = async (u) => {
+      asked += 1;
+      return asked === 1 ? { ok: true, status: 200, text: async () => JSON.stringify({ error: 'Zoho Translate returned nothing' }) } : answer('[hi] ' + wanted(u).text);
+    };
+    check('an empty answer is tried once more, and then works', (await TR.translateText('Peace', 'hi')) === '[hi] Peace' && asked === 2, `asked ${asked}`);
+
+    /* In formatted text, one paragraph Zoho keeps answering with nothing is kept; the others are translated. */
+    globalThis.fetch = async (u) => {
+      const t = wanted(u).text;
+      return /Odd/.test(t) ? { ok: true, status: 200, text: async () => JSON.stringify({ error: 'Zoho Translate returned nothing' }) } : answer('[hi] ' + t);
+    };
+    check('one stubborn paragraph is kept and the others in the message are translated',
+      (await TR.translateHtml('<p>Good one.</p><p>Odd one.</p><ul><li>Another good one.</li></ul>', 'hi')) === '<p>[hi] Good one.</p><p>Odd one.</p><ul><li>[hi] Another good one.</li></ul>');
+    const allOdd = await TR.translateHtml('<p>Odd one.</p><p>Odd two.</p>', 'hi').then(() => null, (e) => e);
+    check('...but a message of which no paragraph could be translated fails', !!allOdd && /returned nothing/.test(allOdd.message), allOdd?.message);
   } finally {
     globalThis.fetch = realFetch;
     if (wasUrl === undefined) delete process.env.ZOHO_TRANSLATE_URL; else process.env.ZOHO_TRANSLATE_URL = wasUrl;

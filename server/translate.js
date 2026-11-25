@@ -161,13 +161,15 @@ async function tryZoho(text, target, source) {
   }
 }
 
-/** One call to the function: waits for its turn, and is tried twice when the first try was only slow or briefly refused. */
+/** One call to the function: waits for its turn, and is tried twice when the first try was only slow, briefly refused, or answered with nothing. */
 async function callZoho(text, target, source) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await inSlot(() => tryZoho(text, target, source));
     } catch (err) {
-      if (attempt >= 2 || !(err instanceof TranslateError) || err.code !== 'transient') throw err;
+      /* An empty answer to a text with words in it is sometimes only Zoho being busy: the same text works a moment later. */
+      const again = err instanceof TranslateError && (err.code === 'transient' || NOTHING.test(err.message));
+      if (attempt >= 2 || !again) throw err;
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }
@@ -218,10 +220,30 @@ const decode = (s) => s.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
    Each part is translated as a whole, so a sentence is never cut in two; bold and italic inside it are not kept. */
 const BLOCK = /<(p|h[1-4])>([\s\S]*?)<\/\1>|<li>((?:(?!<\/?(?:p|ul|ol|li)\b)[\s\S])*?)<\/li>/g;
 
-/** Several texts in as few calls as can be trusted: one per text (Zoho counts each call). */
+/**
+ * Several texts, one call each (Zoho counts each call). A paragraph Zoho still answers with nothing, after a second try, is kept
+ * as it is so one stubborn paragraph does not cost the whole entry its translation; if none of the paragraphs came back
+ * translated, the entry fails.
+ */
 async function translateAll(texts, target, source) {
   const out = [];
-  for (const t of texts) out.push(t.trim() ? await translateText(t, target, source) : t);
+  let words = 0;
+  let done = 0;
+  let nothing = null;
+  for (const t of texts) {
+    if (!t.trim()) { out.push(t); continue; }
+    const real = hasWords(t);
+    if (real) words += 1;
+    try {
+      out.push(await translateText(t, target, source));
+      if (real) done += 1;
+    } catch (err) {
+      if (!(err instanceof TranslateError && NOTHING.test(err.message))) throw err;
+      nothing = err;
+      out.push(t);
+    }
+  }
+  if (words > 0 && done === 0) throw nothing;
   return out;
 }
 
