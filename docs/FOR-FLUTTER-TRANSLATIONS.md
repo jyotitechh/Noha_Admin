@@ -1,12 +1,24 @@
-# For the Noah app and the Noah API: showing content in the member's language
+# Content in the member's language: what the Noah app and the Noah API need to do
 
-From the console team, 23 November 2026.
+From the console team, 25 November 2026. For the developer of the Noah app (Flutter) and of the Noah API (`noah_api` on
+Catalyst).
 
-The office writes content once, in English. The console translates it with **Zoho Translate** into every language the app
-offers (Hindi, Marathi, Telugu, Malayalam, Tamil and Kannada) and stores every translation in the **same Catalyst table** as the original.
-The app does not translate anything. It asks for the member's language and shows what comes back.
+## In short
 
-Translated today:
+- The office writes content **once, in English**, in the admin console.
+- When they press **Save** or **Publish**, the console translates it with **Zoho Translate** into **Hindi, Marathi,
+  Telugu, Malayalam, Tamil and Kannada**, the languages the app offers. It takes a minute or two, in the background.
+- Each translation is stored as **its own row in the same Catalyst table** as the English original.
+- **The app translates nothing.** It sends the member's language; the API answers each item in that language, or in
+  English when there is no translation.
+- Older content has been translated too. The few entries not yet in every language are filled in by the console by
+  itself; until then the API shows them in English (section 4, step 4).
+
+> **Do this first.** The tables now hold, for each entry, the English original **and up to six translated copies**. An
+> API that lists every row will show each Daily Manna, prayer and confession **up to seven times**. Section 3, step 1
+> (list the originals only) fixes that, even before the rest is built.
+
+## 1. What is translated
 
 | Content | Table | Texts that are translated |
 |---|---|---|
@@ -16,60 +28,64 @@ Translated today:
 | Dream dictionary | `dreamDictionary` | `title`, `content` |
 | Bible commentary | `bibleCommentary` | `title`, `content` |
 
-## 1. Languages
+Not translated (shown as they are): banners, announcements, Noahgram, Noah Tube, Bible school and courses.
 
-`contentLanguage` is a number. The two-letter code is what a phone reports and what Zoho uses.
+## 2. Languages
 
-| Number | Code | Language |
-|---|---|---|
-| 1 | `en` | English |
-| 2 | `hi` | Hindi |
-| 3 | `mr` | Marathi |
-| 4 | `te` | Telugu |
-| 5 | `ml` | Malayalam |
-| 6 | `ta` | Tamil |
-| 7 | `kn` | Kannada |
+`contentLanguage` is a number. The two-letter code is what a phone reports.
 
-More may be added later with the next number (8, 9…). The console team will tell you the number and code. An unknown
-number must simply show the original.
+| Number | Code | Language | Written as |
+|---|---|---|---|
+| 1 | `en` | English | English |
+| 2 | `hi` | Hindi | हिन्दी |
+| 3 | `mr` | Marathi | मराठी |
+| 4 | `te` | Telugu | తెలుగు |
+| 5 | `ml` | Malayalam | മലയാളം |
+| 6 | `ta` | Tamil | தமிழ் |
+| 7 | `kn` | Kannada | ಕನ್ನಡ |
 
-## 2. How a translation is stored
+All six are always translated into; the office does not switch languages on or off. A language may be added later with
+the next number (8, 9…); the console team will tell you. **An unknown number must simply show the English.**
+
+## 3. How a translation is stored
 
 A translation is its own row in the same table:
 
 | Column | On the original | On a translation |
 |---|---|---|
 | `translatingParentId` | empty | the original's `ROWID` |
-| `contentLanguage` | usually 1 | the language's number, e.g. 7 |
-| translated texts (table above) | the original text | the translated text |
+| `contentLanguage` | 1 (English) | the language's number, e.g. 7 |
+| translated texts (section 1) | the English text | the translated text |
 | everything else (date, category, picture, partners only, published, embeds, writer) | as set | copied from the original, kept in step |
 | `likes`, `comments`, counters | the real counts | 0. **Do not use them.** |
 
-There is at most one translation per original per language. Treat an empty `translatingParentId` as "this is an
-original". Keep ids as Strings.
+- At most **one** translation per original per language.
+- An empty `translatingParentId` means "this is an original". Keep ids as Strings.
+- When the office edits, publishes, takes down or deletes the original, the console does the same to its translations.
+- The office may correct a translation by hand in the console; that row is then simply the better text.
 
-## 3. The rule for the Noah API
+## 4. The Noah API
 
-**List and count the originals only. Swap in the translated texts per item.**
+**List and count the originals only. Swap in the translated texts item by item.**
 
 For a member asking in language `L`:
 
-1. Select the rows exactly as today (published, dates, partners only, not archived), but only the originals: those with
-   an empty `translatingParentId`.
-2. For each original, look for a row with `translatingParentId = original.ROWID` and `contentLanguage = L`.
+1. Select the rows exactly as today (published, dates, partners only, not archived), **but only the originals**: an
+   empty `translatingParentId`.
+2. For each original, look for the row with `translatingParentId = original.ROWID` and `contentLanguage = L`.
 3. If there is one, return the original's item with **that row's texts** (`title`, `content`, `prayer`).
-4. If there is none, return the original's texts, and mark `fallback: true` with a reason (section 4).
+4. If there is none (just saved and still being translated, or Zoho failed), return the English texts with
+   `fallback: true`.
 5. Always return the **original's `id`**. Likes, comments, shares, bookmarks, deep links and push targets all use the
-   original's id, so a member's like counts whichever language they read in.
-6. An original that is itself written in `L` (`contentLanguage = L`) is shown as it is.
+   original's id, so a like counts whichever language the member read in.
+6. If `L` is English (1), or missing, or unknown: return the originals as today.
 
-> **Do not** filter the list by `contentLanguage = L` and fall back to English only when the list is empty. If you do, a
-> Kannada reader loses every entry that is not translated yet. The fallback must be decided **per item**.
+> **Do not** filter the list by `contentLanguage = L`. A member would then lose every entry not translated yet. The
+> fallback is decided **per item**.
 
-The published state, publish date and partners only flag are kept the same on the translation as on the original, but
-always decide visibility from the **original**.
+Decide visibility (published, date, partners only) from the **original**, not the translation.
 
-In ZCQL the lookup is one query per screen. With the originals' ids in hand:
+In ZCQL, one extra query per screen, with the originals' ids in hand:
 
 ```sql
 SELECT ROWID, translatingParentId, title, content, prayer FROM dailyMana
@@ -78,60 +94,58 @@ WHERE translatingParentId IN ('<id1>', '<id2>', ...) AND contentLanguage = 7
 
 ZCQL returns at most 300 rows a query and takes at most five `WHERE` conditions, so page the `IN` list.
 
-## 4. What to return (suggested)
+### What to return
 
-Add these to each item:
+Add `language`, `requestedLanguage` and `fallback` to each item:
 
 ```json
 { "id": "27145000000123456", "title": "ದೇವರ ಶಾಂತಿ", "content": "<p>…</p>", "prayer": "<p>…</p>",
   "language": 7, "requestedLanguage": 7, "fallback": false }
 ```
 
-When the item is not in the member's language:
-
 ```json
-{ "id": "27145000000123457", "title": "The peace of God", "content": "<p>…</p>",
-  "language": 1, "requestedLanguage": 7, "fallback": true, "reason": "not_translated_yet" }
+{ "id": "27145000000123457", "title": "The peace of God", "content": "<p>…</p>", "prayer": "<p>…</p>",
+  "language": 1, "requestedLanguage": 7, "fallback": true }
 ```
 
-| `reason` | Meaning |
-|---|---|
-| `not_offered` | The office translates nothing into this language. |
-| `not_translated_yet` | The language is on, but this item has no translation yet (or the translation failed). |
+**Never answer with an error for a missing translation.** Show the English.
 
-**Never show the member an error for a missing translation.** Show the original. A small "Shown in English" line is
-optional.
-
-Which languages are on: Catalyst table `globalSettings`, row `keyCol = 'console.translateTo'`, value such as `kn,hi`
-(codes). An endpoint for the app could be:
+Optional, for the app's language picker:
 
 ```
-GET /content/languages   ->  { "source": { "code": "en", "number": 1, "name": "English" },
-                               "languages": [ { "code": "kn", "number": 7, "name": "Kannada", "native": "ಕನ್ನಡ" } ] }
+GET /content/languages  ->  { "source": { "code": "en", "number": 1, "name": "English" },
+                              "languages": [ { "code": "hi", "number": 2, "name": "Hindi", "native": "हिन्दी" }, ... ] }
 ```
 
-## 5. The app
+(The list is fixed: the table in section 2.)
 
-- **Which language.** Default to the phone's language and keep only the two-letter code: in Flutter,
-  `PlatformDispatcher.instance.locale.languageCode` gives `ta` for `ta-IN`. Offer a language picker in settings,
-  remember the choice, and send it instead of the phone's language from then on.
-- **Sending it.** Send `lang` on every content call, as the number (`lang=7`) or the code (`lang=kn`); the API should
-  accept both. Send it when the device registers too, so a push can later go out in the member's language.
-- **Showing it.** Show `title`, `content` and `prayer` as today. They are HTML from the editor (FOR-FLUTTER-CONTENT.md),
-  and a translation keeps the same tags. If `fallback` is true, still show the text: it is the original.
-- **Fonts.** The texts arrive in Devanagari, Telugu, Malayalam, Tamil and Kannada scripts. Check each renders on a plain
-  Android phone (Noto Sans covers them all).
-- **Right to left.** None of today's languages needs it. If Urdu or Arabic is added later, show those right to left.
+## 5. The Flutter app
+
+- **Which language.** Use the language the member chose in the app. Until they choose, use the phone's language, two
+  letters only: `PlatformDispatcher.instance.locale.languageCode` gives `ta` for `ta-IN`. A phone language not in
+  section 2 means English.
+- **Sending it.** Send it on every content call: `?lang=7` or `?lang=kn` (the API should accept both). Also send it when
+  the device registers, so a notification can later go out in the member's language.
+- **Changing it.** When the member changes the language in settings, reload the content screens that are open (or clear
+  their cache), so the new language shows at once.
+- **Showing it.** Show `title`, `content` and `prayer` as today. They are HTML from the console's editor, and a
+  translation keeps the same tags. When `fallback` is true, still show the text (it is the English); a small
+  "Shown in English" line is optional.
+- **Fonts.** Devanagari, Telugu, Malayalam, Tamil and Kannada scripts. Check each on a plain Android phone; Noto Sans
+  covers them all.
+- **Caching.** Cache per language (the key includes `lang`), or a member who switches language sees the old one.
+- **Right to left.** None of these languages needs it.
 
 ## 6. How to check it
 
-1. In the console, in **Content > Daily Manna**, add an entry for today in English, published. After saving, the message
-   says it is being translated into the six languages; a minute or two later the list shows the six translations with
-   the label **Translated**.
-2. Older content is translated by the console by itself, a few minutes after it starts.
-3. Set a test phone to Kannada, or pick Kannada in the app's settings, and open the Daily Manna. Today's message must show
-   in Kannada.
-4. Switch the phone to Tamil while Tamil is off. The same entry must show in English, with `fallback: true`.
-5. Like the entry in Kannada, then switch to English. The like must still be there, because it is on the original's id.
-6. In the console, correct a word in the Kannada entry and save. After a refresh the app shows the correction.
-7. Take the English entry down. The Kannada one must disappear from the app too.
+1. Console: **Content > Daily Manna**, add an entry for today in English and **Save and publish**. The console says it is
+   being translated; a minute or two later the list shows six more rows labelled **Translated**.
+2. App, phone or app language **English**: today's entry shows **once**, in English.
+3. Switch the app to **Kannada**: the same entry shows in Kannada, still once. Repeat for Hindi, Marathi, Telugu,
+   Malayalam and Tamil.
+4. Straight after saving a new entry (before the translations are made), the app in Tamil shows it in English with
+   `fallback: true`, then in Tamil a minute or two later.
+5. Like the entry in Kannada, switch to English: the like is still there (it is on the original's id).
+6. Console: correct a word in the Kannada row and save. After a refresh the app in Kannada shows the correction.
+7. Console: take the English entry down. It disappears from the app in every language.
+8. Phone language that is not in the list (e.g. French): the app shows English.
