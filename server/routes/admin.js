@@ -11,7 +11,7 @@ import { downloadFile, fileScopeMissing, explainCatalyst } from '../catalyst.js'
 import * as noah from '../noah-api.js';
 import { noahConfigured, findFileId } from '../noah-api.js';
 import { MEMBER_ROLES, MEMBER_RESTRICTIONS, patchForRole, patchForRestriction, appRoleSummary, roleById as memberRole, restrictionById } from '../roles.js';
-import { decidePrayerRequest, prayerRequestById } from '../prayer-requests.js';
+import { decidePrayerRequest, editPrayerRequest, prayerRequestById, forgetPrayerRequests, TEXT_MAX } from '../prayer-requests.js';
 import { decidePraise, featurePraise, praiseById, praisePhoto } from '../praise-reports.js';
 import { patchMemberRoles, memberRolesRow, allMemberRoles, activateMemberOnly, canEnterApp, clearCache } from '../noah-schema.js';
 import { syncRoleScanners, scannerGaps, fillScannerGaps } from '../scanner-role.js';
@@ -695,20 +695,32 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
 
   /* ================= prayer requests from the app ================= */
 
+  /* The office's decision on a request. The reason for a decline is optional. Through the Noah API when it is connected, so the
+     member is told (a push and a notification, with the reason when there is one); without it, or when it cannot be reached, the
+     table is written directly and the member is not told. */
   app.post('/api/prayer-inbox/:id/decide', ...guard('community.moderate'), async (req, res) => {
+    const decision = req.body?.decision;
+    if (!['Approved', 'Declined'].includes(decision)) return res.status(400).json({ error: 'Decide Approved or Declined.' });
+    const remark = String(req.body?.remark || '').trim().slice(0, 500);
     if (live()) {
       try {
-        const decision = req.body?.decision;
-        if (!['Approved', 'Declined'].includes(decision)) return res.status(400).json({ error: 'Decide Approved or Declined.' });
-        const remark = String(req.body?.remark || '').trim();
-        if (decision === 'Declined' && !remark) return res.status(400).json({ error: 'Say why it was declined.' });
         const p = await prayerRequestById(req.params.id);
         if (!p) return notFound(res);
         if (p.state !== 'Pending') return res.status(409).json({ error: `Already ${p.state.toLowerCase()}. Refresh the list.` });
-        await decidePrayerRequest(p.id, decision, { byRowId: req.user.memberRowId });
-        /* The table has no column for the reason, so it is kept in the audit log. */
-        log(req, decision === 'Approved' ? 'Approved prayer request' : 'Declined prayer request', 'Community', p.id, { state: p.state }, { state: decision }, remark);
-        return res.json({ ok: true, request: { ...p, state: decision, remark } });
+        let memberTold = false;
+        if (noahConfigured()) {
+          try {
+            await noah.decideAppPrayerRequest(p.id, { decision, remark, actor: req.user.name });
+            forgetPrayerRequests();
+            memberTold = true;
+          } catch (err) {
+            if (err instanceof noah.NoahApiError && err.status === 409) return res.status(409).json({ error: 'That request was decided already. Refresh the list.' });
+            console.error(`[prayer] the Noah API could not decide ${p.id}, writing the table instead: ${err.message}`);
+          }
+        }
+        if (!memberTold) await decidePrayerRequest(p.id, decision, { byRowId: req.user.memberRowId });
+        log(req, decision === 'Approved' ? 'Approved prayer request' : 'Declined prayer request', 'Community', p.id, { state: p.state }, { state: decision, memberTold }, remark);
+        return res.json({ ok: true, memberTold, request: { ...p, state: decision, remark } });
       } catch (err) {
         const explained = explainCatalyst(err);
         return res.status(503).json({ error: explained?.message ?? err.message });
@@ -716,15 +728,10 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
     }
     const p = find('PRAYER_INBOX', req.params.id);
     if (!p) return notFound(res);
-    const decision = req.body?.decision;
-    if (!['Approved', 'Declined'].includes(decision)) return res.status(400).json({ error: 'Decide Approved or Declined.' });
-    if (decision === 'Declined' && !String(req.body?.remark || '').trim()) {
-      return res.status(400).json({ error: 'Say why it was declined. The member sees this.' });
-    }
     const before = { state: p.state };
     p.state = decision;
     p.decidedBy = req.user.name;
-    p.remark = req.body?.remark || '';
+    p.remark = remark;
 
     /* An approved request joins the prayer wall the app reads. */
     if (decision === 'Approved') {
@@ -735,6 +742,59 @@ export default function mountAdmin(app, { requireSession, requirePerm }) {
       });
     }
     log(req, decision === 'Approved' ? 'Approved prayer request' : 'Declined prayer request', 'Community', p.id, before, { state: decision }, p.remark);
+    res.json({ ok: true, memberTold: false, request: p });
+  });
+
+  /* The office may correct a request's wording and change who may see it, whether it is waiting or already approved. The app
+     limits a request to 300 characters; here the limit is the size of the column (10,000). { text?, everyone? } */
+  app.patch('/api/prayer-inbox/:id', ...guard('community.moderate'), async (req, res) => {
+    const asked = {};
+    if (req.body && 'text' in req.body) asked.text = req.body.text;
+    if (req.body && 'everyone' in req.body) {
+      if (typeof req.body.everyone !== 'boolean') return res.status(400).json({ error: 'Say whether it is for everyone (true) or for prayer warriors only (false).' });
+      asked.everyone = req.body.everyone;
+    }
+    if (!Object.keys(asked).length) return res.status(400).json({ error: 'Send the new wording, or who may see it.' });
+    if ('text' in asked && typeof asked.text !== 'string') return res.status(400).json({ error: 'The wording must be text.' });
+
+    const what = (before, after) => {
+      const parts = [];
+      if (after.text !== before.text) parts.push('wording');
+      if (after.everyone !== before.everyone) parts.push('who may see it');
+      return parts;
+    };
+    if (live()) {
+      try {
+        const before = await prayerRequestById(req.params.id);
+        if (!before) return notFound(res);
+        const after = await editPrayerRequest(req.params.id, asked, { byRowId: req.user.memberRowId });
+        const changed = what(before, after);
+        if (changed.length) {
+          log(req, `Edited prayer request (${changed.join(' and ')})`, 'Community', before.id,
+            { text: before.text, everyone: before.everyone }, { text: after.text, everyone: after.everyone });
+        }
+        return res.json({ ok: true, request: after });
+      } catch (err) {
+        if (['empty', 'too_long', 'unknown_audience'].includes(err.code)) return res.status(400).json({ error: err.message, code: err.code });
+        const explained = explainCatalyst(err);
+        return res.status(503).json({ error: explained?.message ?? err.message });
+      }
+    }
+    const p = find('PRAYER_INBOX', req.params.id);
+    if (!p) return notFound(res);
+    const before = { text: p.text, everyone: p.everyone };
+    if ('text' in asked) {
+      const t = asked.text.trim();
+      if (!t) return res.status(400).json({ error: 'A prayer request cannot be empty.', code: 'empty' });
+      if (t.length > TEXT_MAX) return res.status(400).json({ error: `That is ${t.length} characters. The most a request can hold is ${TEXT_MAX}.`, code: 'too_long' });
+      p.text = t;
+    }
+    if ('everyone' in asked) p.everyone = asked.everyone;
+    /* An approved one is already on the wall the app reads: change it there too. */
+    const onWall = db.PRAYERS.find((w) => w.id === p.id);
+    if (onWall) { onWall.text = p.text; onWall.everyone = p.everyone; }
+    const changed = what(before, p);
+    if (changed.length) log(req, `Edited prayer request (${changed.join(' and ')})`, 'Community', p.id, before, { text: p.text, everyone: p.everyone });
     res.json({ ok: true, request: p });
   });
 

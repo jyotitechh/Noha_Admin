@@ -7,7 +7,10 @@
    out loud:
      - nothing reaches another member's wall until it is approved;
      - the member chose who may see it. "Prayer warriors" is the default and
-       is not a formality — the server filters the wall by it. */
+       is not a formality — the server filters the wall by it.
+
+   The office may correct the wording and change who may see a request, before or after it is approved. The app limits a member to
+   300 characters; the office is not held to that (the database holds 10,000). Giving a reason for declining is optional. */
 
 import { useMemo, useState } from 'react';
 import { api, collection } from '@/lib/api';
@@ -36,6 +39,9 @@ export default function PrayerInbox() {
   const [open, setOpen] = useState<PrayerRequest | null>(null);
   const [remark, setRemark] = useState('');
   const [declining, setDeclining] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [draftEveryone, setDraftEveryone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -59,13 +65,13 @@ export default function PrayerInbox() {
     };
   }, [all.data]);
 
+  const closeDrawer = () => { setOpen(null); setDeclining(false); setRemark(''); setEditing(false); };
+
   async function decide(r: PrayerRequest, decision: 'Approved' | 'Declined', why = '') {
     setBusy(true);
     try {
-      await api.post(`/prayer-inbox/${r.id}/decide`, { decision, remark: why });
-      setOpen(null);
-      setDeclining(false);
-      setRemark('');
+      const out = await api.post<{ memberTold?: boolean }>(`/prayer-inbox/${r.id}/decide`, { decision, remark: why });
+      closeDrawer();
       q.reload();
       all.reload();
       queues.refresh();
@@ -74,8 +80,37 @@ export default function PrayerInbox() {
           ? r.everyone
             ? 'Approved. It is on the open prayer wall now.'
             : 'Approved. Prayer warriors can see it; it stays off the open wall.'
-          : 'Declined. The member sees your note.',
+          : out.memberTold ? (why ? 'Declined. The member is told, with your note.' : 'Declined. The member is told.') : 'Declined.',
         decision === 'Approved' ? 'ok' : 'warn',
+      );
+    } catch (e) {
+      toast((e as Error).message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const startEdit = (r: PrayerRequest) => { setDraft(r.text); setDraftEveryone(r.everyone); setEditing(true); setDeclining(false); };
+
+  /* Save the corrected wording and who may see it. Only what changed is sent. */
+  async function saveEdit(r: PrayerRequest) {
+    const text = draft.trim();
+    const body: { text?: string; everyone?: boolean } = {};
+    if (text !== r.text) body.text = text;
+    if (draftEveryone !== r.everyone) body.everyone = draftEveryone;
+    if (!Object.keys(body).length) { setEditing(false); return; }
+    setBusy(true);
+    try {
+      const out = await api.patch<{ request: PrayerRequest }>(`/prayer-inbox/${r.id}`, body);
+      setOpen(out.request);
+      setEditing(false);
+      q.reload();
+      all.reload();
+      toast(
+        body.everyone !== undefined && body.text !== undefined ? 'Saved. The wording and who may see it are changed.'
+          : body.everyone !== undefined ? (draftEveryone ? 'Saved. It is for everyone now.' : 'Saved. It is for prayer warriors only now.')
+            : 'Saved. The wording is changed.',
+        'ok',
       );
     } catch (e) {
       toast((e as Error).message, 'bad');
@@ -184,7 +219,7 @@ export default function PrayerInbox() {
 
       <Drawer
         open={!!open}
-        onClose={() => { setOpen(null); setDeclining(false); setRemark(''); }}
+        onClose={closeDrawer}
         title="Prayer request"
         sub={open ? <><span className="mono">{open.id}</span> · {fdt(open.at)}</> : ''}
         footer={
@@ -193,7 +228,7 @@ export default function PrayerInbox() {
               <>
                 <span className="sp" style={{ flex: 1 }} />
                 <Btn onClick={() => { setDeclining(false); setRemark(''); }}>Cancel</Btn>
-                <Btn variant="danger" disabled={!remark.trim() || busy} onClick={() => decide(open, 'Declined', remark.trim())}>
+                <Btn variant="danger" disabled={busy} onClick={() => decide(open, 'Declined', remark.trim())}>
                   Decline and tell them
                 </Btn>
               </>
@@ -203,8 +238,8 @@ export default function PrayerInbox() {
                   {open.everyone ? 'Approving puts it on the open wall.' : 'Approving sends it to prayer warriors only.'}
                 </span>
                 <span className="sp" style={{ flex: 1 }} />
-                <Btn variant="danger" icon="x" onClick={() => setDeclining(true)} disabled={busy}>Decline</Btn>
-                <Btn variant="ok" icon="check" onClick={() => decide(open, 'Approved')} disabled={busy}>Approve</Btn>
+                <Btn variant="danger" icon="x" onClick={() => setDeclining(true)} disabled={busy || editing}>Decline</Btn>
+                <Btn variant="ok" icon="check" onClick={() => decide(open, 'Approved')} disabled={busy || editing}>Approve</Btn>
               </>
             )
           ) : open ? (
@@ -226,7 +261,31 @@ export default function PrayerInbox() {
             </div>
 
             <div className="card pad">
-              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.65 }}>{open.text}</p>
+              {editing ? (
+                <div className="stack" style={{ gap: 12 }}>
+                  <Field label="The request" hint={`${draft.trim().length.toLocaleString('en-IN')} characters`}>
+                    <textarea className="ta" rows={9} value={draft} autoFocus onChange={(e) => setDraft(e.target.value)} />
+                  </Field>
+                  <Field label="Who may see it">
+                    <select className="sel" value={draftEveryone ? 'everyone' : 'warriors'} onChange={(e) => setDraftEveryone(e.target.value === 'everyone')}>
+                      <option value="warriors">Prayer warriors only</option>
+                      <option value="everyone">Everyone (the open prayer wall)</option>
+                    </select>
+                  </Field>
+                  <div className="row gap8">
+                    <span className="sp" style={{ flex: 1 }} />
+                    <Btn onClick={() => setEditing(false)} disabled={busy}>Cancel</Btn>
+                    <Btn variant="ok" icon="check" onClick={() => saveEdit(open)} disabled={busy || !draft.trim()}>Save changes</Btn>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontSize: 15, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{open.text}</p>
+                  {open.state !== 'Declined' && (
+                    <div className="mt12"><Btn sm icon="edit" onClick={() => startEdit(open)} disabled={busy}>Edit</Btn></div>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="mt16">
@@ -244,11 +303,8 @@ export default function PrayerInbox() {
 
             {declining && (
               <div className="mt20">
-                <Note tone="warn" icon="alert">
-                  The member reads this. Say what was wrong, so they can send it again.
-                </Note>
                 <div className="mt12">
-                  <Field label="Why is it being declined?" hint="Required.">
+                  <Field label="Why is it being declined?" hint="Optional. The member is told it was declined, and sees this if you write it.">
                     <textarea
                       className="ta" rows={3} value={remark} autoFocus
                       placeholder="It gives a phone number. Please send it again without personal contact details."

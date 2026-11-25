@@ -45,6 +45,7 @@ import { startChildNoticeSweep } from './children.js';
 import { startTranslationBackfill } from './content-translate.js';
 import { registerLinks, applyRegisterFilters, filtersFrom, forgetRegisterLinks } from './member-register.js';
 import { forgetChosenLanguages } from './translation-settings.js';
+import { forgetPrayerRequests } from './prayer-requests.js';
 import { startEventSweep } from './event-announce.js';
 
 /* The port, in order: one given on the command line (`node server/index.js 9000`, which is how
@@ -538,6 +539,7 @@ app.post('/api/refresh', requireSession, (_req, res) => {
   clearReads();
   forgetRegisterLinks();
   forgetChosenLanguages();
+  forgetPrayerRequests();   /* so a request a member has just sent shows up */
   res.json({ ok: true });
 });
 

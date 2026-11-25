@@ -78,6 +78,7 @@ const { S, T, tables, reset, seed, makeReady, setOutage, removeTable, restoreTab
 const CONTENT_TABLES = new Set((await import('./content-types.js')).TYPES.map((t) => t.table));
 const { forgetTables } = await import('./content.js');
 const { forgetEventRows } = await import('./events.js');
+const { forgetPrayerRequests } = await import('./prayer-requests.js');
 reset(seed());
 const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -261,6 +262,7 @@ http.createServer(async (req, res) => {
       : { translated: `[${args.target}] ${args.text}` };
     return send(res, 200, { code: 'success', details: { output: JSON.stringify(output), output_type: 'map' }, message: 'function executed successfully' });
   }
+  if (req.method === 'GET' && path === '/_fake/prayer-decisions') return send(res, 200, { decisions: globalThis.prayerDecisions || [] });
   if (req.method === 'GET' && path === '/_fake/translate-calls') return send(res, 200, { calls: globalThis.translateCalls || [] });
 
   /* Add a family request (FOR-CONSOLE-CHILDREN.md: kind 'member' is "Make member"), for tests that need one. */
@@ -282,6 +284,7 @@ http.createServer(async (req, res) => {
     for (const r of rows || []) list.push({ CREATEDTIME: '2026-11-10 10:00:00', ...r, ROWID: String(r.ROWID) });
     S.clearCache();
     forgetEventRows();
+    forgetPrayerRequests();
     return send(res, 200, { ok: true });
   }
 
@@ -455,6 +458,16 @@ http.createServer(async (req, res) => {
     return send(res, 200, { id: r.id, state: r.state, notified: { pushed: 2, emailed: false } });
   }
   /* FOR-CONSOLE-NOAHGRAM.md: the posts waiting, and the decision that makes one live (or archives it) and tells the author. */
+  /* ADMIN_INTEGRATION.md, "Prayer requests": the decision, which tells the member. A decline is isApproved = 2. */
+  if (req.method === 'POST' && (m = path.match(/^\/admin\/prayer-requests\/(\d+)\/decide$/))) {
+    const row = (tables['tbl:prayerRequest'] || []).find((x) => x.ROWID === m[1]);
+    if (!row) return err(res, 404, 'prayer_request_not_found', 'No such prayer request.');
+    if (!['Approved', 'Declined'].includes(body.decision)) return err(res, 400, 'bad_decision', 'Decide Approved or Declined.');
+    if (Number(row.isApproved) !== 0 || row.isArchived === true) return err(res, 409, 'not_pending', 'Already decided.');
+    row.isApproved = body.decision === 'Approved' ? 1 : 2;
+    (globalThis.prayerDecisions ||= []).push({ id: row.ROWID, decision: body.decision, remark: body.remark ?? null });
+    return send(res, 200, { id: row.ROWID, state: body.decision, notified: { pushed: 1 } });
+  }
   /* FOR-CONSOLE-HELP-BOT.md: what members asked the help bot. answered=false is the to-do list: no answer, or "not helpful". */
   if (req.method === 'GET' && path === '/admin/help-questions') {
     const want = url.searchParams.get('answered') ?? 'false';

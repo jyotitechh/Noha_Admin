@@ -1777,6 +1777,70 @@ section('Languages: every kind of content is translated into the six languages, 
 }
 
 /* ================================================================== */
+section('Prayer requests: category and audience read right, the office can edit them, a decline needs no reason');
+
+{
+  const ids = { health: '27145000000995001', career: '27145000000995002', thanks: '27145000000995003', other: '27145000000995004', toDecline: '27145000000995005', toApprove: '27145000000995006', odd: '27145000000995007' };
+  const row = (ROWID, type, isApproved, content) => ({ ROWID, memberId: ANAND_ID, type, isApproved, isArchived: false, closed: false, content, prayerCount: 0, createdOn: '2026-11-24 10:00:00' });
+  await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'prayerRequest', rows: [
+    row(ids.health, 11, 0, 'Please pray for my health.'),         /* Healing, everyone */
+    row(ids.career, 30, 0, 'Please pray for my career.'),         /* Guidance, prayer warriors */
+    row(ids.thanks, 40, 1, 'Thank you Lord for the harvest.'),    /* Thanksgiving, prayer warriors, approved */
+    row(ids.other, 51, 0, 'Pray for the village.'),               /* Other, everyone */
+    row(ids.toDecline, 11, 0, 'Decline me without a reason.'),
+    row(ids.toApprove, 21, 0, 'Approve me.'),                     /* Family, everyone */
+    row(ids.odd, 52, 0, 'An audience code nobody knows.'),
+  ] }) });
+  await call('POST', '/refresh', null, BT);
+  const list = async () => ((await call('GET', '/data/PRAYER_INBOX?limit=500', null, BT)).body?.rows || []);
+  const get = async (id) => (await list()).find((r) => r.id === id);
+
+  const a = await list();
+  const h = a.find((r) => r.id === ids.health);
+  check('a request the member sent for everyone shows as Everyone, with its category', h?.everyone === true && h.category === 'Healing', JSON.stringify(h));
+  check('...one for prayer warriors as prayer warriors', a.find((r) => r.id === ids.career)?.everyone === false && a.find((r) => r.id === ids.career)?.category === 'Guidance');
+  check('...Thanksgiving and Other are read too', a.find((r) => r.id === ids.thanks)?.category === 'Thanksgiving' && a.find((r) => r.id === ids.other)?.category === 'Other' && a.find((r) => r.id === ids.other)?.everyone === true);
+  check('...and the state is read from isApproved', a.find((r) => r.id === ids.thanks)?.state === 'Approved' && h.state === 'Pending');
+
+  /* Editing: the wording and who may see it. */
+  const longText = 'Lord, hear this long prayer. '.repeat(100);
+  const toAll = await call('PATCH', `/prayer-inbox/${ids.career}`, { everyone: true }, BT);
+  check('the office can change a request from prayer warriors to everyone', toAll.status === 200 && toAll.body?.request?.everyone === true && (await get(ids.career))?.everyone === true && (await get(ids.career))?.category === 'Guidance', toAll.text.slice(0, 160));
+  const toWarriors = await call('PATCH', `/prayer-inbox/${ids.health}`, { everyone: false }, BT);
+  check('...and from everyone to prayer warriors', toWarriors.status === 200 && (await get(ids.health))?.everyone === false && (await get(ids.health))?.category === 'Healing');
+  const longEdit = await call('PATCH', `/prayer-inbox/${ids.other}`, { text: longText }, BT);
+  check('the wording can be edited before approval, past the 300 characters the app allows', longEdit.status === 200 && (await get(ids.other))?.text.length === longText.trim().length && longText.length > 2500, longEdit.text.slice(0, 160));
+  check('...and its audience is untouched by that', (await get(ids.other))?.everyone === true);
+  const afterApproval = await call('PATCH', `/prayer-inbox/${ids.thanks}`, { text: 'Thank you Lord for a good harvest.', everyone: true }, BT);
+  check('...and after it was approved, both the wording and who may see it', afterApproval.status === 200 && (await get(ids.thanks))?.text === 'Thank you Lord for a good harvest.' && (await get(ids.thanks))?.everyone === true && (await get(ids.thanks))?.state === 'Approved', afterApproval.text.slice(0, 160));
+  check('...an empty request is refused', (await call('PATCH', `/prayer-inbox/${ids.health}`, { text: '   ' }, BT)).status === 400);
+  const tooLong = await call('PATCH', `/prayer-inbox/${ids.health}`, { text: 'x'.repeat(10001) }, BT);
+  check('...so is more than the 10,000 the database can hold, saying so', tooLong.status === 400 && tooLong.body?.code === 'too_long' && /10,000/.test(tooLong.body?.error || ''), tooLong.text.slice(0, 160));
+  check('...nothing to change is refused', (await call('PATCH', `/prayer-inbox/${ids.health}`, {}, BT)).status === 400 && (await call('PATCH', `/prayer-inbox/${ids.health}`, { everyone: 'yes' }, BT)).status === 400);
+  check('...a request that is not there is a 404', (await call('PATCH', '/prayer-inbox/27145000000999999', { text: 'x' }, BT)).status === 404);
+  const odd = await call('PATCH', `/prayer-inbox/${ids.odd}`, { everyone: true }, BT);
+  check('an audience code the console does not know is not changed (and says why)', odd.status === 400 && odd.body?.code === 'unknown_audience' && (await get(ids.odd))?.everyone === false, odd.text.slice(0, 160));
+  check('...but its wording can still be edited', (await call('PATCH', `/prayer-inbox/${ids.odd}`, { text: 'An audience code nobody knows, corrected.' }, BT)).status === 200);
+  check('editing needs permission to moderate (finance gets 403)', (await call('PATCH', `/prayer-inbox/${ids.health}`, { text: 'x' }, FT)).status === 403);
+  const audits = (await call('GET', '/data/AUD?limit=60', null, BT)).body?.rows || [];
+  check('edits are in the audit log, saying what was changed', audits.some((x) => /Edited prayer request \(who may see it\)/.test(x.action)) && audits.some((x) => /Edited prayer request \(wording\)/.test(x.action)) && audits.some((x) => /Edited prayer request \(wording and who may see it\)/.test(x.action)));
+
+  /* Deciding: through the Noah API, so the member is told; the reason for a decline is optional. */
+  const declined = await call('POST', `/prayer-inbox/${ids.toDecline}/decide`, { decision: 'Declined' }, BT);
+  check('a request can be declined without a reason, and the member is told', declined.status === 200 && declined.body?.memberTold === true && (await get(ids.toDecline))?.state === 'Declined', declined.text.slice(0, 160));
+  const withWhy = await call('POST', `/prayer-inbox/${ids.other}/decide`, { decision: 'Declined', remark: 'Please send it again with more detail.' }, BT);
+  const sent = (await (await fetch(CONTROL + '/_fake/prayer-decisions')).json()).decisions;
+  check('...with a reason, it goes to the member through the Noah API', withWhy.status === 200 && sent.find((d) => d.id === ids.other)?.remark === 'Please send it again with more detail.' && sent.find((d) => d.id === ids.toDecline)?.remark === null, JSON.stringify(sent));
+  const approved = await call('POST', `/prayer-inbox/${ids.toApprove}/decide`, { decision: 'Approved' }, BT);
+  check('approving is told to the member too, and moves it to Approved', approved.status === 200 && approved.body?.memberTold === true && (await get(ids.toApprove))?.state === 'Approved');
+  check('deciding again is refused (409)', (await call('POST', `/prayer-inbox/${ids.toApprove}/decide`, { decision: 'Declined' }, BT)).status === 409);
+  check('...and an unknown decision is a 400', (await call('POST', `/prayer-inbox/${ids.career}/decide`, { decision: 'Maybe' }, BT)).status === 400);
+  check('deciding needs permission to moderate (finance gets 403)', (await call('POST', `/prayer-inbox/${ids.career}/decide`, { decision: 'Approved' }, FT)).status === 403);
+  const declinedRow = await get(ids.toDecline);
+  check('a declined request (the Noah API marks it isApproved = 2) is listed as Declined, not as waiting', declinedRow?.state === 'Declined' && !(await list()).some((r) => r.id === ids.toDecline && r.state === 'Pending'));
+}
+
+/* ================================================================== */
 section('Help bot questions: the FAQ to-do list (FOR-CONSOLE-HELP-BOT.md)');
 
 {

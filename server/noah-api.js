@@ -204,6 +204,16 @@ export const announceDue = ({ hours, actor } = {}) =>
 export const childAgeNotices = ({ actor } = {}) =>
   call('/admin/children/age-notices', { method: 'POST', actor, body: {} });
 
+/* ---------- prayer requests (ADMIN_INTEGRATION.md, "Prayer requests") ----------
+
+   Decide through the API, not by writing the table, so the member is told (a push and a notification). For a decline, the remark
+   is shown to the member; it is optional. The API marks a decline with isApproved = 2. Answers 409 when it was decided already. */
+export const decideAppPrayerRequest = (id, { decision, remark, actor } = {}) =>
+  call(`/admin/prayer-requests/${encodeURIComponent(id)}/decide`, {
+    method: 'POST', actor,
+    body: { decision, ...(remark ? { remark } : {}) },
+  });
+
 /* ---------- the help bot (FOR-CONSOLE-HELP-BOT.md) ----------
 
    What members asked the help bot (Menu > Help in the app). `answered`: 'false' (no answer, or "not helpful": the FAQ's to-do
