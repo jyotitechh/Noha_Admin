@@ -32,6 +32,7 @@ const SCREENS: Record<string, ComponentType> = {
   'community/prayer-inbox': lazy(() => import('@/modules/community/PrayerInbox')),
   'media/noahgram': lazy(() => import('@/modules/media/Noahgram')),
   'community/flagged': lazy(() => import('@/modules/community/Reported')),
+  'community/help': lazy(() => import('@/modules/community/HelpQuestions')),
   'community/praise': lazy(() => import('@/modules/community/Praise')),
 
   /* Authoring: every one of these is a ContentManager, drawn from the server's

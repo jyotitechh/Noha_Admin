@@ -204,6 +204,15 @@ export const announceDue = ({ hours, actor } = {}) =>
 export const childAgeNotices = ({ actor } = {}) =>
   call('/admin/children/age-notices', { method: 'POST', actor, body: {} });
 
+/* ---------- the help bot (FOR-CONSOLE-HELP-BOT.md) ----------
+
+   What members asked the help bot (Menu > Help in the app). `answered`: 'false' (no answer, or "not helpful": the FAQ's to-do
+   list), 'true', or 'all'. Newest first, at most `limit` (1 to 200). */
+export const listHelpQuestions = async (answered = 'false', limit = 100) => {
+  const data = await call(`/admin/help-questions?answered=${encodeURIComponent(answered)}&limit=${Math.min(200, Math.max(1, Number(limit) || 100))}`);
+  return Array.isArray(data) ? data : Array.isArray(data?.questions) ? data.questions : [];
+};
+
 /* ---------- entry passes, the door scanner and attendance ----------
 
    EVENTS-QR-CONTRACT.md. The console checks the permission itself before calling any of these: the Noah API does not know the

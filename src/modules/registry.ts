@@ -144,6 +144,8 @@ export const MODULES: ModuleDef[] = [
       { id: 'flagged', label: 'Reported comments', perm: 'community.moderate', status: 'built',
         desc: 'Comments members have reported on the Daily Manna and Noahgram.' },
       { id: 'praise', label: 'Praise', perm: 'community.moderate', status: 'built', desc: 'Praise reports and testimonies.' },
+      { id: 'help', label: 'Help bot questions', perm: 'community.moderate', status: 'built',
+        desc: 'What members asked the help bot in the app. Those it had no answer for, or that did not help, are the topics to add to the FAQ.' },
       { id: 'prayer', label: 'Prayer wall', perm: 'community.moderate', status: 'planned', from: 'Community → Prayer', desc: 'The wall itself, and prayer counts.' },
       { id: 'obituaries', label: 'Obituaries', perm: 'community.moderate', status: 'planned', from: 'Community → Obituaries', desc: 'Notices and service details.' },
       { id: 'inbox', label: 'Feedback and inbox', perm: 'community.moderate', status: 'planned', from: 'Community → Feedback and inbox', desc: 'What members have told the office.' },

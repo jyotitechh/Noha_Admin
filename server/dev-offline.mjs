@@ -91,6 +91,16 @@ const { M } = await import('./fake-catalyst.mjs');
 const { resolveChange, normStatus } = await import('./change-fields.js');
 let idSeq = 27145000000190000;
 const nextId = () => String(++idSeq);
+
+/* What members asked the help bot (FOR-CONSOLE-HELP-BOT.md): two with no answer (one asked twice, worded differently), one
+   answered but "not helpful", one answered and helpful, one answered and not rated. */
+const helpQuestions = [
+  { id: '100596000000337051', question: 'Where can I pay my tithe?', answer: null, answered: false, helpful: null, memberId: M.approved, memberName: 'Anand Rao', at: '2026-11-24T12:55:00.000Z' },
+  { id: '100596000000337052', question: 'where can i pay my tithe ', answer: null, answered: false, helpful: null, memberId: M.boss, memberName: 'Test Boss', at: '2026-11-24T14:10:00.000Z' },
+  { id: '100596000000337053', question: 'How do I change my mobile number?', answer: 'Go to Me > My information and ask for the change. The office approves it.', answered: true, helpful: false, memberId: M.approved, memberName: 'Anand Rao', at: '2026-11-23T09:00:00.000Z' },
+  { id: '100596000000337054', question: 'How many prayer requests can I send in a day?', answer: 'You can send 2 prayer requests a day, of up to 300 characters each.', answered: true, helpful: true, memberId: M.approved, memberName: 'Anand Rao', at: '2026-11-22T08:00:00.000Z' },
+  { id: '100596000000337055', question: 'मैं एक दिन में कितने प्रार्थना अनुरोध भेज सकता हूँ?', answer: 'आप एक दिन में 2 प्रार्थना अनुरोध भेज सकते हैं।', answered: true, helpful: null, memberId: M.boss, memberName: 'Test Boss', at: '2026-11-21T08:00:00.000Z' },
+];
 const familyRequests = [
   { id: '100596000000071001', state: 'Pending', relation: 'daughter', kid: true, name: 'Hannah Rao', gender: 'female', dob: '2018-03-09', mobile: null, note: '', requesterId: M.approved, existingMemberId: null, at: '2026-11-01T10:00:00.000Z' },
   { id: '100596000000071002', state: 'Pending', relation: 'brother', kid: false, name: 'Fr Thomas', gender: 'male', dob: null, mobile: '+919000000100', note: 'My younger brother', requesterId: M.approved, existingMemberId: M.pastor, at: '2026-11-02T08:30:00.000Z' },
@@ -445,6 +455,16 @@ http.createServer(async (req, res) => {
     return send(res, 200, { id: r.id, state: r.state, notified: { pushed: 2, emailed: false } });
   }
   /* FOR-CONSOLE-NOAHGRAM.md: the posts waiting, and the decision that makes one live (or archives it) and tells the author. */
+  /* FOR-CONSOLE-HELP-BOT.md: what members asked the help bot. answered=false is the to-do list: no answer, or "not helpful". */
+  if (req.method === 'GET' && path === '/admin/help-questions') {
+    const want = url.searchParams.get('answered') ?? 'false';
+    if (!['false', 'true', 'all'].includes(want)) return err(res, 400, 'invalid_filter', 'answered must be true, false or all.');
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 100));
+    const rows = helpQuestions
+      .filter((q) => want === 'all' || (want === 'false' ? (!q.answered || q.helpful === false) : (q.answered && q.helpful !== false)))
+      .sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, limit);
+    return send(res, 200, { questions: rows });
+  }
   if (req.method === 'GET' && path === '/admin/noahgram/pending') {
     const nameOf = (id) => { const x = tables[T.members].find((mm) => mm.ROWID === String(id)); return x ? [x.firstName, x.lastName].filter(Boolean).join(' ') : null; };
     return send(res, 200, {

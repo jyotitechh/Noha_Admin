@@ -1721,20 +1721,43 @@ section('Languages: every kind of content is translated into the six languages, 
   check('only someone who may publish can fill it in (finance 403)', (await call('POST', '/translation/run', {}, FT)).status === 403);
   const run = await call('POST', '/translation/run', {}, BT);
   check('filling in starts in the background with the entries still to do', run.status === 202 && run.body?.job?.running === true && run.body.job.total > 0, run.text.slice(0, 200));
-  check('...and a second start while it runs is refused', (await call('POST', '/translation/run', {}, BT)).status === 409);
+  /* The stand-in translates at once, so the first run may already be over when the second start arrives: then the second
+     finds nothing left to do. Either way two runs never go side by side. */
+  const second = await call('POST', '/translation/run', {}, BT);
+  check('...and a second start while it runs is refused', second.status === 409 || (second.status === 202 && second.body?.job?.total === 0), `${second.status} ${second.text.slice(0, 120)}`);
   let job;
   for (let i = 0; i < 200; i += 1) {
     job = (await call('GET', '/translation', null, BT)).body;
     if (!job?.job?.running) break;
     await new Promise((r) => setTimeout(r, 100));
   }
-  check('...it finishes with every entry done and none failed', job?.job?.running === false && job.job.done === job.job.total && job.job.failed === 0 && job.job.made > 0, JSON.stringify(job?.job).slice(0, 300));
+  check('...it finishes with every entry done and none failed', job?.job?.running === false && job.job.done === job.job.total && job.job.failed === 0
+    && (second.status === 409 ? job.job.made > 0 : true), JSON.stringify(job?.job).slice(0, 300));
   check('...and now everything is in all six languages', job?.coverage?.every((c) => c.error || ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => c.done[l] === c.originals)), JSON.stringify(job?.coverage));
   const again = await call('POST', '/translation/run', {}, BT);
   check('...so running it again has nothing to do', again.status === 202 && again.body?.job?.total === 0, again.text.slice(0, 120));
 
   const calls = (await (await fetch(CONTROL + '/_fake/translate-calls')).json()).calls;
   check('Zoho was asked for the six languages, never English', ['hi', 'mr', 'te', 'ml', 'ta', 'kn'].every((l) => calls.some((c) => c.target === l)) && calls.every((c) => c.target !== 'en'));
+}
+
+/* ================================================================== */
+section('Help bot questions: the FAQ to-do list (FOR-CONSOLE-HELP-BOT.md)');
+
+{
+  const todo = await call('GET', '/help-questions', null, BT);
+  const rows = todo.body?.rows || [];
+  check('Needs attention lists the questions with no answer and the ones marked not helpful', todo.status === 200 && rows.length === 3
+    && rows.filter((r) => r.problem === 'none').length === 2 && rows.filter((r) => r.problem === 'unhelpful').length === 1, todo.text.slice(0, 200));
+  check('...newest first, with the member and the time', rows[0]?.memberName === 'Test Boss' && rows[0]?.at === '2026-11-24T14:10:00.000Z' && rows[0]?.answer === null, JSON.stringify(rows[0]));
+  const unhelpful = rows.find((r) => r.problem === 'unhelpful');
+  check('...a not helpful one carries the answer the bot gave', /Me > My information/.test(unhelpful?.answer || '') && unhelpful.helpful === false);
+  const answered = await call('GET', '/help-questions?show=answered', null, BT);
+  check('Answered lists the ones that got an answer (helpful or not rated)', answered.body?.rows?.length === 2 && answered.body.rows.every((r) => r.answered && r.problem === null), answered.text.slice(0, 160));
+  check('All lists every question', (await call('GET', '/help-questions?show=all', null, BT)).body?.rows?.length === 5);
+  check('anything else is read as Needs attention', (await call('GET', '/help-questions?show=nonsense', null, BT)).body?.show === 'attention');
+  check('only moderators see the questions (finance gets 403)', (await call('GET', '/help-questions', null, FT)).status === 403);
+  check('...and a sign-in is needed (401)', (await call('GET', '/help-questions')).status === 401);
 }
 
 /* ================================================================== */
