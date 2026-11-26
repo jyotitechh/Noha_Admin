@@ -8,9 +8,16 @@
      npm run deploy:api -- --email-codes  THE LIVE CONSOLE: codes are emailed; no passphrase,
                                         no code on the page, no test accounts
      npm run deploy:api -- --email-codes --production
-                                        the same, on the Production data and the Production Noah API
-                                        (needs the new admin key in ~/ksm-production-api-key.txt;
+                                        THE LIVE CONSOLE (karuna-api): the Production data and the Production
+                                        Noah API (needs the admin key in ~/ksm-production-api-key.txt;
                                         see docs/PRODUCTION.md)
+     npm run deploy:api -- --email-codes --test
+                                        THE TEST CONSOLE (karuna-api-test): the Development data and the
+                                        Development Noah API from .env.local, to try changes before they go live.
+                                        Its own session secret, so a test sign-in never works on the live console.
+
+   karuna-api is the live console and runs on Production, so deploying it WITHOUT --production is
+   refused (it would quietly put the live console back on Development). --development overrides that.
 
    Slate hosts the pages; AppSail runs this Node server. It sends what is COMMITTED
    (`git archive HEAD`: server/, package.json, package-lock.json), bundles it with esbuild
@@ -39,7 +46,9 @@ import { passphraseLooksCopied } from './auth.js';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003';
 const ORG = process.env.SLATE_ORG_ID || '60093443705';
-const NAME = process.env.APPSAIL_NAME || 'karuna-api';
+/* The test console: its own AppSail, on the Development data (see the top of this file). */
+const test = process.argv.includes('--test');
+const NAME = process.env.APPSAIL_NAME || (test ? 'karuna-api-test' : 'karuna-api');
 const DC = process.env.SLATE_DC || 'in';
 const SITE = process.env.CONSOLE_URL || 'https://karuna-admin-eayoyuuw.onslate.in';
 const testLogin = process.argv.includes('--test-login');
@@ -65,6 +74,12 @@ const run = (cmd, cwd) => {
 };
 
 console.log('\nDeploy the API to Catalyst AppSail\n' + '─'.repeat(64));
+
+if (test && production) fail('--test is the test console on the Development data; it cannot be combined with --production.');
+if (NAME === 'karuna-api' && !production && !process.argv.includes('--development')) {
+  fail('karuna-api is the LIVE console and runs on Production. Deploy it with --email-codes --production,\n  or deploy the test console with --email-codes --test.');
+}
+say(`${NAME}: ${production ? 'LIVE console, Production data' : test ? 'TEST console, Development data' : 'Development data'}`);
 
 /* ---------- the settings ---------- */
 
@@ -97,13 +112,15 @@ function kept(file, make, ok = () => true) {
 
 const WORDS = ['amber', 'harbor', 'lantern', 'orchid', 'quiet', 'river', 'cedar', 'falcon', 'meadow', 'copper', 'velvet', 'summit', 'willow', 'ember', 'granite', 'saffron'];
 const word = () => WORDS[randomInt(WORDS.length)];
-const passphrase = kept('ksm-passphrase.txt',
+/* The test console keeps its own passphrase and session secret: a session signed for one must never open the other. */
+const sfx = test ? '-test' : '';
+const passphrase = kept(`ksm-passphrase${sfx}.txt`,
   () => [word(), word(), word(), word(), randomInt(1000, 9999)].join('-'),
   (v) => !passphraseLooksCopied(v) && v.length >= 12);
 
 /* Signs the session tokens, so a signed-in tab keeps working when the API restarts or is redeployed
    (server/auth.js). Made once and kept, like the passphrase; deleting the file signs everyone out. Never printed. */
-const sessionSecret = kept('ksm-session-secret.txt', () => randomBytes(48).toString('base64url'), (v) => v.length >= 40);
+const sessionSecret = kept(`ksm-session-secret${sfx}.txt`, () => randomBytes(48).toString('base64url'), (v) => v.length >= 40);
 
 const settings = {
   SESSION_SECRET: sessionSecret.value,
@@ -139,6 +156,12 @@ if (production) {
   settings.NOAH_API_BASE = envFile.NOAH_API_BASE_PRODUCTION || PRODUCTION_API;
   settings.NOAH_ADMIN_API_KEY = key;
   say(`Production: the Production data store and ${settings.NOAH_API_BASE}`);
+}
+if (test) {
+  settings.CATALYST_ENV = 'Development';
+  if (/catalystserverless\.in\/server/.test(settings.NOAH_API_BASE) && !/\.development\./.test(settings.NOAH_API_BASE)) {
+    fail('--test must call the Development Noah API, but NOAH_API_BASE in .env.local is the Production one.');
+  }
 }
 let testCode = null;
 if (emailCodes) {

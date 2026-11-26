@@ -15,7 +15,7 @@
    address is printed; it must be in ALLOWED_ORIGINS on the API (render.yaml). */
 
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,11 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003'; /* noah */
 const ORG = process.env.SLATE_ORG_ID || '60093443705';
-const NAME = process.env.SLATE_APP_NAME || 'karuna-admin';
+/* `npm run deploy:slate -- --test` deploys the TEST site (karuna-admin-test), built to talk to the test
+   API (karuna-api-test, on the Development data) instead of the live one. TEST_API_BASE overrides its address. */
+const test = process.argv.includes('--test');
+const NAME = process.env.SLATE_APP_NAME || (test ? 'karuna-admin-test' : 'karuna-admin');
+const TEST_API = process.env.TEST_API_BASE || 'https://karuna-api-test-50047381961.development.catalystappsail.in';
 const DC = process.env.SLATE_DC || 'in';
 
 const say = (s) => console.log(`\n  ${s}`);
@@ -48,6 +52,15 @@ try {
   const app = join(work, 'console');
   mkdirSync(app);
   execSync(`git archive HEAD | tar -x -C "${app}"`, { cwd: root, shell: true });
+
+  /* The test site is the same build pointed at the test API: only the copy being deployed changes. */
+  if (test) {
+    const envProd = join(app, '.env.production');
+    const text = readFileSync(envProd, 'utf8');
+    if (!/^VITE_API_BASE=.*$/m.test(text)) { console.error('\n  .env.production has no VITE_API_BASE line.\n'); process.exit(1); }
+    writeFileSync(envProd, text.replace(/^VITE_API_BASE=.*$/m, `VITE_API_BASE=${TEST_API}`));
+    say(`TEST site ${NAME}, talking to ${TEST_API}`);
+  }
 
   say(`Project ${PROJECT}, organisation ${ORG}`);
   run(`catalyst init --project ${PROJECT} --org ${ORG} --dc ${DC} -ni`, work);
