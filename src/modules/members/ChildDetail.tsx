@@ -2,16 +2,24 @@
 
    What the parents gave when they added the child (photo, name, date of birth, gender, Aadhaar), who the parents are, and how
    far the child is on the way to becoming a member: the notice at 15, Make member (Family requests) and the consent (App
-   registrations). A parent's record, or the child's own member record once they have one, opens from here on request. */
+   registrations). A parent's record, or the child's own member record once they have one, opens from here on request.
 
-import { api } from '@/lib/api';
+   The office can correct the child's details here (Edit): name, gender, date of birth, blood group and, for staff who may see
+   contact details, the Aadhaar number. A child who is a member has the name, gender and date of birth changed on their member
+   record too. The photo and the Aadhaar picture are the parents' uploads and stay as they are. */
+
+import { useState } from 'react';
+import { api, type ApiError } from '@/lib/api';
 import { useQuery } from '@/lib/useQuery';
-import { Btn, Chip, Failed, Kv, Loading, Note, Who } from '@/components/ui';
+import { useAuth } from '@/state/auth';
+import { useToast } from '@/components/layers';
+import { Btn, Chip, Failed, Field, Kv, Loading, Note, Who } from '@/components/ui';
 import { AuthImage } from '@/components/AuthImage';
 import { fd, fdt } from '@/lib/format';
 
 export interface ChildRecord {
-  kidId: string; name: string; salutation: string | null; gender: string | null; dob: string | null; age: number | null;
+  kidId: string; name: string; firstName: string; middleName: string; lastName: string; genderKey: 'male' | 'female' | 'other' | null;
+  salutation: string | null; gender: string | null; dob: string | null; age: number | null;
   bloodGroup: string | null; kidPhoto: boolean; aadhaarNo: string; aadhaarPicture: boolean; masked: boolean;
   parents: { rowId: string; name: string; mobile: string; rel: string }[];
   state: string; memberRowId: string | null; fifteen: boolean; noticeAt: string | null; noticesRead: boolean; addedAt: string | null;
@@ -42,15 +50,59 @@ const CONSENT_WORD: Record<string, { tone: 'warn' | 'ok' | 'bad' | 'mute' | 'bra
 const born = (d: string | null) => (d ? fd(new Date(d + 'T00:00:00')) : '—');
 const at = (d: string | null) => (d ? fdt(new Date(d)) : '');
 
-export function ChildDetail({ kidId, onOpenMember }: {
+interface Form { salutation: string; firstName: string; middleName: string; lastName: string; gender: string; dateOfBirth: string; bloodGroup: string; aadhaarNo: string }
+
+const formOf = (c: ChildRecord): Form => ({
+  salutation: c.salutation ?? '', firstName: c.firstName, middleName: c.middleName, lastName: c.lastName,
+  gender: c.genderKey ?? '', dateOfBirth: c.dob ?? '', bloodGroup: c.bloodGroup ?? '', aadhaarNo: c.aadhaarNo,
+});
+
+export function ChildDetail({ kidId, onOpenMember, onChanged }: {
   kidId: string;
   /** Open a member's own record: a parent's, or the child's once they are a member. */
   onOpenMember: (who: { rowId: string; name: string }) => void;
+  /** Called after the office corrected the child, so the list around it reads its rows again. */
+  onChanged?: () => void;
 }) {
+  const { can } = useAuth();
+  const { toast } = useToast();
   const q = useQuery(() => api.get<ChildRecord>(`/children/${kidId}`), [kidId]);
+  const [form, setForm] = useState<Form | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
   if (q.error) return <Failed error={q.error} onRetry={q.reload} />;
   if (!q.data) return <Loading what="the child" />;
   const c = q.data;
+  const editing = form !== null;
+  const set = (k: keyof Form, v: string) => setForm((f) => (f ? { ...f, [k]: v } : f));
+
+  /* Send only what changed. The Aadhaar number is left out unless it was changed: it may be partly hidden for this role. */
+  async function save() {
+    if (!form) return;
+    const was = formOf(c);
+    const changes: Record<string, string> = {};
+    for (const k of Object.keys(form) as (keyof Form)[]) {
+      if (k === 'aadhaarNo' && c.masked) continue;
+      if (form[k].trim() !== was[k].trim()) changes[k] = form[k].trim();
+    }
+    if (!Object.keys(changes).length) { setForm(null); setErrors({}); return; }
+    setBusy(true);
+    setErrors({});
+    try {
+      const out = await api.patch<{ changed: string[]; alsoMember: boolean }>(`/children/${kidId}`, { changes });
+      setForm(null);
+      q.reload();
+      onChanged?.();
+      toast(out.alsoMember ? 'Saved. Their member record is changed too.' : 'Saved. The details are corrected.', 'ok');
+    } catch (e) {
+      const err = e as ApiError;
+      setErrors(err.errors ?? {});
+      toast(err.message, 'bad');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const st = CHILD_STATE[c.state] ?? { tone: 'mute' as const, label: c.state };
   const asked = c.makeMember[0] ?? null;
 
@@ -70,20 +122,65 @@ export function ChildDetail({ kidId, onOpenMember }: {
       </div>
 
       <section>
-        <div className="sect-title">About the child</div>
-        <Kv rows={[
-          ['Name', <b key="n">{c.name}</b>],
-          ['Gender', c.gender || '—'],
-          ['Date of birth', born(c.dob)],
-          ['Age', c.age != null ? `${c.age} years` : '—'],
-          ['Blood group', c.bloodGroup || '—'],
-          ['Added by the parents', c.addedAt ? fd(new Date(c.addedAt)) : '—'],
-        ]} />
+        <div className="row">
+          <div className="sect-title grow">About the child</div>
+          {can('members.edit') && !editing && <Btn sm icon="edit" onClick={() => { setForm(formOf(c)); setErrors({}); }}>Edit</Btn>}
+        </div>
+        {editing && form ? (
+          <div className="card pad stack" style={{ gap: 12 }}>
+            <Field label="Title" error={errors.salutation}>
+              <input className="inp" value={form.salutation} maxLength={50} onChange={(e) => set('salutation', e.target.value)} />
+            </Field>
+            <Field label={<>First name <span style={{ color: 'var(--bad)' }}>*</span></>} error={errors.firstName}>
+              <input className="inp" value={form.firstName} maxLength={100} autoFocus onChange={(e) => set('firstName', e.target.value)} />
+            </Field>
+            <Field label="Middle name" error={errors.middleName}>
+              <input className="inp" value={form.middleName} maxLength={100} onChange={(e) => set('middleName', e.target.value)} />
+            </Field>
+            <Field label="Last name" error={errors.lastName}>
+              <input className="inp" value={form.lastName} maxLength={100} onChange={(e) => set('lastName', e.target.value)} />
+            </Field>
+            <Field label="Gender" error={errors.gender}>
+              <select className="sel" value={form.gender} onChange={(e) => set('gender', e.target.value)}>
+                <option value="">Choose…</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
+            <Field label="Date of birth" error={errors.dateOfBirth}>
+              <input className="inp" type="date" value={form.dateOfBirth} max={new Date().toISOString().slice(0, 10)} onChange={(e) => set('dateOfBirth', e.target.value)} />
+            </Field>
+            <Field label="Blood group" error={errors.bloodGroup}>
+              <input className="inp" value={form.bloodGroup} maxLength={100} onChange={(e) => set('bloodGroup', e.target.value)} />
+            </Field>
+            {!c.masked && (
+              <Field label="Aadhaar number" hint="12 digits. Leave empty to remove it." error={errors.aadhaarNo}>
+                <input className="inp mono" inputMode="numeric" value={form.aadhaarNo} maxLength={14} onChange={(e) => set('aadhaarNo', e.target.value)} />
+              </Field>
+            )}
+            {c.memberRowId && <Note tone="info" icon="info">{c.firstName || 'The child'} is a member now. The name, gender and date of birth are changed on their member record too.</Note>}
+            <div className="row gap8">
+              <span className="sp" style={{ flex: 1 }} />
+              <Btn onClick={() => { setForm(null); setErrors({}); }} disabled={busy}>Cancel</Btn>
+              <Btn variant="ok" icon="check" onClick={save} disabled={busy || !form.firstName.trim()}>Save changes</Btn>
+            </div>
+          </div>
+        ) : (
+          <Kv rows={[
+            ['Name', <b key="n">{c.name}</b>],
+            ['Gender', c.gender || '—'],
+            ['Date of birth', born(c.dob)],
+            ['Age', c.age != null ? `${c.age} years` : '—'],
+            ['Blood group', c.bloodGroup || '—'],
+            ['Added by the parents', c.addedAt ? fd(new Date(c.addedAt)) : '—'],
+          ]} />
+        )}
       </section>
 
       <section>
         <div className="sect-title">Aadhaar</div>
-        <Kv rows={[['Aadhaar number', c.aadhaarNo ? <span key="a" className="mono">{c.aadhaarNo}</span> : 'Not given']]} />
+        {!editing && <Kv rows={[['Aadhaar number', c.aadhaarNo ? <span key="a" className="mono">{c.aadhaarNo}</span> : 'Not given']]} />}
         {c.aadhaarPicture && (
           <div className="mt8"><AuthImage path={`/children/${c.kidId}/aadhaar`} alt="Aadhaar" width={320} open /></div>
         )}

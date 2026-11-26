@@ -153,7 +153,7 @@ export default function Children() {
         sub={open && child ? <button className="btn sm" onClick={() => setOpen(null)}>Back to {child.name.split(' ')[0]}</button> : undefined}>
         {open
           ? <PersonDetail memberRowId={open.rowId} onChanged={q.reload} onGone={() => setOpen(null)} />
-          : child && <ChildDetail kidId={child.kidId} onOpenMember={setOpen} />}
+          : child && <ChildDetail kidId={child.kidId} onOpenMember={setOpen} onChanged={q.reload} />}
       </Drawer>
     </div>
   );

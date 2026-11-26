@@ -2286,6 +2286,21 @@ section('Events, event groups and language groups');
   }
 }
 
+/* ---------- a child's details: what the office may correct ---------- */
+
+{
+  const CF = await import('./child-fields.js');
+  const ok = CF.checkKidPatch({ firstName: ' Ravi ', gender: 'male', dateOfBirth: '2010-05-01', bloodGroup: 'O+', aadhaarNo: '2345 6789 0123' }, { canContact: true });
+  check('a child\'s corrections are checked like a member\'s, and stored as the table holds them', !Object.keys(ok.errors).length
+    && ok.values.firstName === 'Ravi' && ok.values.gender === 1 && ok.values.dateOfBirth === '2010-05-01' && ok.values.aadhaarNo === '234567890123', JSON.stringify(ok));
+  check('the date of birth and the first name cannot be emptied', !!CF.checkKidPatch({ dateOfBirth: '' }).errors.dateOfBirth && !!CF.checkKidPatch({ firstName: '' }).errors.firstName);
+  check('the Aadhaar number needs permission to see contact details', !!CF.checkKidPatch({ aadhaarNo: '234567890123' }, { canContact: false }).errors.aadhaarNo
+    && !CF.checkKidPatch({ aadhaarNo: '234567890123' }, { canContact: true }).errors.aadhaarNo);
+  check('...and can be removed (empty), but a wrong one is refused', CF.checkKidPatch({ aadhaarNo: '' }, { canContact: true }).values.aadhaarNo === null && !!CF.checkKidPatch({ aadhaarNo: '12-34' }, { canContact: true }).errors.aadhaarNo);
+  check('the parents, the photo and a made-up field cannot be edited', !!CF.checkKidPatch({ photoFileId: '1' }).errors.photoFileId && !!CF.checkKidPatch({ parentId: '1' }).errors.parentId);
+  check('the name, gender and date of birth are the fields kept in step with a member record', CF.SHARED_WITH_MEMBER.join() === 'salutation,firstName,middleName,lastName,gender,dateOfBirth');
+}
+
 /* ---------- duplicate emails: the same mailbox however it is written ---------- */
 
 {

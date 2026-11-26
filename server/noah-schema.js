@@ -38,6 +38,7 @@ import {
   getRows, getRow, update, insert, remove, listTables, listColumns, deleteFile, query,
 } from './catalyst.js';
 import { MEMBER_FIELDS, REFER_COLUMN, referByParts, joinReferBy, checkMobile } from './member-fields.js';
+import { KID_FIELDS } from './child-fields.js';
 import { describeChangeField, resolveChange, normStatus } from './change-fields.js';
 import { kidLabel, relationLabel, reverseRelation, isOffered, genderedCode, EXTRA_CODES } from './relations.js';
 
@@ -1948,6 +1949,11 @@ export async function loadChild(kidId) {
   const reg = regs.filter((r) => same(r.kidRowId, kidId)).sort((a, b) => when(b) - when(a))[0] || null;
   return {
     ...c,
+    /* The parts of the name and the gender as the edit form needs them (the list has the joined name and the word). */
+    firstName: String(k.firstName ?? '').trim(),
+    middleName: String(k.middleName ?? '').trim(),
+    lastName: String(k.lastName ?? '').trim(),
+    genderKey: { 1: 'male', 2: 'female', 3: 'other' }[Number(k.gender)] || null,
     salutation: String(k.salutation ?? '').trim() || null,
     bloodGroup: String(k.bloodGroup ?? '').trim() || null,
     aadhaarNo: String(k.aadhaarNo ?? '').replace(/\s+/g, '') || '',
@@ -1961,6 +1967,42 @@ export async function loadChild(kidId) {
       videoSeconds: Number(reg.videoSeconds) || null,
     } : null,
   };
+}
+
+/**
+ * Write the office's corrections to a child's row (`values` is { column: value } from checkKidPatch in child-fields.js). Only a
+ * column whose value really changes is written. Returns { changed: [{ key, label, contact, before, after }] }.
+ * The date of birth is stored as the app stores it, a day at midnight.
+ */
+export async function updateKidFields(kidId, values, { byRowId } = {}) {
+  clearCache();
+  const h = await householdRows();
+  const row = h.kids.find((x) => same(x.ROWID, kidId));
+  if (!row) throw Object.assign(new Error('No such child.'), { code: 'not_found' });
+
+  const norm = (f, v) => {
+    const s = v === null || v === undefined ? '' : String(v).trim();
+    if (f.kind === 'gender') return s ? String(Number(s) || '') : '';
+    if (f.kind === 'date') return s.slice(0, 10);
+    if (f.kind === 'aadhaar') return s.replace(/[\s-]/g, '');
+    return s;
+  };
+  const show = (f, v) => (f.kind === 'gender' ? (genderOf(v) || '') : norm(f, v));
+
+  const write = {};
+  const changed = [];
+  for (const f of KID_FIELDS) {
+    if (!(f.column in values)) continue;
+    const next = values[f.column];
+    if (norm(f, row[f.column]) === norm(f, next)) continue;
+    write[f.column] = f.kind === 'date' ? `${norm(f, next)} 00:00:00` : next;
+    changed.push({ key: f.key, label: f.label, contact: !!f.contact, before: show(f, row[f.column]), after: show(f, next) });
+  }
+  if (!changed.length) return { changed: [] };
+
+  await io.update(T.kids, { ROWID: String(row.ROWID), ...write, updated: stamp(), ...(byRowId ? { updatedBy: String(byRowId) } : {}) });
+  clearCache();
+  return { changed };
 }
 
 /** The file id of the Aadhaar picture the parents gave for a child (kids.aadhaarFileId), or null. */

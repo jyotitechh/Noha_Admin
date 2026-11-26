@@ -911,6 +911,35 @@ section('Children: the list, the notice at 15, and Make member (FOR-CONSOLE-CHIL
   check('...the Make member request and the consent', kid.body?.makeMember?.[0]?.state === 'Approved' && kid.body?.consent?.status === 'draft' && !!kid.body?.memberRowId, JSON.stringify({ m: kid.body?.makeMember, c: kid.body?.consent }));
   check('...a child who is not there is a 404', (await call('GET', '/children/27145000000990000', null, BT)).status === 404);
   check('...and the record needs permission to see members (the content editor gets 403)', (await call('GET', `/children/${MEERA_KID}`, null, ET)).status === 403);
+
+  /* The office corrects a child's details. */
+  check('the child record carries the name in parts and the gender, for the edit form', kid.body?.firstName === 'Meera' && kid.body?.lastName === 'Rao' && kid.body?.genderKey === 'female', JSON.stringify([kid.body?.firstName, kid.body?.lastName, kid.body?.genderKey]));
+  const fix = await call('PATCH', `/children/${MEERA_KID}`, { changes: { firstName: 'Meera', middleName: 'Grace', lastName: 'Rao-Thomas', dateOfBirth: '2009-12-24', bloodGroup: 'B+', aadhaarNo: '4321 4321 9999' } }, BT);
+  check('the office can correct a child: name, date of birth, blood group and Aadhaar', fix.status === 200 && fix.body?.child?.name === 'Meera Grace Rao-Thomas'
+    && fix.body.child.dob === '2009-12-24' && fix.body.child.bloodGroup === 'B+' && fix.body.child.aadhaarNo === '432143219999', fix.text.slice(0, 240));
+  check('...and what was changed is said, in words', fix.body?.changed?.includes('Middle name') && fix.body.changed.includes('Date of birth') && !fix.body.changed.includes('First name'), JSON.stringify(fix.body?.changed));
+  const afterFix = (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.kidId === MEERA_KID);
+  check('...the Children list shows the corrected name and age', afterFix?.name === 'Meera Grace Rao-Thomas' && afterFix.dob === '2009-12-24', JSON.stringify([afterFix?.name, afterFix?.dob]));
+  const memberRows = (await call('GET', '/data/MEMBERS?limit=500&status=', null, BT)).body?.rows || [];
+  const meeraMember = memberRows.find((m) => m.rowId === kid.body?.memberRowId);
+  check('a child who is a member has the name changed on their member record too', fix.body?.alsoMember === true && /Meera Grace Rao-Thomas/.test(meeraMember?.name || ''), meeraMember?.name);
+  const logged = ((await call('GET', '/data/AUD?limit=80', null, BT)).body?.rows || []).find((a) => a.action === "Edited a child's details");
+  check('...it is in the audit log, naming what changed but not the Aadhaar number', !!logged && /Aadhaar number/.test(JSON.stringify(logged.after)) && !/4321/.test(JSON.stringify(logged)), JSON.stringify(logged?.after));
+  const same = await call('PATCH', `/children/${MEERA_KID}`, { changes: { firstName: 'Meera' } }, BT);
+  check('saving what is already there changes nothing', same.status === 200 && same.body?.changed?.length === 0 && same.body?.alsoMember === false);
+  const noelChild = (await call('GET', '/children', null, BT)).body?.rows?.find((c) => c.name === 'Noel Rao');
+  const young = await call('PATCH', `/children/${noelChild?.kidId}`, { changes: { dateOfBirth: '2010-06-01', gender: 'other' } }, BT);
+  check('a child who is not a member yet is corrected on their own record only, and the age follows the date of birth', young.status === 200 && young.body?.alsoMember === false
+    && young.body?.child?.fifteen === true && young.body.child.genderKey === 'other', young.text.slice(0, 200));
+  check('...an empty first name is refused, field by field', (await call('PATCH', `/children/${MEERA_KID}`, { changes: { firstName: '  ' } }, BT)).body?.errors?.firstName === 'First name cannot be empty.');
+  check('...a date of birth in the future, or not a date', !!(await call('PATCH', `/children/${MEERA_KID}`, { changes: { dateOfBirth: '2090-01-01' } }, BT)).body?.errors?.dateOfBirth
+    && !!(await call('PATCH', `/children/${MEERA_KID}`, { changes: { dateOfBirth: 'yesterday' } }, BT)).body?.errors?.dateOfBirth);
+  check('...an Aadhaar number that is not 12 digits', !!(await call('PATCH', `/children/${MEERA_KID}`, { changes: { aadhaarNo: '12345' } }, BT)).body?.errors?.aadhaarNo);
+  check('...a field that cannot be edited (the photo), and an empty change', !!(await call('PATCH', `/children/${MEERA_KID}`, { changes: { photoFileId: '1' } }, BT)).body?.errors?.photoFileId
+    && (await call('PATCH', `/children/${MEERA_KID}`, { changes: {} }, BT)).status === 400);
+  check('...a child who is not there is a 404', (await call('PATCH', '/children/27145000000990000', { changes: { firstName: 'X' } }, BT)).status === 404);
+  check('editing a child needs permission to edit members (finance gets 403, the content editor 403)', (await call('PATCH', `/children/${MEERA_KID}`, { changes: { firstName: 'X' } }, FT)).status === 403
+    && (await call('PATCH', `/children/${MEERA_KID}`, { changes: { firstName: 'X' } }, ET)).status === 403);
 }
 
 /* ================================================================== */
