@@ -3,6 +3,21 @@
 The Noah app goes to Google Play on the **Production** environment of the NoahApp project. This is how each point
 of the developer's file lands in the console. Checked on 26 Nov 2026.
 
+## Two consoles: live and test (since 26 Nov 2026)
+
+| | Live | Test |
+|---|---|---|
+| Site | https://karuna-admin.onslate.in | https://karuna-admin-test-dzgbbwgf.onslate.in |
+| API (AppSail) | `karuna-api` | `karuna-api-test` |
+| Data | **Production** (the Play Store app) | **Development** (the test app) |
+| Deploy the API | `npm run deploy:api -- --email-codes --production` | `npm run deploy:api -- --email-codes --test` |
+| Deploy the site | `npm run deploy:slate` | `npm run deploy:slate -- --test` |
+
+Try a change on the test console first, then deploy the live one. `deploy:api` without `--production` or `--test`
+is refused, so the live console cannot slip back to Development. The two have separate session secrets: signing
+in to one never signs you in to the other. Each has its own staff: on Production, only Jyoti Koli
+(jyoti@techmagify.com) was a super administrator at the switch.
+
 ## 1. Point the console at Production
 
 The console has no settings screen for this. It is three server settings, and `--production` sets all three:
