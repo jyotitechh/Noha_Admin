@@ -7,6 +7,10 @@
                                         number can sign in; see server/demo.js)
      npm run deploy:api -- --email-codes  THE LIVE CONSOLE: codes are emailed; no passphrase,
                                         no code on the page, no test accounts
+     npm run deploy:api -- --email-codes --production
+                                        the same, on the Production data and the Production Noah API
+                                        (needs the new admin key in ~/ksm-production-api-key.txt;
+                                        see docs/PRODUCTION.md)
 
    Slate hosts the pages; AppSail runs this Node server. It sends what is COMMITTED
    (`git archive HEAD`: server/, package.json, package-lock.json), bundles it with esbuild
@@ -45,6 +49,9 @@ const onScreen = process.argv.includes('--code-on-screen');
    no test accounts ("Test accounts — pick a role to try" is for local runs only). Refused unless
    email is set up in .env.local, since otherwise nobody could sign in. */
 const emailCodes = process.argv.includes('--email-codes');
+/* The Production environment of the NoahApp project: its data and its Noah API (see below). */
+const production = process.argv.includes('--production');
+const PRODUCTION_API = 'https://noahapp-60093443705.catalystserverless.in/server/noah_api';
 
 const say = (s) => console.log(`\n  ${s}`);
 const fail = (s) => { console.error(`\n  ${s}\n`); process.exit(1); };
@@ -115,6 +122,23 @@ const settings = {
 };
 for (const k of ['MAPPLS_KEY', 'EVENT_SWEEP', 'EVENT_SWEEP_MINUTES', 'MAIL_PROVIDER', 'MAIL_CATALYST_FROM', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'MAIL_SMTP_USER', 'MAIL_SMTP_PASS', 'MAIL_FROM', 'WHATSAPP_PROVIDER', 'ZOHO_CPAAS_AUTH', 'ZOHO_CPAAS_BASE', 'ZOHO_CPAAS_WHATSAPP_FROM', 'ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY', 'ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS', 'ZOHO_CPAAS_WHATSAPP_OTP_VARIABLE', 'MOBILE_SIGN_IN', 'SMS_PROVIDER', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'CONSOLE_CACHE_SECONDS', 'STRATUS_BUCKET', 'STRATUS_DC', 'ZOHO_TRANSLATE_URL', 'ZOHO_TRANSLATE_FORMAT', 'ZOHO_TRANSLATE_HEADERS', 'CONTENT_TRANSLATE_BACKFILL', 'CHILD_NOTICE_SWEEP', 'CHILD_NOTICE_SWEEP_HOURS']) {
   if (envFile[k]) settings[k] = envFile[k];
+}
+/* PRODUCTION (docs/PRODUCTION.md, from the app developer's FOR-CONSOLE-PRODUCTION.md): the same console, reading and
+   writing the Production data and calling the Production Noah API. Its admin key is a different one from the
+   Development key in .env.local, and is given privately: it is read from ~/ksm-production-api-key.txt and never
+   printed. Without it, or without --email-codes, nothing is deployed. */
+if (production) {
+  if (!emailCodes) fail('--production is the live console: add --email-codes (no test accounts, no code on the page).');
+  if (testLogin || onScreen) fail('--production cannot be combined with --test-login or --code-on-screen.');
+  const keyPath = join(homedir(), 'ksm-production-api-key.txt');
+  const key = existsSync(keyPath) ? clean(readFileSync(keyPath, 'utf8')) : '';
+  if (!key || /\s/.test(key)) {
+    fail(`The Production admin key is not in place.\n  Save the new ADMIN_API_KEY from the developer, on one line and nothing else, in:\n    ${keyPath}\n  and run this again. It is never printed or committed.`);
+  }
+  settings.CATALYST_ENV = 'Production';
+  settings.NOAH_API_BASE = envFile.NOAH_API_BASE_PRODUCTION || PRODUCTION_API;
+  settings.NOAH_ADMIN_API_KEY = key;
+  say(`Production: the Production data store and ${settings.NOAH_API_BASE}`);
 }
 let testCode = null;
 if (emailCodes) {
