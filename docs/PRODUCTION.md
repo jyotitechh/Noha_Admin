@@ -13,6 +13,10 @@ of the developer's file lands in the console. Checked on 26 Nov 2026.
 | Deploy the API | `npm run deploy:api -- --email-codes --production` | `npm run deploy:api -- --email-codes --test` |
 | Deploy the site | `npm run deploy:slate` | `npm run deploy:slate -- --test` |
 
+Each site's address must be in the project's **Authorised Domains** (Catalyst console → Development → Authentication →
+Authorised Domains, CORS on). The AppSail gateway answers CORS from that list, so a site missing from it gets
+"Failed to fetch" on every call, starting with the sign-in code. Both sites above are listed.
+
 Try a change on the test console first, then deploy the live one. `deploy:api` without `--production` or `--test`
 is refused, so the live console cannot slip back to Development. The two have separate session secrets: signing
 in to one never signs you in to the other. Each has its own staff: on Production, only Jyoti Koli
