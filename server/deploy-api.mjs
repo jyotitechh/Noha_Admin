@@ -42,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { randomInt, randomBytes } from 'node:crypto';
 import { credentialProblems, clean } from './catalyst.js';
 import { passphraseLooksCopied } from './auth.js';
+import { requireTested, headCommit } from './release-gate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003';
@@ -80,6 +81,8 @@ if (NAME === 'karuna-api' && !production && !process.argv.includes('--developmen
   fail('karuna-api is the LIVE console and runs on Production. Deploy it with --email-codes --production,\n  or deploy the test console with --email-codes --test.');
 }
 say(`${NAME}: ${production ? 'LIVE console, Production data' : test ? 'TEST console, Development data' : 'Development data'}`);
+/* The live console only gets what the test console already runs (release-gate.mjs). */
+if (production) await requireTested(root, 'the live console API');
 
 /* ---------- the settings ---------- */
 
@@ -136,6 +139,8 @@ const settings = {
   NOAH_ADMIN_API_KEY: envFile.NOAH_ADMIN_API_KEY || '',
   ALLOWED_ORIGINS: SITE,
   ADMIN_PASSPHRASE: passphrase.value,
+  /* Which commit this is, shown by /api/health: how the live deploy knows what the test console has tried. */
+  BUILD_COMMIT: headCommit(root),
 };
 for (const k of ['MAPPLS_KEY', 'EVENT_SWEEP', 'EVENT_SWEEP_MINUTES', 'MAIL_PROVIDER', 'MAIL_CATALYST_FROM', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'MAIL_SMTP_HOST', 'MAIL_SMTP_PORT', 'MAIL_SMTP_USER', 'MAIL_SMTP_PASS', 'MAIL_FROM', 'WHATSAPP_PROVIDER', 'ZOHO_CPAAS_AUTH', 'ZOHO_CPAAS_BASE', 'ZOHO_CPAAS_WHATSAPP_FROM', 'ZOHO_CPAAS_WHATSAPP_TEMPLATE_KEY', 'ZOHO_CPAAS_WHATSAPP_TEMPLATE_ALIAS', 'ZOHO_CPAAS_WHATSAPP_OTP_VARIABLE', 'MOBILE_SIGN_IN', 'SMS_PROVIDER', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'CONSOLE_CACHE_SECONDS', 'STRATUS_BUCKET', 'STRATUS_DC', 'ZOHO_TRANSLATE_URL', 'ZOHO_TRANSLATE_FORMAT', 'ZOHO_TRANSLATE_HEADERS', 'CONTENT_TRANSLATE_BACKFILL', 'CHILD_NOTICE_SWEEP', 'CHILD_NOTICE_SWEEP_HOURS']) {
   if (envFile[k]) settings[k] = envFile[k];

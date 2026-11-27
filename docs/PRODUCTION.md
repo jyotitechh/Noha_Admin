@@ -10,8 +10,17 @@ of the developer's file lands in the console. Checked on 26 Nov 2026.
 | Site | https://karuna-admin.onslate.in | https://karuna-admin-test-dzgbbwgf.onslate.in |
 | API (AppSail) | `karuna-api` | `karuna-api-test` |
 | Data | **Production** (the Play Store app) | **Development** (the test app) |
-| Deploy the API | `npm run deploy:api -- --email-codes --production` | `npm run deploy:api -- --email-codes --test` |
-| Deploy the site | `npm run deploy:slate` | `npm run deploy:slate -- --test` |
+| Branch | `main` | `develop` |
+| Deploy (API + site) | `npm run deploy:live` | `npm run deploy:test` |
+
+### The rule: test first, then live
+
+1. Make changes on the **`develop`** branch, commit, and `npm run deploy:test`. Check them on the test console.
+2. When approved: `git checkout main && git merge --ff-only develop`, then `npm run deploy:live`.
+
+`deploy:live` (and the plain live `deploy:api --production` / `deploy:slate`) **refuses** unless it runs on `main`
+and the commit is exactly the one the test console runs (the test API's `/api/health` reports it as `release`). A change
+made after testing is a new commit, so it has to go to the test console first. See `server/release-gate.mjs`.
 
 Each site's address must be in the project's **Authorised Domains** (Catalyst console → Development → Authentication →
 Authorised Domains, CORS on). The AppSail gateway answers CORS from that list, so a site missing from it gets

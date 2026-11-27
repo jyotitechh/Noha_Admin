@@ -164,7 +164,9 @@ async function catalystState(force = false) {
 app.get('/api/health', async (req, res) => {
   /* noahApi: whether the Noah API key is set, i.e. whether a decision can reach the member's phone.
      A yes or no only; the key itself never leaves the server. */
-  const base = { ok: true, at: new Date(), dataSource: source(), noahApi: noahConfigured() };
+  /* release: the commit this server was deployed from (deploy-api.mjs sets BUILD_COMMIT). The live deploy checks that
+     the test console runs the same one before it goes ahead (release-gate.mjs). Not a secret: it is on GitHub. */
+  const base = { ok: true, at: new Date(), dataSource: source(), noahApi: noahConfigured(), release: process.env.BUILD_COMMIT || null };
   /* What this process has spent of Catalyst's free allowance since it started. Free to ask. */
   if (live()) base.catalystSpent = usage();
   if (!live()) {

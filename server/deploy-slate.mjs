@@ -19,6 +19,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireTested } from './release-gate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = process.env.SLATE_PROJECT_ID || '100596000000023003'; /* noah */
@@ -37,6 +38,9 @@ const run = (cmd, cwd) => {
 };
 
 console.log('\nDeploy the console to Catalyst Slate\n' + '─'.repeat(64));
+
+/* The live site only gets what the test console already runs (release-gate.mjs). */
+if (!test) await requireTested(root, 'the live console site');
 
 /* Only committed work goes out. Say so if there is more on disk. */
 const dirty = execSync('git status --porcelain', { cwd: root }).toString().trim();
