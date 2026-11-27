@@ -392,9 +392,9 @@ export default function Registrations() {
           {r.child && <Chip tone="info" icon="user">Child's consent</Chip>}
           {r.resent && <Chip tone="brand" icon="refresh">Sent again</Chip>}
           {r.memberRowId && sharedFor.get(r.memberRowId) && !sharedFor.get(r.memberRowId)!.checked && (
-            sharedFor.get(r.memberRowId)!.kind === 'duplicate'
-              ? <Chip tone="bad" icon="copy">Duplicate email</Chip>
-              : <Chip tone="warn" icon="alert">Potential duplicate email</Chip>
+            sharedFor.get(r.memberRowId)!.kind === 'potential'
+              ? <Chip tone="bad" icon="alert">Potential duplicate</Chip>
+              : <Chip tone="warn" icon="copy">Shared email</Chip>
           )}
         </div>
       ),
@@ -535,8 +535,8 @@ export default function Registrations() {
           <>
             {open.memberRowId && sharedFor.get(open.memberRowId) && !sharedFor.get(open.memberRowId)!.checked && (
               <div className="mb12">
-                <Note tone={sharedFor.get(open.memberRowId)!.kind === 'duplicate' ? 'bad' : 'warn'} icon="alert">
-                  <b>{sharedFor.get(open.memberRowId)!.kind === 'duplicate' ? 'This email is already used' : 'This email looks like one already used'}</b>
+                <Note tone={sharedFor.get(open.memberRowId)!.kind === 'potential' ? 'bad' : 'warn'} icon="alert">
+                  <b>{sharedFor.get(open.memberRowId)!.kind === 'potential' ? 'Potential duplicate: the same email and date of birth are already used' : 'This email is already used'}</b>
                   {' '}by {sharedFor.get(open.memberRowId)!.others.join(', ')}. Call them to confirm it, and correct it in Membership &gt; Duplicate Emails.
                 </Note>
               </div>

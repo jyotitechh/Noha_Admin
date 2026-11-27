@@ -1,9 +1,9 @@
 /* Membership > Duplicate Emails: addresses that more than one member uses (server/duplicate-emails.js).
 
    Each address shows everyone who uses it, oldest first, with when their address came (their registration, or when they were
-   added), so the office sees which came first. "Duplicate" is exactly the same address; "Potential duplicate" is written
-   differently but very likely the same mailbox (Gmail ignores dots and anything after +; gmial.com is read as gmail.com). A
-   child the parents made a member has the parent's address on purpose, and is labelled so.
+   added), so the office sees which came first. "Potential duplicate" is the same email AND the same date of birth: very likely
+   one person registered twice. "Shared email" is the same email with different dates of birth, often a family. A child the
+   parents made a member has the parent's address on purpose, and is labelled so.
 
    The office calls them (the number is there), corrects the email on the right member here, or marks the address checked when
    the sharing is fine. A checked address comes back on its own when someone new joins with it. */
@@ -19,11 +19,11 @@ import { Btn, Chip, Empty, Failed, Kpi, Kpis, Loading, Note } from '@/components
 import { fd, fdt } from '@/lib/format';
 
 interface Entry {
-  memberRowId: string; name: string; mobile: string; email: string; field: 'Email' | 'Second email';
+  memberRowId: string; name: string; mobile: string; email: string; field: 'Email' | 'Second email'; dob: string; sameDob: boolean;
   came: Date | string | null; status: string; archived: boolean; first: boolean; childOf: string | null;
 }
 export interface SharedEmail {
-  key: string; kind: 'duplicate' | 'potential'; email: string; people: number; familyShare: boolean;
+  key: string; kind: 'potential' | 'shared'; email: string; people: number; familyShare: boolean;
   checked: boolean; check: { by: string; at: string | null; note: string } | null;
   latest: Date | string | null; entries: Entry[];
 }
@@ -37,7 +37,7 @@ export default function DuplicateEmails() {
   const { toast } = useToast();
   const queues = useQueues();
   const [show, setShow] = useState<'open' | 'checked' | 'all'>('open');
-  const [kind, setKind] = useState<'' | 'duplicate' | 'potential' | 'family'>('');
+  const [kind, setKind] = useState<'' | 'potential' | 'shared' | 'family'>('');
   const [search, setSearch] = useState('');
   const [fixing, setFixing] = useState<{ key: string; memberRowId: string; field: Entry['field']; value: string } | null>(null);
   const [checking, setChecking] = useState<{ key: string; note: string } | null>(null);
@@ -110,8 +110,8 @@ export default function DuplicateEmails() {
     <div className="stack">
       <Kpis>
         <Kpi label="To check" value={open.length} icon="merge" tone={open.length ? 'warn' : undefined} detail="emails more than one member uses" />
-        <Kpi label="Duplicates" value={open.filter((g) => g.kind === 'duplicate').length} icon="copy" detail="exactly the same email" />
-        <Kpi label="Potential duplicates" value={open.filter((g) => g.kind === 'potential').length} icon="alert" detail="written differently, likely the same" />
+        <Kpi label="Potential duplicates" value={open.filter((g) => g.kind === 'potential').length} icon="alert" tone={open.some((g) => g.kind === 'potential') ? 'warn' : undefined} detail="same email and date of birth" />
+        <Kpi label="Shared emails" value={open.filter((g) => g.kind === 'shared').length} icon="copy" detail="same email, different date of birth" />
         <Kpi label="With a child" value={open.filter((g) => g.familyShare).length} icon="users" detail="a child given the parent's email" />
       </Kpis>
 
@@ -126,8 +126,8 @@ export default function DuplicateEmails() {
           </select>
           <select className="sel" style={{ width: 'auto' }} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="Kind">
             <option value="">Every kind</option>
-            <option value="duplicate">Duplicate</option>
             <option value="potential">Potential duplicate</option>
+            <option value="shared">Shared email</option>
             <option value="family">With a child</option>
           </select>
           <input className="inp" style={{ maxWidth: 280 }} placeholder="An email, a name or a number" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search" />
@@ -144,9 +144,9 @@ export default function DuplicateEmails() {
             {rows.map((g) => (
               <li key={g.key} style={{ display: 'block', padding: '14px 16px' }}>
                 <div className="row wrap gap6" style={{ alignItems: 'center' }}>
-                  {g.kind === 'duplicate'
-                    ? <Chip tone="bad" icon="copy">Duplicate</Chip>
-                    : <Chip tone="warn" icon="alert">Potential duplicate</Chip>}
+                  {g.kind === 'potential'
+                    ? <Chip tone="bad" icon="alert">Potential duplicate</Chip>
+                    : <Chip tone="warn" icon="copy">Shared email</Chip>}
                   <b className="mono" style={{ fontSize: 15 }}>{g.email}</b>
                   <Chip tone="plain" icon="users">{g.people} people</Chip>
                   {g.familyShare && <Chip tone="info" icon="user">With a child</Chip>}
@@ -156,7 +156,6 @@ export default function DuplicateEmails() {
                     ? <Btn sm onClick={() => reopen(g.key)} disabled={busy}>Open again</Btn>
                     : <Btn sm icon="check" onClick={() => setChecking({ key: g.key, note: '' })} disabled={busy}>Mark as checked</Btn>}
                 </div>
-                {g.kind === 'potential' && <div className="small muted mt4">Written differently, but probably the same mailbox.</div>}
                 {g.checked && g.check?.note && <div className="small muted mt4">“{g.check.note}”</div>}
 
                 {checking?.key === g.key && (
@@ -179,12 +178,14 @@ export default function DuplicateEmails() {
                             <Chip tone={STATUS_TONE[e.status] ?? 'mute'}>{e.status}</Chip>
                             {e.first ? <Chip tone="plain">Came first</Chip> : <Chip tone="plain">Came later</Chip>}
                             {e.childOf && <Chip tone="info" icon="user">Child of {e.childOf}</Chip>}
+                            {e.sameDob && <Chip tone="bad" icon="alert">Same date of birth</Chip>}
                           </span>
                           <span className="t2" style={{ display: 'block', marginTop: 4 }}>
                             {e.mobile
                               ? (pii ? <a className="mono" href={`tel:${e.mobile.replace(/[^\d+]/g, '')}`}>{e.mobile}</a> : <span className="mono">{e.mobile}</span>)
                               : 'No mobile number'}
                             {' · '}<span className="mono">{e.email}</span>{e.field === 'Second email' && <span className="muted"> (second email)</span>}
+                            {' · '}born {e.dob ? fd(e.dob) : 'date not given'}
                             {' · '}came {e.came ? fdt(e.came) : 'on an unknown date'}
                           </span>
                           {editing && (

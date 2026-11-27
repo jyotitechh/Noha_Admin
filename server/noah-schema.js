@@ -624,6 +624,8 @@ export async function memberEmailRows() {
       mobile: phoneOf(m, userById.get(String(m.userId))),
       email1: String(m.emailId1 ?? '').trim(),
       email2: String(m.emailId2 ?? '').trim(),
+      /* The day only, as stored (YYYY-MM-DD): two members with the same email AND this are a potential duplicate. */
+      dob: /^\d{4}-\d{2}-\d{2}/.test(String(m.dateOfBirth ?? '')) ? String(m.dateOfBirth).slice(0, 10) : '',
       came: (reg && utc(reg.submittedAt)) || ist(m.CREATEDTIME) || null,
       status: archived ? 'Archived' : ({
         approved: 'Active', pending: 'Pending', videoReturned: 'Video returned',

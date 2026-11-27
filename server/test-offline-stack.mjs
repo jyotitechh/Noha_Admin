@@ -1900,28 +1900,31 @@ section('Prayer requests: category and audience read right, the office can edit 
 section('Duplicate emails: addresses more than one member uses, when each came, checked or corrected');
 
 {
-  const person = (n, first, email, day) => ({ ROWID: `2714500000099700${n}`, firstName: first, lastName: 'Dup', emailId1: email,
-    countryCode: '+91', mobileNumber1: `90000970${n}0`, CREATEDTIME: `2026-11-${day} 10:00:00:000`, archived: false });
+  const person = (n, first, email, day, dob = '') => ({ ROWID: `2714500000099700${n}`, firstName: first, lastName: 'Dup', emailId1: email,
+    countryCode: '+91', mobileNumber1: `90000970${n}0`, CREATEDTIME: `2026-11-${day} 10:00:00:000`, archived: false, dateOfBirth: dob });
   await fetch(CONTROL + '/_fake/insert', { method: 'POST', body: JSON.stringify({ table: 'members', rows: [
-    person(1, 'Asha', 'same.person@example.com', '01'),
-    person(2, 'Bina', ' Same.Person@Example.COM ', '10'),          /* the same address, other capitals and spaces */
-    person(3, 'Chris', 'john.smith@gmail.com', '02'),
-    person(4, 'Dev', 'johnsmith+church@gmail.com', '12'),         /* Gmail ignores the dot and the +tag */
-    person(5, 'Esha', 'priya@gmial.com', '03'),                   /* a typo of gmail.com */
-    person(6, 'Farah', 'priya@gmail.com', '13'),
+    person(1, 'Asha', 'same.person@example.com', '01', '1990-05-12'),
+    person(2, 'Bina', ' Same.Person@Example.COM ', '10', '1990-05-12'), /* the same address (other capitals), the same birthday */
+    person(3, 'Chris', 'john.smith@gmail.com', '02', '1985-01-01'),
+    person(4, 'Dev', 'johnsmith+church@gmail.com', '12', '2001-07-30'), /* Gmail ignores the dot and the +tag; another birthday */
+    person(5, 'Esha', 'priya@gmial.com', '03', '1979-03-03'),           /* a typo of gmail.com */
+    person(6, 'Farah', 'priya@gmail.com', '13', '1979-03-03'),
     person(7, 'Gita', 'nobody.else@example.com', '04'),
   ] }) });
   const read = async () => (await call('GET', '/duplicate-emails', null, BT)).body?.rows || [];
   const byKey = async (k) => (await read()).find((g) => g.key === k);
 
   const same = await byKey('same.person@example.com');
-  check('two members with the same email (whatever the capitals) are a Duplicate', same?.kind === 'duplicate' && same.people === 2, JSON.stringify(same).slice(0, 200));
+  check('the same email (whatever the capitals) and the same date of birth is a Potential duplicate', same?.kind === 'potential' && same.people === 2
+    && same.entries.every((e) => e.sameDob === true && e.dob === '1990-05-12'), JSON.stringify(same).slice(0, 240));
   check('...listed oldest first, with when each came, so the office sees which came first', same?.entries?.[0]?.name === 'Asha Dup' && same.entries[0].first === true
     && same.entries[1].name === 'Bina Dup' && same.entries[1].first === false && same.entries[0].came < same.entries[1].came, JSON.stringify(same?.entries?.map((e) => [e.name, e.came, e.first])));
   check('...with their mobile number to call them', same?.entries?.[0]?.mobile?.includes('9000097010'), same?.entries?.[0]?.mobile);
   const gmail = await byKey('johnsmith@gmail.com');
-  check('the same Gmail with a dot or a +tag is a Potential duplicate', gmail?.kind === 'potential' && gmail.people === 2, JSON.stringify(gmail).slice(0, 160));
-  check('...so is a typo of gmail.com', (await byKey('priya@gmail.com'))?.kind === 'potential');
+  check('the same email (a Gmail with a dot or a +tag) with different dates of birth is a Shared email, not a potential duplicate', gmail?.kind === 'shared' && gmail.people === 2
+    && gmail.entries.every((e) => e.sameDob === false), JSON.stringify(gmail).slice(0, 200));
+  check('...a typo of gmail.com is the same email, so with the same birthday it is a Potential duplicate', (await byKey('priya@gmail.com'))?.kind === 'potential');
+  check('...potential duplicates are listed before shared emails', (await read()).findIndex((g) => g.kind === 'shared') > (await read()).findIndex((g) => g.kind === 'potential'));
   check('an address only one member uses is not listed', !(await read()).some((g) => g.entries.some((e) => e.email === 'nobody.else@example.com')));
   check('the list needs permission to edit members (finance gets 403)', (await call('GET', '/duplicate-emails', null, FT)).status === 403);
 

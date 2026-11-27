@@ -5,11 +5,12 @@
    one of them is usually a typo or a family member's address. So the office sees every shared address here, calls the people,
    and corrects the email on the right member (the ordinary member edit, PATCH /api/people/:id).
 
-   Two kinds:
-     duplicate            two or more members have exactly the same address (ignoring capitals and spaces);
-     potential duplicate  the addresses differ but are very likely the same mailbox: Gmail ignores dots and anything after a +
-                          (john.smith@gmail.com, johnsmith+x@gmail.com), and a few common typos of the big providers' names
-                          are read as the provider (priya@gmial.com, priya@gmail.co).
+   "The same email" is the same mailbox: capitals and spaces ignored, Gmail's dots and anything after a + ignored
+   (john.smith@gmail.com, johnsmith+x@gmail.com), and a few common typos of the big providers' names read as the provider
+   (priya@gmial.com, priya@gmail.co). Two kinds (the office's rule, 27 Nov 2026):
+     potential  potential duplicate: two or more members with the same email AND the same date of birth, very likely one
+                person registered twice. The office asks them and corrects the email (or the record) on the right member.
+     shared     the same email, but different dates of birth (or one not given): different people, often a family, sharing it.
 
    Each person in a group shows when their address came: when they sent their registration, or when they were added. The
    office can mark a group "checked" (for example, the same family on purpose). The mark is kept in the app's globalSettings
@@ -82,7 +83,7 @@ export async function findDuplicateEmails() {
       const key = mailbox(n);
       if (!byBox.has(key)) byBox.set(key, []);
       byBox.get(key).push({
-        memberRowId: m.rowId, name: m.name, mobile: m.mobile, email, field,
+        memberRowId: m.rowId, name: m.name, mobile: m.mobile, email, field, dob: m.dob,
         came: m.came, status: m.status, archived: m.archived, parentMemberId: m.parentMemberId,
       });
     }
@@ -100,10 +101,16 @@ export async function findDuplicateEmails() {
       e.childOf = e.parentMemberId && entries.some((x) => x.memberRowId === e.parentMemberId) ? nameOf.get(e.parentMemberId) || null : null;
       delete e.parentMemberId;
     });
-    /* Exactly the same address on two members is a duplicate; only the same mailbox written differently is a potential one. */
+    /* The same email and the same date of birth on two different members: a potential duplicate. Each such member is marked
+       sameDob, so the office sees which of them match. A date not given never matches. */
+    const byDob = new Map();
+    for (const e of entries) if (e.dob) byDob.set(e.dob, (byDob.get(e.dob) || new Set()).add(e.memberRowId));
+    const matching = new Set([...byDob.values()].filter((s) => s.size > 1).flatMap((s) => [...s]));
+    entries.forEach((e) => { e.sameDob = matching.has(e.memberRowId); });
+    const kind = matching.size ? 'potential' : 'shared';
+    /* How many members wrote each exact address, to show the address as most of them wrote it. */
     const sameExactly = new Map();
     for (const e of entries) sameExactly.set(normal(e.email), (sameExactly.get(normal(e.email)) || new Set()).add(e.memberRowId));
-    const kind = [...sameExactly.values()].some((s) => s.size > 1) ? 'duplicate' : 'potential';
     const signature = signatureOf(entries);
     const mark = checks.get(key);
     const checked = !!mark && mark.signature === signature;
@@ -121,7 +128,8 @@ export async function findDuplicateEmails() {
       entries,
     });
   }
-  return groups.sort((a, b) => (+b.latest || 0) - (+a.latest || 0));
+  /* Potential duplicates first, then the newest. */
+  return groups.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'potential' ? -1 : 1) || (+b.latest || 0) - (+a.latest || 0));
 }
 
 /** The groups still to look at: not checked, or changed since they were. */
